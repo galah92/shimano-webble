@@ -1526,3 +1526,29 @@ uncorrelated result is not proof of freshness or hardware compatibility. Next
 work is the D timed query/data worker with address/bank setup, then image-level
 handover and recovery. The live app still cannot flash firmware or change US
 region; the bike's last observed destination remains EU.
+
+## Build .25: D timed query and address/bank setup plan
+
+D now uses the tested common query lifecycle with its own Y6 evidence window
+and m1 reply deadline (25 seconds for block indexes 0..2, 3 seconds thereafter).
+Both M and D register before writing and wait for successful ATT completion
+before accepting immediate buffered RX; timers/listeners are removed on all
+terminal paths. D still needs both data-sequence C0 and a qualifying 31 result.
+No D retries or data writes have been wired.
+
+Re-read C1/f1/z1/K1/X1 and the E5000 Ih.n protocol assignment (family 34,
+Hh.a). The declarative initial plan is protocol 88 with four-byte payloads:
+21 00 page 00 (page=floor((length-1)/2048), 40s), 0A 00 00 00
+(bank zero, 1.2s), then 24 00 40 00 (24-bit little-endian address 4000,
+1.2s). u1's later bank transition reverses the latter two operations: address
+then bank. Bank changes occur at indexes 1024 and 2048, to addresses 14000
+and 24000. Reposition commands are recorded without retry authority.
+The source y1 callers permit five retries for address/bank and zero for start;
+that command worker/retry policy and 88 transport mapping are not implemented.
+
+Added fake-clock D query tests for both RX orders, immediate buffered reply,
+slow ATT with full subsequent 25s/3s window, wrong block, rejection, stalled
+ATT and abort. Address-plan tests verify initialization ordering, both bank
+crossings, no spurious crossing, last modeled address and bounds. They pass
+alongside 72 Java D reply vectors, M query/worker regression tests, file checks
+and Chromium startup. The app remains unable to flash or change region.

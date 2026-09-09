@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.24';
+const BUILD = '2026-09-09.25';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -497,6 +497,9 @@ function mFirmwareReplyWindow(querySequence, dataSequence, checkpoint = false) {
 // transport and explicit sequence bytes. No data write, retry or bootloader entry.
 async function queryMFirmwareBlock({write, subscribe, signal, querySequence, dataSequence, checkpoint = false}) {
   const evidence = mFirmwareReplyWindow(querySequence, dataSequence, checkpoint);
+  return runFirmwareQuery({write, subscribe, signal, querySequence, dataSequence, evidence, replyTimeoutMs: 3000});
+}
+async function runFirmwareQuery({write, subscribe, signal, querySequence, dataSequence, evidence, replyTimeoutMs}) {
   if (signal?.aborted) throw new Error('Firmware query aborted');
   return new Promise((resolve, reject) => {
     let settled = false, writeCompleted = false, unsubscribe = null;
@@ -518,7 +521,7 @@ async function queryMFirmwareBlock({write, subscribe, signal, querySequence, dat
     const evaluate = () => {
       if (settled || !writeCompleted) return;
       const result = evidence.status();
-      if (result.state === 'failed') finish(new Error(result.error));
+      if (result.state === 'failed') finish(new Error(result.error || `D block result rejected; code ${result.errorCode}`));
       else if (result.state === 'evidence-complete') finish();
     };
     const abort = () => finish(new Error('Firmware query aborted; reconnect before another attempt'));
@@ -539,8 +542,8 @@ async function queryMFirmwareBlock({write, subscribe, signal, querySequence, dat
         if (settled) return;
         writeCompleted = true;
         clearTimeout(writeTimer);
-        // Source F0 starts its 3000ms reply deadline after successful ATT completion.
-        replyTimer = setTimeout(() => finish(new Error('Firmware query reply timed out')), 3000);
+        // Both source workers start their component-specific reply deadline after ATT completion.
+        replyTimer = setTimeout(() => finish(new Error('Firmware query reply timed out')), replyTimeoutMs);
         evaluate();
       }, error => finish(error instanceof Error ? error : new Error(String(error))));
     } catch (error) { finish(error); }
@@ -641,6 +644,33 @@ function dFirmwareReplyWindow(dataSequence, blockIndex) {
   };
 }
 // END D FIRMWARE REPLIES
+
+// BEGIN D FIRMWARE QUERY
+function queryDFirmwareBlock({write, subscribe, signal, querySequence, dataSequence, blockIndex}) {
+  if (!Number.isInteger(querySequence) || querySequence < 0 || querySequence > 255)
+    throw new Error('Invalid D query sequence');
+  const evidence = dFirmwareReplyWindow(dataSequence, blockIndex);
+  return runFirmwareQuery({write, subscribe, signal, querySequence, dataSequence, evidence,
+    replyTimeoutMs: evidence.status().replyTimeoutMs});
+}
+// Declarative inner commands only. Actual 88 transport/bootloader handover is
+// not wired. Source C1 initializes bank then address; u1 changes address then bank.
+function dFirmwareAddressPlan(length, blockIndex) {
+  if (!Number.isInteger(length) || length < 1 || length > 196608 ||
+      !Number.isInteger(blockIndex) || blockIndex < 0 || blockIndex >= Math.ceil(length / 64))
+    throw new Error('Invalid D image length or block index');
+  const address = 0x4000 + blockIndex * 64;
+  const bank = Math.floor(blockIndex / 1024);
+  const selectBank = {protocol: 0x88, payload: [0x0a, bank, 0, 0], timeoutMs: 1200};
+  const setAddress = {protocol: 0x88, payload: [0x24, address & 255, (address >> 8) & 255, (address >> 16) & 255], timeoutMs: 1200};
+  return {address, bank,
+    initial: blockIndex === 0 ? [
+      {protocol: 0x88, payload: [0x21, 0, Math.floor((length - 1) / 2048), 0], timeoutMs: 40000}, selectBank, setAddress] : [],
+    boundary: blockIndex > 0 && blockIndex % 1024 === 0 ? [setAddress, selectBank] : [],
+    // Retry setup is listed as evidence, not permission to resend an uncertain block.
+    reposition: [setAddress, selectBank], installable: false};
+}
+// END D FIRMWARE QUERY
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.
