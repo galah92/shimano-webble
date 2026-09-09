@@ -5,13 +5,13 @@ const {webcrypto,createHash}=require('node:crypto');
 const source=fs.readFileSync(__dirname+'/../index.html','utf8').split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE FILE CHECKS')[0];
 const flush=async()=>{for(let i=0;i<150;i++)await Promise.resolve();};
 const sum=a=>a.reduce((x,y)=>(x+y)&255,0);
-const identityReference=()=>({version:1,verified:true,expected:{identity:'a'.repeat(64)},salt:'07'.repeat(16),bootloaderIdentity:{version:1,family:34,unit:0,identity:createHash('sha256').update(Uint8Array.of(68,66,76,49,...new Uint8Array(16).fill(7),34,0,9,8,7,6,5,4)).digest('hex')}});
+const identityReference=()=>({version:1,verified:true,expected:{identity:createHash('sha256').update(Uint8Array.of(...new Uint8Array(16).fill(7),1,2,3,4,5,6)).digest('hex')},salt:'07'.repeat(16),bootloaderIdentity:{version:1,family:34,unit:0,identity:createHash('sha256').update(Uint8Array.of(68,66,76,49,...new Uint8Array(16).fill(7),34,0,9,8,7,6,5,4)).digest('hex')}});
 function images(dLength,mLength){
  const d=Uint8Array.from({length:dLength},(_,i)=>(i*13+7)&255),m=Uint8Array.from({length:mLength},(_,i)=>(i*17+3)&255);
  d.fill(255,0,16);d.set([0x43,0,0],16);d.set([34,0,4],40);d.set([0x42,0,0],47);
  m.set([255,255,34,0],12);m.set([0x42,1,0],8);m.set([0x42,0,0],16);return {d,m};
 }
-async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wrongIdentity=false,wrongSerial=false,dropPhase=null}={}){
+async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wrongIdentity=false,wrongSerial=false,baselineMismatch=false,dropPhase=null}={}){
  const {d,m}=images(dLength,mLength),hash=b=>createHash('sha256').update(b).digest('hex');
  const code=source.replace('const FIRMWARE_IMAGES = Object.freeze({',`const FIRMWARE_IMAGES = Object.freeze({'${hash(d)}':'preparation','${hash(m)}':'preparation',`);
  let now=0,id=0,listener=null,result,error,stage='',selector=13,status=141,fragments=null,fragmentIndex=0,pending=null;
@@ -22,6 +22,12 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  const rx=(...bytes)=>{if(stage!==dropPhase&&listener)listener(Uint8Array.from(bytes));};
  function logical(name,p){
   commands.push({name,p:[...p],stage});
+  if(stage==='baseline-verification') {
+    assert.equal(name,'2afe');
+    const queries=[[0,1,28,0],[0,1,60,0],[0,1,132,0],[0,1,132,1],[0,22,172,1]];
+    const replies=[[0,1,30,34,0],[0,1,62,baselineMismatch?9:1,2,3,4,5,6],[0,1,134,69,0,0],[0,1,134,68,8,0],[0,22,174,1,0]];
+    const n=commands.length-1;assert.deepEqual(p,queries[n]);rx(...replies[n]);return;
+  }
   if(name==='2afa'&&p[0]===3){status=128|(p[1]&96)|selector;rx(35,0);return;}
   if(name==='2afa'&&p[0]===4){rx(36,status);return;}
   if(name==='2afa'&&p[0]===6){assert([0,31].includes(p[1]));rx(38,0);return;}
@@ -86,7 +92,7 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  }
  const characteristic=name=>({async writeValueWithResponse(p){native(name,false,p);},async writeValueWithoutResponse(p){native(name,true,p);}});
  const file=data=>({size:data.length,arrayBuffer:async()=>data.slice().buffer});
- const promise=ctx.transferFirmwarePair({files:[file(m),file(d)],identityReference:identityReference(),baseline:{identity:'a'.repeat(64),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0'},credentials:Uint8Array.from({length:15},(_,i)=>i+1),
+ const promise=ctx.transferFirmwarePair({files:[file(m),file(d)],identityReference:identityReference(),baseline:{identity:createHash('sha256').update(Uint8Array.of(...new Uint8Array(16).fill(7),1,2,3,4,5,6)).digest('hex'),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:0},credentials:Uint8Array.from({length:15},(_,i)=>i+1),
   characteristics:{'2afa':characteristic('2afa'),'2afe':characteristic('2afe')},signal:controller.signal,
   subscribe(fn){assert.equal(listener,null);listener=fn;return()=>listener=null;},
   onStage(value){stage=value;stages.push(value);if(value==='D-update-entry'){assert(mFinished);selector=0;status=128;}}
@@ -113,6 +119,7 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  for(let abortAt=0;abortAt<first.nativeCount;abortAt++){const r=await run({abortAt});assert(r.error);assert.equal(r.nativeCount,abortAt+1);}
  for(const dropPhase of first.stages.slice(1)){const r=await run({dropPhase});assert(r.error);assert.equal(r.error.stage,dropPhase);}
  const mismatch=await run({wrongIdentity:true});assert(mismatch.error);assert.equal(mismatch.error.mFinished,true);assert.equal(mismatch.dBlocks,0);
+ const stale=await run({baselineMismatch:true});assert(stale.error);assert.equal(stale.error.stage,'baseline-verification');assert.equal(stale.nativeCount,5);assert.equal(stale.mBlocks,0);assert.equal(stale.dBlocks,0);
  const wrongMotor=await run({wrongSerial:true});assert(wrongMotor.error);assert(wrongMotor.error.mFinished);assert.equal(wrongMotor.dBlocks,0);assert.equal(wrongMotor.error.reset,false);
  assert(!wrongMotor.commands.some(c=>c.stage==='D-identity-and-transfer'&&[6,7,8,9,33].includes(c.p[1])));
  for(const [dLength,mLength]of [[65537,1025],[132072,116320],[138072,119824]]){

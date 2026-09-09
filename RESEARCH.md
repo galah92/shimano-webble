@@ -2233,3 +2233,20 @@ existing Verify after restart action. A successful result would establish
 re-entry from the intact D bootloader plus original native readback, not
 recovery of erased firmware or an interrupted M image. No image transfer
 is enabled by this test or by a successful result.
+
+### Build .51: fresh baseline enforced by the paired coordinator
+
+After validating both image snapshots and before update entry, the unwired
+paired coordinator now reads model, salted application identity, native D/M
+versions and current destination from the current connection. All six
+baseline fields must match the snapshotted plan. Caller mutation after the
+operation starts cannot alter the expected values. Missing destination is
+rejected before writes; mismatched live values stop before update entry.
+The existing reference salt is used so the fresh identity is comparable.
+
+Tests cover each mismatching baseline field, early input rejection, plan
+mutation, and the full physical pipeline including five baseline reads.
+Full-size preparation/restoration simulations and all-write failure/abort
+checks pass. Authentication and recovery readiness remain external
+preconditions; the page still does not call the transfer coordinator.
+The guided52-write .50 recovery probe and requested bike test are unchanged.

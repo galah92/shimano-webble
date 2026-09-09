@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.50';
+const BUILD = '2026-09-09.51';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1319,12 +1319,12 @@ async function checkFirmwarePair(files) {
   return {source: d.source, dVersion: d.version.join('.'), mVersion: m.version.join('.'), dGeometry: d.geometry, mGeometry: m.geometry, installable: false};
 }
 
-// No UI caller. A fresh authenticated baseline, ordinary E5000 transport,
-// private credentials and a recovery plan are external preconditions.
+// No UI caller. Authenticated E5000 transport, private credentials and a
+// recovery plan remain external preconditions. Baseline is reread before entry.
 const firmwarePairTransports = new WeakSet();
 async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage, identityReference}) {
   const knownVersions = ['4.5.0.0/4.4.8.0', '4.3.0.0/4.2.1.0'];
-  if (!baseline || baseline.family !== 34 || baseline.unit !== 0 ||
+  if (!baseline || baseline.family !== 34 || baseline.unit !== 0 || ![0,1].includes(baseline.destination) ||
       !knownVersions.includes(`${baseline.dVersion}/${baseline.mVersion}`))
     throw new Error('Paired transfer requires a fresh reviewed E5000 component baseline');
   if (!identityReference || identityReference.version!==1 || identityReference.verified!==true ||
@@ -1340,6 +1340,7 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
   const owner = characteristics['2afa'];
   if (firmwarePairTransports.has(owner)) throw new Error('Paired firmware workflow already active on this transport');
   firmwarePairTransports.add(owner);
+  const expectedBaseline={...baseline};
   const keys = credentials.slice(),expectedBootloaderIdentity={...identityReference.bootloaderIdentity};
   const identitySalt=Uint8Array.from(identityReference.salt.match(/../g),b=>parseInt(b,16));
   let writer, stage = 'file-validation', mFinished = false, dFinished = false;
@@ -1350,6 +1351,10 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
     const {d, m, source} = await loadFirmwarePair(files);
     writer = createFirmwareGattWriter(characteristics, signal);
     const transport = {write: writer.write, subscribe, signal};
+    advance('baseline-verification');
+    const current=await readFirmwareBaseline({...transport,identitySalt});
+    if (['family','unit','identity','dVersion','mVersion','destination'].some(key=>current[key]!==expectedBaseline[key]))
+      throw new Error('Live motor baseline differs from the planned transfer');
     advance('M-update-entry');
     const mEntry = await enterFirmwareUpdateSession(transport);
     advance('M-slot-selection');
