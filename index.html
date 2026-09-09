@@ -3,6 +3,10 @@
 <!--
 ===============================================================================
 SHIMANO WEBBLE REVERSE-ENGINEERING HANDOFF NOTES
+
+Historical import. For current verified findings, see RESEARCH.md.
+Build 2026-09-09.3 adds explicit 2AF3 session-authentication writes only.
+The original read-only behavior and pending milestones below are historical.
 ===============================================================================
 
 PURPOSE / END GOAL
@@ -309,13 +313,14 @@ END HANDOFF NOTES
   #log { white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:46vh; overflow:auto; background:#0001; padding:10px; border-radius:10px; min-height:180px; }
   .ok { color: #2f9e44; }
   .bad { color: #d9480f; }
+  input { padding:10px; max-width:100%; box-sizing:border-box; }
   .warn { color: #e67700; }
 </style>
 </head>
 <body>
 <h1>Shimano BLE Diagnostic</h1>
-<div class="muted">Build 2026-09-09.2 · read-only</div>
-<p>Web Bluetooth diagnostic console for Shimano's proprietary BLE service. This build performs no configuration writes.</p>
+<div class="muted">Build 2026-09-09.3 · session authentication experiment</div>
+<p>Connect and inspect your Shimano display. Session authentication is experimental and performs no configuration or firmware changes.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -331,42 +336,292 @@ END HANDOFF NOTES
 <button id="probe" disabled>Run read-only probe</button>
 <button id="disconnect" disabled>Disconnect</button>
 </div>
+<div class="card">
+<label for="passkey">Shimano passkey (six digits)</label>
+<input id="passkey" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" disabled />
+<div class="row"><button id="authenticate" disabled>Authenticate session</button></div>
+<div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged.</div>
+</div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clear">Clear log</button></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.2';
-const STORAGE_KEY = 'shimano-webble-log-v1';
-const BASE = '-5348-494d-414e-4f5f424c4500';
-const UUID = n => `0000${n.toLowerCase()}${BASE}`;
+const BUILD = '2026-09-09.3';
+const STORAGE_KEY = 'shimano-webble-log-v2';
+const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
-const C2AF3 = UUID('2af3');
-const C2AF4 = UUID('2af4');
-const C2AF6 = UUID('2af6');
-const C2AF7 = UUID('2af7');
-const C2AF8 = UUID('2af8');
-let device, server, service;
-let ch2af3, ch2af4, ch2af6, ch2af7, ch2af8;
 const $ = id => document.getElementById(id);
 const logEl = $('log');
-function ts(){return new Date().toLocaleTimeString([], {hour12:false});}
-function persistLog(){try{sessionStorage.setItem(STORAGE_KEY, logEl.textContent);}catch{}}
-function log(msg){logEl.textContent += `[${ts()}] ${msg}\n`;logEl.scrollTop=logEl.scrollHeight;persistLog();}
-function hex(view){const u8=view instanceof DataView?new Uint8Array(view.buffer,view.byteOffset,view.byteLength):new Uint8Array(view.buffer??view);return [...u8].map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ');}
-function ascii(view){const u8=view instanceof DataView?new Uint8Array(view.buffer,view.byteOffset,view.byteLength):new Uint8Array(view.buffer??view);return [...u8].map(b=>(b>=32&&b<=126)?String.fromCharCode(b):'.').join('');}
-function setConnected(on){$('connect').disabled=on;$('disconnect').disabled=!on;$('probe').disabled=!on;}
-function setProtected(status,css=''){$('protected').className=css;$('protected').textContent=status;}
-async function getChar(uuid,required=true){try{const ch=await service.getCharacteristic(uuid);log(`Found characteristic ${uuid.slice(4,8).toUpperCase()}`);return ch;}catch(e){if(required)throw e;log(`Characteristic ${uuid.slice(4,8).toUpperCase()} unavailable: ${e.name}: ${e.message}`);return null;}}
-async function connect(){try{$('status').textContent='Choosing device…';setProtected('Not tested');log('Opening Bluetooth device chooser');device=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'SCE'},{services:[SERVICE_18FF]}],optionalServices:[SERVICE_18FF]});$('device').textContent=`${device.name||'(unnamed)'} / ${device.id}`;device.addEventListener('gattserverdisconnected',onDisconnected);$('status').textContent='Connecting…';server=await device.gatt.connect();log(`Connected to ${device.name||device.id}`);service=await server.getPrimaryService(SERVICE_18FF);$('svc').textContent='Found';log(`Found service ${SERVICE_18FF}`);ch2af3=await getChar(C2AF3);ch2af4=await getChar(C2AF4);ch2af6=await getChar(C2AF6,false);ch2af7=await getChar(C2AF7,false);ch2af8=await getChar(C2AF8,false);ch2af3.addEventListener('characteristicvaluechanged',ev=>{const v=ev.target.value;log(`RX 2AF3: ${hex(v)}   ASCII: ${ascii(v)}`);});await ch2af3.startNotifications();$('notify').textContent='Enabled';log('Enabled 2AF3 indications/notifications');$('status').textContent='Connected';setConnected(true);await runProbe();}catch(e){$('status').textContent='Error';log(`ERROR: ${e.name}: ${e.message}`);console.error(e);setConnected(false);}}
-async function readCharacteristic(label,ch){if(!ch){log(`${label}: characteristic unavailable`);return {ok:false,reason:'unavailable'};}try{const v=await ch.readValue();log(`READ ${label}: ${hex(v)}   ASCII: ${ascii(v)}`);return {ok:true,value:v};}catch(e){log(`READ ${label} failed: ${e.name}: ${e.message}`);return {ok:false,reason:e.message,name:e.name};}}
-async function runProbe(){log('--- read-only probe start ---');const challenge=await readCharacteristic('2AF4',ch2af4);if(challenge.ok)$('challenge').textContent=hex(challenge.value);const r6=await readCharacteristic('2AF6',ch2af6);const r7=await readCharacteristic('2AF7',ch2af7);const r8=await readCharacteristic('2AF8',ch2af8);if(r6.ok||r7.ok||r8.ok){setProtected('At least one protected read succeeded','ok');log('PROTECTED ACCESS: at least one 2AF6/7/8 read succeeded');}else{setProtected('Protected reads blocked / session not established','warn');log('PROTECTED ACCESS: 2AF6/7/8 remain blocked');}log('--- read-only probe end ---');}
-function disconnect(){if(device?.gatt?.connected)device.gatt.disconnect();else onDisconnected();}
-function onDisconnected(){$('status').textContent='Disconnected';$('svc').textContent='—';$('notify').textContent='—';setConnected(false);log('Disconnected');}
-async function copyLog(){try{await navigator.clipboard.writeText(logEl.textContent);log('Log copied to clipboard');}catch(e){log(`Copy failed: ${e.name}: ${e.message}`);}}
-$('connect').onclick=connect;$('probe').onclick=runProbe;$('disconnect').onclick=disconnect;$('copyLog').onclick=copyLog;$('clear').onclick=()=>{logEl.textContent='';try{sessionStorage.removeItem(STORAGE_KEY);}catch{}};
-$('secure').innerHTML=window.isSecureContext?'<span class="ok">Yes</span>':'<span class="bad">No — HTTPS required</span>';
-if(!navigator.bluetooth){$('webbt').innerHTML='<span class="bad">Unavailable</span>';$('status').innerHTML='<span class="bad">Web Bluetooth unavailable</span>';$('connect').disabled=true;}else{$('webbt').innerHTML='<span class="ok">Available</span>';}
-try{const oldLog=sessionStorage.getItem(STORAGE_KEY);if(oldLog)logEl.textContent=oldLog;}catch{}
+let session = null;
+let busy = false;
+let connectionAttempt = 0;
+
+function log(message) {
+  logEl.textContent += `[${new Date().toISOString()}] ${message}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  try { sessionStorage.setItem(STORAGE_KEY, logEl.textContent); } catch {}
+}
+function bytes(value) {
+  return ArrayBuffer.isView(value)
+    ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+    : new Uint8Array(value);
+}
+function hex(value) {
+  return [...bytes(value)].map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+}
+function ascii(value) {
+  return [...bytes(value)].map(b => b >= 32 && b <= 126 ? String.fromCharCode(b) : '.').join('');
+}
+function controls() {
+  const connected = !!session?.device.gatt.connected;
+  $('connect').disabled = busy || connected || !navigator.bluetooth || !window.isSecureContext;
+  $('disconnect').disabled = !connected;
+  $('probe').disabled = busy || !connected;
+  $('authenticate').disabled = busy || !connected || session?.authenticated || !crypto.subtle;
+  $('passkey').disabled = busy || !connected || session?.authenticated;
+}
+function protectedStatus(message, css = '') {
+  $('protected').textContent = message;
+  $('protected').className = css;
+}
+function assertCurrent(s) {
+  if (session !== s || !s.device.gatt.connected) throw new Error('Bluetooth disconnected');
+}
+function resetSession(s) {
+  if (session !== s) return;
+  s.controller.abort();
+  connectionAttempt++;
+  session = null;
+  busy = false;
+  $('passkey').value = '';
+  $('status').textContent = 'Disconnected';
+  $('device').textContent = '—';
+  $('svc').textContent = '—';
+  $('notify').textContent = '—';
+  $('challenge').textContent = '—';
+  protectedStatus('Not tested');
+  controls();
+  log('Disconnected');
+}
+function disconnect() {
+  const s = session;
+  if (!s) return;
+  resetSession(s);
+  if (s.device.gatt.connected) s.device.gatt.disconnect();
+}
+async function readCharacteristic(s, short) {
+  assertCurrent(s);
+  const ch = s.chars[short];
+  if (!ch) {
+    log(`${short.toUpperCase()}: characteristic unavailable`);
+    return null;
+  }
+  try {
+    const value = await ch.readValue();
+    assertCurrent(s);
+    // No 2AF8 reads: the captured value is the BLE passkey.
+    log(`READ ${short.toUpperCase()}: ${hex(value)}   ASCII: ${ascii(value)}`);
+    return value;
+  } catch (e) {
+    assertCurrent(s);
+    log(`READ ${short.toUpperCase()} failed: ${e.name}: ${e.message}`);
+    return null;
+  }
+}
+async function probe(s) {
+  log('--- read-only probe start ---');
+  const challenge = await readCharacteristic(s, '2af4');
+  $('challenge').textContent = challenge ? hex(challenge) : 'Read failed';
+  await readCharacteristic(s, '2af6');
+  const identity = await readCharacteristic(s, '2af7');
+  protectedStatus(identity
+    ? '2AF7 readable; see identification in log'
+    : '2AF7 not readable; see error in log', identity ? 'ok' : 'warn');
+  log('--- read-only probe end ---');
+}
+async function runProbe() {
+  if (busy || !session) return;
+  const s = session;
+  busy = true;
+  controls();
+  try { await probe(s); }
+  catch (e) { if (session === s) log(`Probe stopped: ${e.message}`); }
+  finally { if (session === s) { busy = false; controls(); } }
+}
+async function connect() {
+  if (busy || session) return;
+  const attempt = ++connectionAttempt;
+  busy = true;
+  controls();
+  let s;
+  try {
+    $('status').textContent = 'Choosing device…';
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{namePrefix: 'SCE'}, {services: [SERVICE_18FF]}],
+      optionalServices: [SERVICE_18FF]
+    });
+    s = {device, chars: {}, controller: new AbortController(), authenticated: false};
+    session = s;
+    device.addEventListener('gattserverdisconnected', () => resetSession(s), {once: true});
+    // Keep device identifiers out of copied and persisted logs.
+    $('device').textContent = device.name || 'Shimano device';
+    $('status').textContent = 'Connecting…';
+    const server = await device.gatt.connect();
+    assertCurrent(s);
+    controls();
+    s.service = await server.getPrimaryService(SERVICE_18FF);
+    assertCurrent(s);
+    $('svc').textContent = 'Found';
+    for (const short of ['2af3', '2af4', '2af6', '2af7']) {
+      try {
+        s.chars[short] = await s.service.getCharacteristic(UUID(short));
+        assertCurrent(s);
+      } catch (e) {
+        assertCurrent(s);
+        if (short === '2af3' || short === '2af4' || short === '2af7') throw e;
+        log(`${short.toUpperCase()} unavailable: ${e.message}`);
+      }
+    }
+    s.chars['2af3'].addEventListener('characteristicvaluechanged', ev => {
+      if (session !== s) return;
+      const value = bytes(ev.target.value);
+      if (value.length === 3 && value[0] === 0x10) log(`RX 2AF3 status: ${hex(value)}`);
+      else log(`RX 2AF3: ${value.length} bytes (payload omitted)`);
+    });
+    await s.chars['2af3'].startNotifications();
+    assertCurrent(s);
+    $('notify').textContent = 'Enabled';
+    $('status').textContent = 'Connected';
+    log('Connected; 2AF3 indications enabled. No authentication sent.');
+    await probe(s);
+  } catch (e) {
+    if (s && session !== s) return;
+    log(`Connection failed: ${e.name}: ${e.message}`);
+    if (s) disconnect();
+    $('status').textContent = 'Connection failed; see log';
+  } finally {
+    if (attempt === connectionAttempt) { busy = false; controls(); }
+  }
+}
+
+// One AES block only. With a zero IV, the first CBC ciphertext block equals
+// AES-ECB(block). Web Crypto adds a padding block, which we discard.
+async function encryptBlock(keyBytes, block) {
+  if (keyBytes.length !== 16 || block.length !== 16) throw new Error('Expected 16-byte AES key and challenge');
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-CBC', false, ['encrypt']);
+  const result = await crypto.subtle.encrypt({name: 'AES-CBC', iv: new Uint8Array(16)}, key, block);
+  return new Uint8Array(result).slice(0, 16);
+}
+async function authResponses(challenge, passkey) {
+  if (!/^[0-9]{6}$/.test(passkey)) throw new Error('Enter the six-digit Shimano passkey');
+  const key1 = new Uint8Array([0x00,0x01,0x11,0x47,0xa5,0x3f,0xa2,0x79,0x52,0x48,
+    ...new TextEncoder().encode(passkey)]);
+  const key2 = new Uint8Array([0x00,0x02,0xd3,0x9c,0xa4,0x26,0xc6,0x94,0xe3,0x0b,0xc9,0x22,0xe8,0x7b,0xb5,0x8d]);
+  try {
+    return [new Uint8Array([1, ...await encryptBlock(key1, challenge)]),
+      new Uint8Array([2, ...await encryptBlock(key2, challenge)])];
+  } finally { key1.fill(0); }
+}
+function sendAuthStage(s, packet) {
+  assertCurrent(s);
+  const ch = s.chars['2af3'];
+  const stage = packet[0];
+  log(`TX 2AF3 authentication stage ${stage}: ${packet.length} bytes (payload omitted)`);
+  return new Promise((resolve, reject) => {
+    let acknowledged = false;
+    let written = false;
+    const finish = error => {
+      clearTimeout(timer);
+      ch.removeEventListener('characteristicvaluechanged', onValue);
+      s.controller.signal.removeEventListener('abort', onAbort);
+      if (error) reject(error); else resolve();
+    };
+    const onAbort = () => finish(new Error('Disconnected during authentication'));
+    const onValue = ev => {
+      const value = bytes(ev.target.value);
+      if (value[0] !== 0x10 || value[1] !== stage) return;
+      if (value.length !== 3) return finish(new Error(`Malformed stage ${stage} response`));
+      if (value[2] !== 1) return finish(new Error(`Stage ${stage} rejected (status ${value[2]})`));
+      acknowledged = true;
+      if (written) finish();
+    };
+    const timer = setTimeout(() => finish(new Error(`Stage ${stage} timed out`)), 8000);
+    ch.addEventListener('characteristicvaluechanged', onValue);
+    s.controller.signal.addEventListener('abort', onAbort, {once: true});
+    // Register the indication listener before issuing the write: the indication
+    // can arrive before the browser resolves the write promise.
+    try {
+      ch.writeValueWithResponse(packet).then(() => {
+        written = true;
+        if (acknowledged) finish();
+      }, finish);
+    } catch (e) { finish(e); }
+  });
+}
+async function authenticate() {
+  if (busy || !session || session.authenticated) return;
+  let passkey = $('passkey').value;
+  if (!/^[0-9]{6}$/.test(passkey)) { log('Enter the six-digit Shimano passkey first.'); return; }
+  const s = session;
+  busy = true;
+  controls();
+  let packets;
+  try {
+    protectedStatus('Authenticating…');
+    const challenge = await s.chars['2af4'].readValue();
+    assertCurrent(s);
+    $('challenge').textContent = hex(challenge);
+    if (challenge.byteLength !== 16) throw new Error('Unexpected challenge length');
+    packets = await authResponses(bytes(challenge), passkey);
+    passkey = '';
+    $('passkey').value = '';
+    assertCurrent(s);
+    for (const packet of packets) {
+      await sendAuthStage(s, packet);
+      assertCurrent(s);
+    }
+    s.authenticated = true;
+    log('Both session authentication stages acknowledged. Checking 2AF7.');
+    const identity = await readCharacteristic(s, '2af7');
+    if (identity && /^SCE7000\0*$/.test(new TextDecoder().decode(bytes(identity)))) {
+      protectedStatus('Session verified: SC-E7000 identification readable', 'ok');
+      log('MILESTONE: both auth acknowledgements and SC-E7000 identification verified.');
+    } else {
+      protectedStatus('Authentication acknowledged; SC-E7000 identification not verified', 'warn');
+      log('Stop here: further setup may be required. No additional writes sent.');
+    }
+  } catch (e) {
+    if (session === s) {
+      log(`Authentication stopped: ${e.message}. Reconnect before retrying.`);
+      disconnect();
+    }
+  } finally {
+    passkey = '';
+    if (session === s) $('passkey').value = '';
+    packets?.forEach(packet => packet.fill(0));
+    if (session === s) { busy = false; controls(); }
+  }
+}
+$('connect').onclick = connect;
+$('probe').onclick = runProbe;
+$('disconnect').onclick = disconnect;
+$('authenticate').onclick = authenticate;
+$('copyLog').onclick = async () => {
+  try { await navigator.clipboard.writeText(logEl.textContent); log('Log copied to clipboard'); }
+  catch (e) { log(`Copy failed: ${e.message}`); }
+};
+$('clear').onclick = () => {
+  logEl.textContent = '';
+  try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+};
+$('secure').textContent = window.isSecureContext ? 'Yes' : 'No — HTTPS required';
+$('webbt').textContent = navigator.bluetooth ? 'Available' : 'Unavailable';
+try {
+  // Previous builds logged 2AF8 (the passkey), so do not restore old logs.
+  sessionStorage.removeItem('shimano-webble-log-v1');
+  logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
+} catch {}
+controls();
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

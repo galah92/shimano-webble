@@ -1,22 +1,30 @@
 # Shimano WebBLE
 
-A single-file, read-only Web Bluetooth diagnostic console for Shimano STEPS.
+A single-file Web Bluetooth diagnostic and experimental session-authentication
+console for Shimano STEPS. No configuration or firmware changes are implemented.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
 ## Use
 
-Open the live site in Chrome/Chromium on Android, enable Bluetooth, make the
-Shimano endpoint discoverable, and tap **Connect Shimano**. The page subscribes
-to 2AF3 indications and reads the 2AF4 challenge. **Try protected reads** probes
-2AF6, 2AF7, and 2AF8; permission failures are logged for investigation.
+Open the site in Chrome on Android, enable Bluetooth, make the Shimano endpoint
+discoverable, and tap **Connect Shimano**. The page subscribes to 2AF3 indications
+and probes 2AF4, 2AF6, and 2AF7 without application writes.
 
-The app does not perform configuration writes or implement Shimano session
-authentication. Actual BLE behavior must be verified with the target hardware.
+To test session access, enter the six-digit passkey configured in E-TUBE and tap
+**Authenticate session**. This sends the two reconstructed authentication
+messages, waits for their acknowledgements, and checks whether 2AF7 identifies
+the SC-E7000. The passkey is used locally, cleared after the attempt, and never
+saved or logged. **Copy log** exports the diagnostic results for analysis.
+
+The response calculation matches the supplied HCI capture, but this WebBLE
+handshake still needs validation on the bike. If authentication fails, reconnect
+before retrying. If both acknowledgements succeed but identification is not
+verified, share the log; further session setup may be needed.
 
 ## Develop
 
-Edit `index.html`; there is no build step or dependency installation.
+Edit `index.html`; there is no build step or runtime dependency installation.
 
 ```sh
 git clone https://github.com/galah92/shimano-webble.git
@@ -32,17 +40,18 @@ GitHub Pages publishes the repository root from `main`. Push changes to `main`
 to deploy; check the repository's Actions tab for the Pages build result.
 `.nojekyll` keeps the site as plain static files.
 
+For simulated browser tests, use Python with Playwright and its Chromium browser
+installed, then run `python tests/browser.py`. No Bluetooth hardware is needed.
+
 ## Source and handoff
 
-See [RESEARCH.md](RESEARCH.md) for the current evidence, firmware findings,
-and next session-authentication analysis steps.
+See [RESEARCH.md](RESEARCH.md) for verified evidence, protocol details,
+firmware limitations, and remaining live checks.
 
-`index.html` was imported from `shimano_webble_with_handoff.html` on
-2026-09-09, preserving its embedded research and engineering handoff notes.
-Those historical observations and provisional protocol models are source
-context, not newly verified findings. The deployment limitations described in
-the original notes predate this repository setup.
+The original HTML and historical handoff notes came from
+`shimano_webble_with_handoff.html`. Their original read-only description predates
+the explicit authentication experiment in build `2026-09-09.3`.
 
-Keep passkeys, device identifiers, bugreports, and raw captures out of this
-public repository. Continue with hardware validation of the existing read-only
-flow before implementing authenticated-session support.
+Keep passkeys, device identifiers, bugreports, and raw captures outside this
+public repository. Earlier diagnostic builds logged the passkey via 2AF8;
+keep those old exported logs private.
