@@ -1878,3 +1878,45 @@ is scoped to the ordinary p3 path, not special recovery/W2/EP branches.
 The paired coordinator must select that path explicitly and cannot treat
 M completion or motor authentication as D bootloader entry. No entry or
 firmware transfer is exposed in the UI yet.
+
+## Paired coordinator — build .37
+
+transferFirmwarePair now joins the ordinary path: validate both files,
+M update negotiation, M slot0, M version/setup/data/finish, fresh D update
+negotiation, D FIRMUP entry, and D identity/setup/data/finish. It suppresses
+reset and never calls the US setter. The fresh D selector is used instead of
+reusing the M selector. Th.p3's ordinary non-EP path is the only modeled path.
+
+loadFirmwarePair is shared by the picker and coordinator. It snapshots each
+actual file buffer before hashing, checks the reviewed SHA-256 allowlist,
+requires one D and one M from the same source pair, validates raw headers and
+peer minima, and bounds component geometry. Both files pass before any entry
+write. Picker results cannot authorize a transfer or substitute for these
+checks. Actual preparation and restoration pairs both pass the shared loader;
+synthetic images are rejected by the deployed allowlist.
+
+The coordinator requires an externally supplied fresh E5000 family34/unit0
+baseline with either reviewed pair of native component versions, private stage
+credentials, and the required GATT write methods. These checks do not prove
+freshness by themselves: a future UI must obtain the baseline from the active
+authenticated bike session. No UI caller is enabled. The coordinator takes an
+exclusive per-characteristic lease before asynchronous file loading; another
+coordinator cannot interleave on that transport. Its writer closes on either
+success or failure. Private credentials are snapshotted and its key copy is
+cleared in finally; no complete JavaScript memory-erasure guarantee is made.
+
+Progress exposes stage names only. Errors expose the failed stage and whether
+M or D has finished, not arbitrary native error text or packet contents.
+There is no automatic retry, reset, resume or rollback. A completed transfer
+returns firmwareVerified=false, regionVerified=false and recoveryVerified=false.
+Native version and region checks after a separately justified reset are still
+required. No claim is made about an interrupted pair being bootable.
+
+Orchestration tests use controlled component workers to verify ordering,
+new-selector handover, immutable inputs, validation before writes, concurrency
+rejection, cancellation before entry and partial-completion reporting at every
+phase. They do not simulate the entire wire exchange: entry, component and
+GATT suites test those layers separately. An integrated physical-protocol
+simulation and live recovery/entry evidence remain necessary before enabling
+an updater. The real private assets pass the shared loader without changing
+the public allowlist or adding firmware binaries to git.

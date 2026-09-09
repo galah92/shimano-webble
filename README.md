@@ -328,3 +328,11 @@ and failure at every step: `node tests/d_bootloader_entry.cjs`. It takes private
 stage credentials as input and contains none in the repository. This is still
 unwired: paired orchestration, actual entry/identity checks and recovery must
 be validated before a bike firmware test.
+
+Build .37 joins validation, M transfer, fresh handover, D entry and D transfer
+in an unwired paired coordinator. It owns the transport, validates both actual
+file snapshots before writes, and reports partial completion without resetting
+or retrying. `node tests/firmware_pair.cjs` checks orchestration with controlled
+workers; the component suites cover their protocols separately. Full integrated
+wire simulation, fresh live baseline acquisition and recovery remain required
+before exposing an updater or requesting a firmware test.

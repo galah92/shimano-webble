@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.36';
+const BUILD = '2026-09-09.37';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1213,24 +1213,80 @@ function firmwarePairRequirements(d, m) {
   const rank = v => v[0] * 1000000 + v[1] * 10000 + v[2] * 100 + v[3];
   return rank(m.version) >= rank(d.minimum) && rank(d.version) >= rank(m.minimum);
 }
-async function checkFirmwarePair(files) {
+async function loadFirmwarePair(files) {
   if (files.length !== 2) throw new Error('Select exactly two DAT files: one D and one M');
   const headers = [];
   for (const file of files) {
     if (file.size < 256 || file.size > 32 * 1024 * 1024) throw new Error('File size outside supported DAT range');
-    const data = new Uint8Array(await file.arrayBuffer());
+    const data = new Uint8Array(await file.arrayBuffer()).slice();
     const header = firmwareHeader(data);
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
     const hash = Array.from(digest, b => b.toString(16).padStart(2, '0')).join('');
     const source = FIRMWARE_IMAGES[hash];
     if (!source) throw new Error('File does not match a reviewed preparation or restoration image');
-    headers.push({...header, source, geometry: firmwareTransferGeometry(data, header.component)});
+    headers.push({...header, source, data, geometry: firmwareTransferGeometry(data, header.component)});
   }
   const d = headers.find(h => h.component === 'D'), m = headers.find(h => h.component === 'M');
   if (!d || !m) throw new Error('A pair needs one D and one M image');
   if (d.source !== m.source || !firmwarePairRequirements(d, m)) throw new Error('Mixed or incompatible component pair');
-  // No bytes or authorization token are retained. A future installer must revalidate its inputs.
+  return {d, m, source: d.source};
+}
+async function checkFirmwarePair(files) {
+  const {d, m} = await loadFirmwarePair(files);
+  // The picker retains no bytes or authorization token.
   return {source: d.source, dVersion: d.version.join('.'), mVersion: m.version.join('.'), dGeometry: d.geometry, mGeometry: m.geometry, installable: false};
+}
+
+// No UI caller. A fresh authenticated baseline, ordinary E5000 transport,
+// private credentials and a recovery plan are external preconditions.
+const firmwarePairTransports = new WeakSet();
+async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage}) {
+  const knownVersions = ['4.5.0.0/4.4.8.0', '4.3.0.0/4.2.1.0'];
+  if (!baseline || baseline.family !== 34 || baseline.unit !== 0 ||
+      !knownVersions.includes(`${baseline.dVersion}/${baseline.mVersion}`))
+    throw new Error('Paired transfer requires a fresh reviewed E5000 component baseline');
+  if (!(credentials instanceof Uint8Array) || credentials.length !== 15 || typeof subscribe !== 'function' ||
+      onStage !== undefined && typeof onStage !== 'function') throw new Error('Incomplete paired transport inputs');
+  for (const [name, method] of [['2afa', 'writeValueWithResponse'], ['2afa', 'writeValueWithoutResponse'], ['2afe', 'writeValueWithResponse']])
+    if (typeof characteristics?.[name]?.[method] !== 'function') throw new Error(`Missing ${name} ${method}`);
+  const owner = characteristics['2afa'];
+  if (firmwarePairTransports.has(owner)) throw new Error('Paired firmware workflow already active on this transport');
+  firmwarePairTransports.add(owner);
+  const keys = credentials.slice();
+  let writer, stage = 'file-validation', mFinished = false, dFinished = false;
+  const advance = name => { stage = name; if (signal?.aborted) throw new Error('Aborted'); onStage?.(name); };
+  try {
+    advance('file-validation');
+    // Hash and peer-check both actual snapshots before the first bike write.
+    const {d, m, source} = await loadFirmwarePair(files);
+    writer = createFirmwareGattWriter(characteristics, signal);
+    const transport = {write: writer.write, subscribe, signal};
+    advance('M-update-entry');
+    const mEntry = await enterFirmwareUpdateSession(transport);
+    advance('M-slot-selection');
+    await selectMFirmwareSlot(transport);
+    advance('M-transfer');
+    let sequence = 0;
+    await transferMFirmware({...transport, data: m.data, targetSelector: mEntry.targetSelector,
+      nextSequence: () => sequence++ & 255});
+    mFinished = true;
+    // Ordinary Th.p3 Sh has no special cleanup resources. Re-negotiate the
+    // session for D; do not reset M or reuse the old selector across handover.
+    advance('D-update-entry');
+    const dEntry = await enterFirmwareUpdateSession(transport);
+    advance('D-bootloader-entry');
+    await enterDBootloader({...transport, ...dEntry, credentials: keys});
+    advance('D-identity-and-transfer');
+    await transferDComponent({...transport, data: d.data, write: packet => writer.write('2afa', packet)});
+    dFinished = true;
+    return {state: 'paired-transfer-finished', source, dVersion: d.version.join('.'), mVersion: m.version.join('.'),
+      mFinished, dFinished, reset: false, firmwareVerified: false, regionVerified: false, recoveryVerified: false, installable: false};
+  } catch (cause) {
+    // Do not log arbitrary native errors or private command payloads.
+    const error = new Error(`Paired firmware workflow stopped during ${stage}; no automatic reset or recovery`);
+    Object.assign(error, {stage, mFinished, dFinished, reset: false, recoveryVerified: false});
+    throw error;
+  } finally { writer?.close(); keys.fill(0); firmwarePairTransports.delete(owner); }
 }
 // END FIRMWARE FILE CHECKS
 const STORAGE_KEY = 'shimano-webble-log-v2';
