@@ -319,7 +319,7 @@ END HANDOFF NOTES
 </head>
 <body>
 <h1>Shimano BLE Diagnostic</h1>
-<div class="muted">Build 2026-09-09.3 · session authentication experiment</div>
+<div class="muted" id="build"></div>
 <p>Connect and inspect your Shimano display. Session authentication is experimental and performs no configuration or firmware changes.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
@@ -653,6 +653,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
+$('build').textContent = `Build ${BUILD} · session setup experiment`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>
