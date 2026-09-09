@@ -354,12 +354,19 @@ END HANDOFF NOTES
 <input id="firmwareFiles" type="file" accept=".dat" multiple aria-label="Select D and M firmware files" />
 <div id="firmwareStatus" role="status">Choose both files from the same package.</div>
 </details>
+<details class="card"><summary>Bootloader entry/exit experiment</summary>
+<p>This temporarily enters update mode, reads bootloader information, then requests reset. Entry and exit on this bike are not yet verified. The probe cannot send erase commands or firmware images.</p>
+<p>Load the private probe profile, then connect, authenticate the session, read compatibility, and authenticate the motor. After the test, turn the bike off and on, reconnect and read compatibility again to check the original configuration.</p>
+<input id="bootProfileFile" type="file" accept=".bin" aria-label="Private bootloader probe profile" />
+<div class="row"><button id="bootProbe" disabled>Test bootloader entry and exit</button></div>
+<div id="bootProbeStatus" role="status">A private probe profile is required. It is used locally and not saved.</div>
+</details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.39';
+const BUILD = '2026-09-09.40';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1099,7 +1106,8 @@ async function transferDFirmware({data, write, subscribe, signal}) {
 }
 // n1 sends RESET without a protocol-result wait. ATT completion only confirms
 // delivery at the transport layer; reconnect/version checks must prove reboot.
-// A paired coordinator must call this only after both components finish.
+// After image transfer, reset is allowed only after both components finish.
+// The entry-only probe instead requires loader identity and blocks all image writes.
 async function requestDFirmwareReset({write, signal}) {
   await firmwareDataWrite(write, Uint8Array.of(0x88, 0x28, 0, 0, 0), signal);
   return {state: 'reset-write-completed', rebootVerified: false, firmwareVerified: false, installable: false};
@@ -1345,6 +1353,70 @@ async function verifyFirmwareAfterReconnect({expected, previousConnection, conne
     // A new BLE session alone does not prove a power cycle or persistence.
     reconnectObserved:true, powerCycleVerified:false, persistenceVerified:false, installable:false};
 }
+
+// Restricted transport for an entry/read/reset experiment, never an updater.
+function createBootloaderProbeWriter(characteristics, credentials, signal) {
+  if (!(credentials instanceof Uint8Array) || credentials.length !== 15) throw new Error('Invalid probe profile');
+  const signatures = new Set();
+  const key = (name,p) => name + ':' + Array.from(p).join(',');
+  const allow = (name,p) => signatures.add(key(name,p));
+  for (const p of [[4],[6,0],[6,31],[3,0],[3,32],[3,96]]) allow('2afa',p);
+  for (let selector=0;selector<32;selector++) allow('2afa',[3,64|selector]);
+  for (const name of ['2afa','2afe']) {
+    const first = name === '2afa' ? 19 : 0;
+    allow(name,[first,50,32,1]);allow(name,[first,240,0,65,0,0,0]);
+  }
+  for (const p of [[0,1,28,0],[0,1,60,0],[0,1,132,0],[0,1,132,1],[0,22,172,1]]) allow('2afe',p);
+  for (let n=1;n<=5;n++) allow('2afa',[136,n,...credentials.slice((n-1)*3,n*3)]);
+  for (const command of [46,47,48,41,42]) allow('2afa',[136,command,0,0,0]);
+  const writer = createFirmwareGattWriter(characteristics,signal);
+  let resetAllowed=false, closed=false;
+  return {
+    async write(name,p) {
+      if (closed || !(p instanceof Uint8Array) ||
+          !signatures.has(key(name,p)) && !(resetAllowed && key(name,p) === '2afa:136,40,0,0,0'))
+        throw new Error('Probe blocked a command outside entry/read/reset scope');
+      await writer.write(name,p);
+    },
+    allowReset() { resetAllowed=true; },
+    close() { closed=true;signatures.clear();writer.close(); }
+  };
+}
+async function probeBootloaderRoundTrip({characteristics,subscribe,signal,credentials,identitySalt,onBaseline,onStage}) {
+  if (!(credentials instanceof Uint8Array)||credentials.length!==15) throw new Error('Invalid probe profile');
+  const profile=credentials.slice();
+  const writer=createBootloaderProbeWriter(characteristics,profile,signal);
+  const transport={write:writer.write,subscribe,signal};
+  let stage='baseline',resetRequested=false;
+  const advance=name=>{stage=name;onStage?.(name);};
+  try {
+    advance('baseline');
+    const baseline=await readFirmwareBaseline({...transport,identitySalt});
+    if (baseline.dVersion!=='4.5.0.0'||baseline.mVersion!=='4.4.8.0'||baseline.destination!==0)
+      throw new Error('Probe baseline differs from the verified original EU pair');
+    onBaseline?.(baseline);
+    advance('M-update-entry');
+    const mEntry=await enterFirmwareUpdateSession(transport);
+    await selectMFirmwareSlot(transport);
+    advance('M-bootloader-version');
+    const mBoot=await queryMBootloaderVersion({...transport,targetSelector:mEntry.targetSelector});
+    advance('D-update-entry');
+    const dEntry=await enterFirmwareUpdateSession(transport);
+    advance('D-bootloader-entry');
+    await enterDBootloader({...transport,...dEntry,credentials:profile});
+    advance('D-bootloader-identity');
+    const dBoot=await queryDBootloaderIdentity({...transport,write:p=>writer.write('2afa',p)});
+    if(dBoot.family!==34||dBoot.unit!==0) throw new Error('Unexpected D bootloader family/unit');
+    advance('reset-request');
+    writer.allowReset();resetRequested=true;
+    await requestDFirmwareReset({write:p=>writer.write('2afa',p),signal});
+    return {state:'probe-reset-requested',mBootloaderVersion:mBoot.version,family:dBoot.family,unit:dBoot.unit,
+      resetRequested,firmwareDataSent:false,rebootVerified:false};
+  } catch(cause) {
+    const error=new Error(`Bootloader probe stopped during ${stage}; reconnect and verify the original pair`);
+    Object.assign(error,{stage,resetRequested,firmwareDataSent:false});throw error;
+  } finally {writer.close();profile.fill(0);}
+}
 // END FIRMWARE FILE CHECKS
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
@@ -1381,6 +1453,8 @@ function controls() {
   $('setUS').disabled = busy || !connected || !canSetUS(session);
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || !connected || session?.authenticated;
+  $('bootProfileFile').disabled = busy;
+  $('bootProbe').disabled = busy || !connected || !session?.motorAuthenticated || !session?.motorEligible || !bootProfile || session?.bootProbeAttempted || !!(probeRecord && !probeRecord.verified);
 }
 function protectedStatus(message, css = '') {
   $('protected').textContent = message;
@@ -1466,7 +1540,7 @@ async function connect() {
       filters: [{namePrefix: 'SCE'}, {services: [SERVICE_18FF]}],
       optionalServices: [SERVICE_18FF]
     });
-    s = {device, chars: {}, controller: new AbortController(), authenticated: false};
+    s = {device, chars: {}, controller: new AbortController(), authenticated: false, probeToken: crypto.randomUUID()};
     session = s;
     device.addEventListener('gattserverdisconnected', () => resetSession(s), {once: true});
     // Keep device identifiers out of copied and persisted logs.
@@ -1863,6 +1937,7 @@ async function identifyDrive() {
       : regionReadiness(model, firmware, destination);
     $('regionStatus').textContent = readiness;
     log(readiness);
+    await verifyPendingBootloaderProbe(s);
   } catch (e) {
     if (session === s) {
       log(`Information batch stopped: ${e.message}. Reconnect before retrying.`);
@@ -2139,6 +2214,79 @@ $('clearLog').onclick = () => {
   try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
   $('exportStatus').textContent = 'Log cleared.';
 };
+
+const BOOT_PROFILE_HASH = '8c41e5118b85b15506a01bbf1934f8ee9c7d8d058d1f595d52b4ec404186ba6a';
+const PROBE_RECORD_KEY = 'shimano-probe-readback-v1';
+let bootProfile = null, bootProfileGeneration = 0, probeRecord = null;
+try {
+  const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)||'null');
+  if(record?.version===1 && /^[a-f0-9]{32}$/.test(record.salt) && typeof record.connection==='string' && record.expected) probeRecord=record;
+} catch {}
+function saveProbeRecord() { try {sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(probeRecord));} catch {} }
+function probeSubscription(s) {
+  return fn=>{
+    assertCurrent(s);
+    const listeners=[];
+    for(const short of ['2af9','2afb','2afd']) {
+      const ch=s.chars[short];
+      const receive=ev=>{if(session===s) fn(bytes(ev.target.value).slice());};
+      ch.addEventListener('characteristicvaluechanged',receive);listeners.push([ch,receive]);
+    }
+    return ()=>{for(const [ch,receive]of listeners)ch.removeEventListener('characteristicvaluechanged',receive);};
+  };
+}
+async function verifyPendingBootloaderProbe(s) {
+  if(!probeRecord || probeRecord.verified || probeRecord.connection===s.probeToken) return;
+  const record=probeRecord;
+  const salt=Uint8Array.from(record.salt.match(/../g),x=>parseInt(x,16));
+  const writer=createFirmwareGattWriter(s.chars,s.controller.signal);
+  try {
+    log('Checking original motor identity, native firmware and region after the probe.');
+    const result=await verifyFirmwareAfterReconnect({expected:record.expected,previousConnection:record.connection,connection:s.probeToken,
+      identitySalt:salt,write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal});
+    assertCurrent(s);
+    record.verified=result.state==='reconnected-readback-matches';saveProbeRecord();
+    const message=`Post-probe readback: same motor ${result.identityMatches?'yes':'NO'}; D ${result.dVersion}; M ${result.mVersion}; region ${regionName(result.destination)}; original configuration ${record.verified?'matches':'DOES NOT MATCH'}.`;
+    log(message);$('bootProbeStatus').textContent=message;
+  } finally {writer.close();salt.fill(0);}
+}
+async function runBootloaderProbe() {
+  if(busy || !bootProfile || !session?.motorAuthenticated || !session.motorEligible || session.bootProbeAttempted || probeRecord&&!probeRecord.verified) return;
+  const s=session,profile=bootProfile.slice(),salt=crypto.getRandomValues(new Uint8Array(16));
+  bootProfile.fill(0);bootProfile=null;$('bootProfileFile').value='';
+  s.bootProbeAttempted=true;busy=true;controls();
+  log('Bootloader entry/exit probe started. Firmware erase and data commands are blocked.');
+  try {
+    const result=await probeBootloaderRoundTrip({characteristics:s.chars,subscribe:probeSubscription(s),signal:s.controller.signal,credentials:profile,identitySalt:salt,
+      onBaseline(baseline){probeRecord={version:1,connection:s.probeToken,salt:hex(salt).replaceAll(' ','').toLowerCase(),expected:baseline,verified:false};saveProbeRecord();},
+      onStage(stage){log(`Bootloader probe stage: ${stage}`);$('bootProbeStatus').textContent=stage;}});
+    log(`Bootloader information: M loader ${result.mBootloaderVersion.join('.')}; D family ${result.family}, unit ${result.unit}. Reset write completed; reboot not yet verified.`);
+  } catch(error) {
+    log(`Bootloader probe stopped at ${error.stage||'initialization'}. Reset requested: ${error.resetRequested?'yes':'no'}. Firmware images were not sent.`);
+  } finally {
+    profile.fill(0);salt.fill(0);
+    $('bootProbeStatus').textContent='Turn the bike off and on. Reconnect, authenticate the session and read compatibility to verify the original configuration. Copy the log afterward.';
+    if(session===s) disconnect();
+    busy=false;controls();
+  }
+}
+$('bootProfileFile').onchange=async()=>{
+  const generation=++bootProfileGeneration;
+  bootProfile?.fill(0);bootProfile=null;controls();
+  const file=$('bootProfileFile').files[0];
+  let data;
+  try {
+    if(!file||file.size!==15) throw new Error('Expected the supplied 15-byte probe profile');
+    data=new Uint8Array(await file.arrayBuffer());
+    const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',data));
+    if(hex(digest).replaceAll(' ','').toLowerCase()!==BOOT_PROFILE_HASH) throw new Error('Profile does not match the reviewed source');
+    if(generation!==bootProfileGeneration)return;
+    bootProfile=data;data=null;$('bootProbeStatus').textContent='Profile loaded locally. Complete session and motor authentication to run the probe.';
+  } catch(error) {if(generation===bootProfileGeneration)$('bootProbeStatus').textContent=error.message;}
+  finally {data?.fill(0);controls();}
+};
+$('bootProbe').onclick=runBootloaderProbe;
+
 let firmwareCheckGeneration = 0;
 $('firmwareFiles').onchange = async () => {
   const generation = ++firmwareCheckGeneration;

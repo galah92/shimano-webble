@@ -1992,3 +1992,27 @@ next IC read. Matching readback is not a power-cycle test: both
 powerCycleVerified and persistenceVerified remain false. The eventual UX
 must acquire fresh sessions and separately establish restart/persistence.
 This implements comparison logic without claiming a live installation result.
+
+
+### Build .40: bounded live entry/exit probe
+
+The next live boundary is bootloader entry and exit without any image transfer.
+The probe composes the existing source-derived ordinary E5000 update entry,
+M slot selection/version read, fresh D entry, FIRMUP exchange and loader identity
+reads. It requests the existing n1 RESET only after loader family 34/unit 0.
+This use of reset without an image transfer is an experiment, not previously
+observed live behavior. Failure does not trigger speculative cleanup packets.
+
+Before entry, five fresh reads require the original native D4.5.0.0/M4.4.8.0,
+EU0 and family34/unit0 and save a salted application-serial fingerprint. A
+strict logical-packet allowlist excludes all protocol0B commands, D erase,
+start, address, finish, serial programming, and destination writes. Loader
+serial representation is not assumed equivalent to application serial; the
+post-reconnect check compares application serial fingerprints only.
+
+Simulation covers 38 physical writes, failure before/after each native write,
+abort at each write, missing replies at each phase, wrong identity/baseline,
+reset gating, and forbidden commands. Browser tests cover profile validation
+and pending verification across reload. Existing paired-wire and readback
+regressions also pass. These results establish software behavior, not live
+bootloader entry, reset, recovery, firmware compatibility, or US persistence.

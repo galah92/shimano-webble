@@ -2,7 +2,7 @@
 
 A single-file Web Bluetooth diagnostic and experimental session-authentication
 console for Shimano STEPS. The experimental US-destination setter is currently disabled.
-No firmware changes are implemented.
+Firmware transfer code is tested offline; the page does not expose firmware flashing.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
@@ -36,7 +36,7 @@ APK's direct-region gate routes that combination through preparation; 4.3.0
 is the concrete preparation lead under investigation. Builds .15 and .16 both
 received AB/3A rejection after motor authentication. The .15 reconnect confirmed EU;
 the .16 pre-write read also reported EU. Build .17 disables direct writes,
-including after successful authentication. No firmware transfer is implemented.
+including after successful authentication. Firmware transfer remains unavailable in the UI.
 The US-region goal remains incomplete.
 
 Build .16 returned seven zero model-descriptor bytes. Together with series 22
@@ -350,3 +350,29 @@ mismatches and every read failure through the GATT adapter. The caller must
 supply actual connection lifecycle tokens and the same private identity salt.
 Matching readback does not establish power-cycle persistence; that remains
 an explicit live verification requirement.
+
+## Bootloader entry/exit probe (build .40)
+
+This is an experimental entry/read/reset test, not a firmware update. It requires
+the privately supplied 15-byte probe profile; no paid account is needed.
+
+1. Download the supplied profile to the phone. Open **Bootloader entry/exit experiment** and select it.
+2. Connect, authenticate the session, read region and compatibility, then authenticate the motor.
+3. Tap **Test bootloader entry and exit** once. Keep Chrome foregrounded.
+4. After it ends, turn the bike off and on. Reconnect, authenticate the session, and read region and compatibility.
+5. Copy the log. The page checks the same motor identity, native D 4.5.0.0 / M 4.4.8.0, and EU destination against the pre-probe baseline.
+
+Entry and reset have not yet been verified on the bike. The transport permits
+only the reviewed entry, information-read, and gated reset packets; it rejects
+erase, image transfer, and region-write packets. A failure stops the sequence.
+Reset ATT completion does not prove reboot or recovery from interrupted flashing.
+
+The profile stays in memory and is consumed by the attempt. The same tab stores
+a salted motor fingerprint and original configuration for reconnect comparison;
+it does not save the raw serial or profile. A new BLE connection alone does not
+prove a physical power cycle or configuration persistence.
+
+Tests: `node tests/bootloader_probe.cjs` exercises the complete physical GATT
+sequence, all write failures/aborts, response timeouts, baseline/identity gates,
+and forbidden commands. `python tests/bootloader_probe_ui.py` checks profile
+validation, UI gates, one-attempt consumption, and reconnect verification wiring.
