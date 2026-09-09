@@ -692,3 +692,35 @@ setter; rejection or unchanged readback leaves preparation unresolved. No
 firmware operation, other destination value, factory-slot setter or speed
 setter is available. Persistence requires a later read after a user-confirmed
 bike power cycle. No software-only test can establish the actual speed outcome.
+
+## Build .15 live result: authenticated destination write rejected
+
+The user's first 2026-09-09 session completed motor authentication at
+08:54:13.067 UTC. A fresh AC 01 read at 08:54:15.660 still returned
+`00 16 AE 01 00`. The app then sent exactly one `00 16 A8 01 01`.
+ATT completed, followed by `00 16 AB 3A 00` at 08:54:15.731; the app
+reported rejection and disconnected. There was no AA acknowledgement and no
+US readback.
+
+The user then reconnected and ran the information batch without a destination
+setter. At 08:54:58.974, AC 01 again returned `00 16 AE 01 00`. Factory
+slot 0 also remained 0. This independently confirms EU after reconnect.
+A physical power cycle was not stated and is not inferred from the log.
+This is a rejected-change result, not evidence that a successful US change
+was lost during a restart.
+
+Conclusion: the exact build .15 sequence, including successful motor auth,
+is insufficient to set US on the reported E50X0 / 4.5.0. Error 3A alone
+does not distinguish a firmware restriction from another missing protocol
+state. It is not the 46 authentication-lock error, so the E8 lock-recovery
+path has no supporting trigger here. Repeating the unchanged setter would
+not test a new hypothesis. No downgrade has occurred.
+
+Preparation follow-up: the explicit `Ju(Ih.n, 0, "4.3.0")` candidate remains
+the source-grounded lead. A debug instruction dump of `W2.a` confirms a POST
+through `Ik.w`, an output cache file, and acceptance only for a 2xx response
+with a nonempty file. `C0791y2.D` then supplies that file and selected family
+to `Oa.s`. This is a downloaded asset workflow, not evidence of one additional
+BLE unlock command. The downloaded contents, whether stock or modified, exact
+hardware compatibility, transfer protocol and recovery path remain unverified.
+No request using extracted app credentials, asset download or flash was made.

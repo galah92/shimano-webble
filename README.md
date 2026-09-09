@@ -108,6 +108,12 @@ the three DA challenge fragments and E2 FF FF completion after the third E0.
 
 ## US destination experiment (build .15)
 
+**Live result:** this exact experiment was rejected with `AB 3A` after
+successful motor authentication. A separate connection read EU (0) again.
+Do not repeat the same write sequence; the next investigation is the app's
+preparation workflow. Firmware 4.3.0 is a candidate from its source, not a
+verified downgrade prescription.
+
 After session authentication, the information batch, and motor authentication,
 **Set region to US** becomes available only for the observed E50X0 / 4.5.0
 with EU readback. Tapping it attempts a persistent OEM destination change.
