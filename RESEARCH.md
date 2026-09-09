@@ -2145,3 +2145,29 @@ physical writes and timing, and reject nonboolean flags before any write.
 The existing full entry/exit probe tests still pass. This implements one
 source-supported recovery primitive, not an interrupted-transfer recovery
 workflow or permission to flash.
+
+### Build .47: dedicated D recovery entry, not paired restart
+
+Further source tracing changes the recovery design: Th.v3's recovery flag
+branches to static Th.d3 for non-EP models and returns before the ordinary
+M/D worker selection. d3 sets C0041b7.b=true and calls x1 with the D file,
+mode32, selector0, and no special session resource. Thus the p3 flag modeled
+in .46 is not itself the complete recovery-install route.
+
+C0041b7.w1 invokes t1 then o1; o1 selects v1 when b is true. v1 waits100ms,
+selects slot0, acknowledges FIRMUP stages1-4, sends stage5 without a result
+wait, waits150ms, then acknowledges stage5. It does not use the ordinary
+four priming writes or second mode change. Recovery slot0 accepts status1
+as well as0/absent (r1 -> Z6 variant2). The original source retries up to
+three times; our primitive deliberately makes one bounded attempt and stops
+on uncertain delivery.
+
+enterDBootloader now models this explicit recoveryInstall branch only for
+mode32/selector0. Nine physical writes and1250ms fixed delays are tested,
+including failure and abort at every write, missing replies, invalid modes,
+invalid flags and slot rejection. Existing ordinary entry and full probe
+tests pass. No live caller selects recovery; no erase/image/region command
+was added to the probe. The source D-only path does not establish recovery
+from an interrupted M transfer or compatibility of a mixed native pair.
+Those cases, same-motor identity and durable transaction tracking remain
+requirements before exposing firmware preparation.
