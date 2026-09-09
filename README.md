@@ -301,3 +301,9 @@ than contain it anywhere. Tests cover the five-query order, six-byte serial
 assembly, truncated replies and incompatible family/unit fields. Run
 `node tests/d_bootloader_identity.cjs`. Bootloader entry, serial-dependent
 setup and paired recovery are still required before a firmware test.
+
+Build .33 joins D identity reads, image checks, serial-dependent setup, data
+transfer and finish. Mismatches stop before setup; any failed exchange stops
+the sequence. `node tests/d_component_workflow.cjs` covers the combined
+operation and failure at every write. The operation does not enter the
+bootloader, reset or recover a failed paired update, and has no UI caller.

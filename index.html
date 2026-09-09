@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.32';
+const BUILD = '2026-09-09.33';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -857,12 +857,14 @@ function sendDFirmwareCommand({write, subscribe, signal, payload}) {
   if (payload.length !== 4 || !Array.from(payload).every(b => Number.isInteger(b) && b >= 0 && b <= 255))
     throw new Error('Expected four unsigned D command bytes');
   const command = Uint8Array.from(payload);
-  if (![0x21, 0x0a, 0x24, 0x27].includes(command[0])) throw new Error('Unsupported D setup command');
+  if (![6, 7, 8, 9, 0x21, 0x0a, 0x24, 0x27].includes(command[0])) throw new Error('Unsupported D setup command');
   const address = command[1] | (command[2] << 8) | (command[3] << 16);
   if (command[0] === 0x21 && (command[1] !== 0 || command[2] > 95 || command[3] !== 0) ||
       command[0] === 0x0a && (command[1] > 2 || command[2] !== 0 || command[3] !== 0) ||
       command[0] === 0x24 && (address < 0x4000 || address > 0x33fc0 || address % 64) ||
-      command[0] === 0x27 && (command[2] !== 0 || command[3] !== 0))
+      command[0] === 0x27 && (command[2] !== 0 || command[3] !== 0) ||
+      command[0] === 6 && (command[1] !== 34 || command[2] !== 0 || command[3] !== 0) ||
+      [7, 8, 9].includes(command[0]) && command[3] !== 0)
     throw new Error('D setup parameters outside modeled address range');
   let match = null, closed = false;
   const status = () => ({state: !match ? 'waiting' : match.result === 49 ? 'evidence-complete' : 'failed',
@@ -874,7 +876,7 @@ function sendDFirmwareCommand({write, subscribe, signal, payload}) {
   };
   // Source Hn.i0/I uses 2AFA [88, payload]. No retries: late replies lack a command ID.
   return runFirmwareExchange({write, subscribe, signal, packet: Uint8Array.of(0x88, ...command), evidence,
-    replyTimeoutMs: command[0] === 0x21 ? 40000 : command[0] === 0x27 ? 3000 : 1200});
+    replyTimeoutMs: command[0] === 0x21 ? 40000 : [6, 7, 8, 9, 0x27].includes(command[0]) ? 3000 : 1200});
 }
 // END D FIRMWARE COMMANDS
 
@@ -969,6 +971,35 @@ function checkDBootloaderImage(data, identity) {
     imageVersion: header.version, installable: false};
 }
 // END D BOOTLOADER IDENTITY
+
+// BEGIN D COMPONENT WORKFLOW
+async function setupDFirmwareIdentity({identity, write, subscribe, signal}) {
+  if (!identity || identity.family !== 34 || identity.unit !== 0 ||
+      !(identity.serial instanceof Uint8Array) || identity.serial.length !== 6)
+    throw new Error('Expected complete E5000 bootloader identity');
+  const serial = identity.serial.slice();
+  // A1/H1: unit, then three serial pairs; each requires a protocol result.
+  const commands = [[6, 34, 0, 0], [7, serial[0], serial[1], 0],
+    [8, serial[2], serial[3], 0], [9, serial[4], serial[5], 0]];
+  for (const payload of commands) await sendDFirmwareCommand({write, subscribe, signal, payload});
+  return {state: 'D-identity-setup-complete', installable: false};
+}
+// Bootloader entry and paired hash/compatibility validation must precede this
+// operation. It owns a snapshot and verifies identity before setup/data writes.
+// No UI caller; no automatic reset, resume or rollback.
+async function transferDComponent({data, write, subscribe, signal}) {
+  firmwareBlock(data, 'D', 0, 0);
+  if (firmwareHeader(data).component !== 'D') throw new Error('Expected a D image');
+  const image = Uint8Array.from(data);
+  const transport = {write, subscribe, signal};
+  const identity = await queryDBootloaderIdentity(transport);
+  const check = checkDBootloaderImage(image, identity);
+  await setupDFirmwareIdentity({...transport, identity});
+  const result = await transferDFirmware({...transport, data: image});
+  // Do not expose serial in a result intended for logging.
+  return {...result, family: check.family, unit: check.unit, imageVersion: check.imageVersion};
+}
+// END D COMPONENT WORKFLOW
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.

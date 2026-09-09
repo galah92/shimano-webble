@@ -1733,3 +1733,24 @@ bounded parsing policy, not exact reproduction of the loose source matcher;
 live bootloader framing still needs validation before use. Synthetic tests
 cover packet ordering, matching/nonmatching prefixes, truncated identity/serial
 fields, ATT failure stops, and compatible/incompatible image fields.
+
+## D serial setup and component workflow
+
+C0041b7.A1 first sends K1(06,family,unit), then K1(07,serial0,serial1),
+K1(08,serial2,serial3), K1(09,serial4,serial5). Each K1 yields four bytes
+with a zero final byte. A1 uses H1, which sends protocol88 via i0, waits
+3000 ms with X6/F1, then checks R1 for31 success/32 rejection. H1 does
+not contain a retry loop. X6's branches both delegate to F1, so the existing
+raw-instruction-corrected matcher applies to these commands as well.
+
+Ih.L rechecked for E5000: family34 and unit0 are required. The joined
+browser component operation validates/snapshots the D image, reads the
+bootloader identity, checks those fields, performs all four acknowledged
+setup commands, and invokes the reviewed setup/data/finish path. It returns
+no serial in its summary and never resets. Tests use a synthetic D header
+and cover mismatch stops before setup, short/invalid files before any writes,
+source command ordering, input mutation and failure at every one of the
+21 writes in a 256-byte scenario. Command tests cover the four new bounds
+and 3000-ms deadlines. No live setup or transfer has occurred. Bootloader
+entry, paired asset authorization/validation, handover and recovery remain
+preconditions for an eventual user-facing updater.
