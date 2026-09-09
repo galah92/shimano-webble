@@ -1590,3 +1590,31 @@ block aliasing problem and establishes the command filter needed next.
 App build remains .25; no extra bike test or deploy is required for this
 offline source correction. The next change can implement the protocol-88
 command exchange using the corrected predicate and the tested query lifecycle.
+
+## Build .26: protocol-88 setup command exchange
+
+Ported the corrected F1 predicate and Hn.E candidate ordering to the app,
+sharing the Hn.J decoder with the existing envelope parser. Browser matching
+agrees with all 108 offline raw-instruction-corrected fixtures. Indexed block
+results are rejected as setup-command replies.
+
+The unwired `sendDFirmwareCommand` accepts only the reviewed four-byte start,
+bank and address commands, with modeled page/bank/alignment bounds. It sends
+2AFA-style bytes [88, command payload] through a caller-supplied transport,
+registering its listener first. The reply deadline begins after ATT succeeds:
+40 seconds for start, 1.2 seconds for bank/address. As with data queries,
+an eight-second application ATT bound prevents an unresolved write from
+hanging indefinitely. It is not a source retry signal.
+
+A received 31 00 00 is first-match success evidence; 32 00 00 rejects. Neither
+contains a command identifier, and the returned evidence explicitly reports
+commandCorrelated=false and installable=false. Automatic command retries are
+not enabled; the source's retry behavior is not sufficient to establish
+freshness after an uncertain WebBLE operation. The page UI never calls this
+exchange and does not enter the bootloader or send firmware.
+
+Tests cover the 108 matcher cases, command bounds, immediate buffered RX,
+ATT failure after RX, both reply deadlines starting after a slow ATT, rejection,
+ignored indexed results, stalled ATT, late completion, abort and no retries.
+M/D query, M worker, envelope, file-check and Chromium startup regressions pass.
+Next: D setup/data orchestration, then paired M/D handover and recovery.

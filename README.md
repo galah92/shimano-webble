@@ -252,3 +252,8 @@ Protocol-88 research now establishes the 2AFA command mapping and a command
 reply filter checked against raw APK instructions. The readable decompiler
 inverted one condition; offline fixtures now cover the corrected behavior.
 This is preparation for the command worker, not live firmware validation.
+
+Build .26 adds the protocol-88 setup command exchange with corrected reply
+matching, parameter bounds and command-specific deadlines. It passes the
+108 matcher fixtures and timing/failure tests. It remains disconnected from
+bike controls; paired transfer and recovery are not yet ready for a motor test.

@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.25';
+const BUILD = '2026-09-09.26';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -416,19 +416,24 @@ function firmwareEnvelopes(raw) {
   };
   add(raw, 'raw');
   if (raw.length > 1 && raw[0] === 0) add(raw.slice(1), 'leading-zero');
-  if (raw.length < 3) return candidates;
+  const decoded = firmwareDecodedFrame(raw);
+  if (decoded) add(decoded, 'escaped-checksum');
+  return candidates;
+}
+function firmwareDecodedFrame(raw) {
+  if (raw.length < 3) return null;
   const frame = raw[0] === 0 && raw.length > 3 ? raw.slice(1) : raw;
-  if (frame[frame.length - 1] !== 0xbb) return candidates;
+  if (frame[frame.length - 1] !== 0xbb) return null;
   const decoded = [];
   for (let i = frame[0] === 0xbb ? 1 : 0; i < frame.length - 1; i++) {
     let byte = frame[i];
     if (byte === 0xbd && i + 1 < frame.length - 1) byte = frame[++i] ^ 0x20;
     decoded.push(byte);
   }
-  if (decoded.length >= 2 && ((firmwareSum(decoded.slice(0, -1)) + 1) & 255) === decoded[decoded.length - 1])
-    add(Uint8Array.from(decoded.slice(0, -1)), 'escaped-checksum');
-  return candidates;
+  return decoded.length >= 2 && ((firmwareSum(decoded.slice(0, -1)) + 1) & 255) === decoded[decoded.length - 1]
+    ? Uint8Array.from(decoded.slice(0, -1)) : null;
 }
+
 function mFirmwareEvents(protocol, payload, querySequence, dataSequence, checkpoint) {
   if (![protocol, querySequence, dataSequence].every(v => Number.isInteger(v) && v >= 0 && v <= 255))
     throw new Error('Expected unsigned protocol and sequence bytes');
@@ -499,7 +504,10 @@ async function queryMFirmwareBlock({write, subscribe, signal, querySequence, dat
   const evidence = mFirmwareReplyWindow(querySequence, dataSequence, checkpoint);
   return runFirmwareQuery({write, subscribe, signal, querySequence, dataSequence, evidence, replyTimeoutMs: 3000});
 }
-async function runFirmwareQuery({write, subscribe, signal, querySequence, dataSequence, evidence, replyTimeoutMs}) {
+function runFirmwareQuery({querySequence, dataSequence, ...options}) {
+  return runFirmwareExchange({...options, packet: Uint8Array.of(0x0b, querySequence, 3, dataSequence)});
+}
+async function runFirmwareExchange({write, subscribe, signal, packet, evidence, replyTimeoutMs}) {
   if (signal?.aborted) throw new Error('Firmware query aborted');
   return new Promise((resolve, reject) => {
     let settled = false, writeCompleted = false, unsubscribe = null;
@@ -538,7 +546,7 @@ async function runFirmwareQuery({write, subscribe, signal, querySequence, dataSe
       if (signal?.aborted) { abort(); return; }
       // Application bound for an ATT promise that never settles; not a retry trigger.
       writeTimer = setTimeout(() => finish(new Error('Firmware query ATT write timed out; reconnect before another attempt')), 8000);
-      Promise.resolve(write(Uint8Array.of(0x0b, querySequence, 3, dataSequence))).then(() => {
+      Promise.resolve(write(packet)).then(() => {
         if (settled) return;
         writeCompleted = true;
         clearTimeout(writeTimer);
@@ -671,6 +679,55 @@ function dFirmwareAddressPlan(length, blockIndex) {
     reposition: [setAddress, selectBank], installable: false};
 }
 // END D FIRMWARE QUERY
+
+// BEGIN D FIRMWARE COMMANDS
+// F1 predicate verified against raw instructions, not the inverted JADX expression.
+function dFirmwareCommandMatch(raw) {
+  const candidates = raw.length ? [raw] : [];
+  if (raw.length > 1 && raw[0] === 0) candidates.push(raw.slice(1));
+  for (const {protocol, payload} of firmwareEnvelopes(raw)) {
+    candidates.push(payload);
+    if (payload.length > 1 && payload[0] === 0) candidates.push(payload.slice(1));
+    candidates.push(Uint8Array.of(protocol, ...payload));
+  }
+  const decoded = firmwareDecodedFrame(raw);
+  if (decoded) candidates.push(decoded.slice(1), decoded);
+  for (const data of candidates) {
+    const result = b => b === 49 || b === 50;
+    let offset = -1;
+    if (result(data[0])) offset = 0;
+    else if (data.length >= 4 && (data[0] & 136) === 136 && result(data[1])) offset = 1;
+    else if (data.length >= 5 && data[0] === 0 && (data[1] & 136) === 136 && result(data[2])) offset = 2;
+    if (offset >= 0 && data.length >= offset + 3 && data[offset + 1] === 0 && data[offset + 2] === 0)
+      return {result: data[offset], payload: data.slice()};
+  }
+  return null;
+}
+function sendDFirmwareCommand({write, subscribe, signal, payload}) {
+  // Only the reviewed initial/address/bank commands are implemented here.
+  if (!Array.isArray(payload) && !(payload instanceof Uint8Array)) throw new Error('Expected D command bytes');
+  if (payload.length !== 4 || !Array.from(payload).every(b => Number.isInteger(b) && b >= 0 && b <= 255))
+    throw new Error('Expected four unsigned D command bytes');
+  const command = Uint8Array.from(payload);
+  if (![0x21, 0x0a, 0x24].includes(command[0])) throw new Error('Unsupported D setup command');
+  const address = command[1] | (command[2] << 8) | (command[3] << 16);
+  if (command[0] === 0x21 && (command[1] !== 0 || command[2] > 95 || command[3] !== 0) ||
+      command[0] === 0x0a && (command[1] > 2 || command[2] !== 0 || command[3] !== 0) ||
+      command[0] === 0x24 && (address < 0x4000 || address > 0x33fc0 || address % 64))
+    throw new Error('D setup parameters outside modeled address range');
+  let match = null, closed = false;
+  const status = () => ({state: !match ? 'waiting' : match.result === 49 ? 'evidence-complete' : 'failed',
+    error: match?.result === 50 ? 'D setup command rejected' : null,
+    result: match?.result ?? null, commandCorrelated: false, installable: false});
+  const evidence = {
+    receive(raw) { if (!closed && !match) match = dFirmwareCommandMatch(raw); return status(); },
+    close() { closed = true; return status(); }, status,
+  };
+  // Source Hn.i0/I uses 2AFA [88, payload]. No retries: late replies lack a command ID.
+  return runFirmwareExchange({write, subscribe, signal, packet: Uint8Array.of(0x88, ...command), evidence,
+    replyTimeoutMs: command[0] === 0x21 ? 40000 : 1200});
+}
+// END D FIRMWARE COMMANDS
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.
