@@ -247,3 +247,8 @@ Build .25 adds the timed D query and a source-derived address/bank command plan.
 M and D share listener/timeout cleanup while retaining different reply rules.
 Offline timing, correlation and bank-boundary tests pass. Actual bootloader
 command transport, D data transfer and paired recovery remain unfinished.
+
+Protocol-88 research now establishes the 2AFA command mapping and a command
+reply filter checked against raw APK instructions. The readable decompiler
+inverted one condition; offline fixtures now cover the corrected behavior.
+This is preparation for the command worker, not live firmware validation.

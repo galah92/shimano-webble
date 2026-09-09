@@ -1,0 +1,434 @@
+[
+  {
+    "raw": "31",
+    "match": null
+  },
+  {
+    "raw": "bb3132bb",
+    "match": null
+  },
+  {
+    "raw": "8831",
+    "match": null
+  },
+  {
+    "raw": "bb8831babb",
+    "match": null
+  },
+  {
+    "raw": "008831",
+    "match": null
+  },
+  {
+    "raw": "bb008831babb",
+    "match": null
+  },
+  {
+    "raw": "3100",
+    "match": null
+  },
+  {
+    "raw": "bb310032bb",
+    "match": null
+  },
+  {
+    "raw": "883100",
+    "match": null
+  },
+  {
+    "raw": "bb883100babb",
+    "match": null
+  },
+  {
+    "raw": "00883100",
+    "match": null
+  },
+  {
+    "raw": "bb00883100babb",
+    "match": null
+  },
+  {
+    "raw": "310000",
+    "match": "310000"
+  },
+  {
+    "raw": "bb31000032bb",
+    "match": "bb31000032bb"
+  },
+  {
+    "raw": "88310000",
+    "match": "88310000"
+  },
+  {
+    "raw": "bb88310000babb",
+    "match": "88310000babb"
+  },
+  {
+    "raw": "0088310000",
+    "match": "0088310000"
+  },
+  {
+    "raw": "bb0088310000babb",
+    "match": "0088310000babb"
+  },
+  {
+    "raw": "310100",
+    "match": null
+  },
+  {
+    "raw": "bb31010033bb",
+    "match": null
+  },
+  {
+    "raw": "88310100",
+    "match": null
+  },
+  {
+    "raw": "bb88310100bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "0088310100",
+    "match": null
+  },
+  {
+    "raw": "bb0088310100bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "310001",
+    "match": null
+  },
+  {
+    "raw": "bb31000133bb",
+    "match": null
+  },
+  {
+    "raw": "88310001",
+    "match": null
+  },
+  {
+    "raw": "bb88310001bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "0088310001",
+    "match": null
+  },
+  {
+    "raw": "bb0088310001bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "31ffff",
+    "match": null
+  },
+  {
+    "raw": "bb31ffff30bb",
+    "match": null
+  },
+  {
+    "raw": "8831ffff",
+    "match": null
+  },
+  {
+    "raw": "bb8831ffffb8bb",
+    "match": null
+  },
+  {
+    "raw": "008831ffff",
+    "match": null
+  },
+  {
+    "raw": "bb008831ffffb8bb",
+    "match": null
+  },
+  {
+    "raw": "32",
+    "match": null
+  },
+  {
+    "raw": "bb3233bb",
+    "match": null
+  },
+  {
+    "raw": "8832",
+    "match": null
+  },
+  {
+    "raw": "bb8832bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "008832",
+    "match": null
+  },
+  {
+    "raw": "bb008832bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "3200",
+    "match": null
+  },
+  {
+    "raw": "bb320033bb",
+    "match": null
+  },
+  {
+    "raw": "883200",
+    "match": null
+  },
+  {
+    "raw": "bb883200bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "00883200",
+    "match": null
+  },
+  {
+    "raw": "bb00883200bd9bbb",
+    "match": null
+  },
+  {
+    "raw": "320000",
+    "match": "320000"
+  },
+  {
+    "raw": "bb32000033bb",
+    "match": "bb32000033bb"
+  },
+  {
+    "raw": "88320000",
+    "match": "88320000"
+  },
+  {
+    "raw": "bb88320000bd9bbb",
+    "match": "88320000bd9bbb"
+  },
+  {
+    "raw": "0088320000",
+    "match": "0088320000"
+  },
+  {
+    "raw": "bb0088320000bd9bbb",
+    "match": "0088320000bd9bbb"
+  },
+  {
+    "raw": "320100",
+    "match": null
+  },
+  {
+    "raw": "bb32010034bb",
+    "match": null
+  },
+  {
+    "raw": "88320100",
+    "match": null
+  },
+  {
+    "raw": "bb88320100bcbb",
+    "match": null
+  },
+  {
+    "raw": "0088320100",
+    "match": null
+  },
+  {
+    "raw": "bb0088320100bcbb",
+    "match": null
+  },
+  {
+    "raw": "320001",
+    "match": null
+  },
+  {
+    "raw": "bb32000134bb",
+    "match": null
+  },
+  {
+    "raw": "88320001",
+    "match": null
+  },
+  {
+    "raw": "bb88320001bcbb",
+    "match": null
+  },
+  {
+    "raw": "0088320001",
+    "match": null
+  },
+  {
+    "raw": "bb0088320001bcbb",
+    "match": null
+  },
+  {
+    "raw": "32ffff",
+    "match": null
+  },
+  {
+    "raw": "bb32ffff31bb",
+    "match": null
+  },
+  {
+    "raw": "8832ffff",
+    "match": null
+  },
+  {
+    "raw": "bb8832ffffb9bb",
+    "match": null
+  },
+  {
+    "raw": "008832ffff",
+    "match": null
+  },
+  {
+    "raw": "bb008832ffffb9bb",
+    "match": null
+  },
+  {
+    "raw": "33",
+    "match": null
+  },
+  {
+    "raw": "bb3334bb",
+    "match": null
+  },
+  {
+    "raw": "8833",
+    "match": null
+  },
+  {
+    "raw": "bb8833bcbb",
+    "match": null
+  },
+  {
+    "raw": "008833",
+    "match": null
+  },
+  {
+    "raw": "bb008833bcbb",
+    "match": null
+  },
+  {
+    "raw": "3300",
+    "match": null
+  },
+  {
+    "raw": "bb330034bb",
+    "match": null
+  },
+  {
+    "raw": "883300",
+    "match": null
+  },
+  {
+    "raw": "bb883300bcbb",
+    "match": null
+  },
+  {
+    "raw": "00883300",
+    "match": null
+  },
+  {
+    "raw": "bb00883300bcbb",
+    "match": null
+  },
+  {
+    "raw": "330000",
+    "match": null
+  },
+  {
+    "raw": "bb33000034bb",
+    "match": null
+  },
+  {
+    "raw": "88330000",
+    "match": null
+  },
+  {
+    "raw": "bb88330000bcbb",
+    "match": null
+  },
+  {
+    "raw": "0088330000",
+    "match": null
+  },
+  {
+    "raw": "bb0088330000bcbb",
+    "match": null
+  },
+  {
+    "raw": "330100",
+    "match": null
+  },
+  {
+    "raw": "bb33010035bb",
+    "match": null
+  },
+  {
+    "raw": "88330100",
+    "match": null
+  },
+  {
+    "raw": "bb88330100bd9dbb",
+    "match": null
+  },
+  {
+    "raw": "0088330100",
+    "match": null
+  },
+  {
+    "raw": "bb0088330100bd9dbb",
+    "match": null
+  },
+  {
+    "raw": "330001",
+    "match": null
+  },
+  {
+    "raw": "bb33000135bb",
+    "match": null
+  },
+  {
+    "raw": "88330001",
+    "match": null
+  },
+  {
+    "raw": "bb88330001bd9dbb",
+    "match": null
+  },
+  {
+    "raw": "0088330001",
+    "match": null
+  },
+  {
+    "raw": "bb0088330001bd9dbb",
+    "match": null
+  },
+  {
+    "raw": "33ffff",
+    "match": null
+  },
+  {
+    "raw": "bb33ffff32bb",
+    "match": null
+  },
+  {
+    "raw": "8833ffff",
+    "match": null
+  },
+  {
+    "raw": "bb8833ffffbabb",
+    "match": null
+  },
+  {
+    "raw": "008833ffff",
+    "match": null
+  },
+  {
+    "raw": "bb008833ffffbabb",
+    "match": null
+  }
+]

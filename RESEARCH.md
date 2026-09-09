@@ -1552,3 +1552,41 @@ ATT and abort. Address-plan tests verify initialization ordering, both bank
 crossings, no spurious crossing, last modeled address and bounds. They pass
 alongside 72 Java D reply vectors, M query/worker regression tests, file checks
 and Chromium startup. The app remains unable to flash or change region.
+
+## Protocol 88 transport and command-filter correction from raw instructions
+
+Hn.i0 uses C0483on.U and Hn.I, which prepends exactly one protocol byte.
+Decoded C0483on's UUID assignment for U is
+00002afa-5348-494d-414e-4f5f424c4500. Therefore the observed source path for
+protocol 88 is 2AFA [88, four-byte command], not an application query on 2AFE.
+X1 pads command payloads shorter than four bytes; these setup commands already
+have four bytes. No actual bootloader write was performed.
+
+An important decompiler discrepancy appeared while examining X6/F1/Hn.E.
+Readable JADX F1 inverted the raw-payload condition for E5000. Recompiling
+that text initially accepted indexed 31/32 payloads and rejected 31 00 00.
+This was NOT faithful to the APK's raw instructions. Generated a fresh
+fallback decompilation of C0041b7 and checked F1 labels L10..L66: a raw
+31/32 result requires length >=3 and bytes 1 and 2 both zero. The prefixed
+88 and leading-zero/88 forms likewise require their two result bytes zero.
+L67 records a rejected general result; L66 returns true. Do not treat a
+recompiled readable decompilation as an independent ground-truth oracle
+without checking suspicious conditions against raw instructions.
+
+The offline command matcher now follows that raw-instruction predicate and
+Hn.E's candidate order: raw; optional leading-zero removal; each Hn.K
+payload, optionally zero-stripped payload, protocol+payload; then Hn.J
+payload/full-frame candidates. It accepts the first qualified candidate.
+The 108 synthetic fixtures were regenerated using copied Hn methods and the
+F1 predicate normalized from those raw instructions. They cover raw/prefixed,
+escaped, short and indexed cases. Python matches all fixtures, and explicit
+regressions reject 88 31 01 00 and 88 32 01 00. These fixtures are source-model
+checks, not captured bootloader traffic. No vendor code is committed.
+
+A zero-index result still has no transaction identifier. Exclusive command
+windows, delayed same-shape replies, retry handling and long-write behavior
+remain integration concerns. This evidence removes the suspected indexed-
+block aliasing problem and establishes the command filter needed next.
+App build remains .25; no extra bike test or deploy is required for this
+offline source correction. The next change can implement the protocol-88
+command exchange using the corrected predicate and the tested query lifecycle.
