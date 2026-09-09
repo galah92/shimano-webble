@@ -41,8 +41,8 @@ Captured ordering (frame numbers refer to the original snoop file):
 The capture does **not** include a failed pre-authentication 2AF7 read in that
 same connection. The blocked-read baseline is user-reported from earlier
 WebBLE/nRF tests. It also does not prove that step 7 is unnecessary for 2AF7.
-The new WebBLE test deliberately checks 2AF7 immediately after the two confirmed
-authentication acknowledgements to resolve that narrower question.
+Build .3 checked 2AF7 immediately after both acknowledgements; the live result
+and next experiment are recorded below.
 
 ## Reconstructed handshake
 
@@ -77,8 +77,8 @@ this is not a claim that the entire decompiled program is correct.
 ## Validation and implementation limits
 
 The actual browser `authResponses` implementation reproduced **both captured
-writes byte-for-byte** using the passkey read from the private capture. Only
-one real challenge is available; independent sessions remain untested.
+writes byte-for-byte** using the passkey read from the private capture. The user subsequently tested build .3 against a new live challenge: both
+stages were acknowledged, independently confirming the response calculation.
 
 Web Crypto provides AES-CBC rather than ECB. For exactly one input block,
 zero-IV CBC produces the required AES block as its first output block; the
@@ -95,7 +95,8 @@ The page performs authentication only after the user enters their passkey and
 presses **Authenticate session**. It waits for the matching stage result and
 stops on failure, disconnecting before a retry. It declares the milestone only
 when both acknowledgements succeed and 2AF7 returns the expected display
-identity. It sends no 2AFF setup, configuration, or firmware writes.
+identity. Build .4 conditionally sends one captured 2AFF setup command as
+described below. No destination or firmware operations are implemented.
 
 2AF8 is no longer read. Passkeys and outgoing authentication payloads are not
 logged or saved. The old session-storage log is discarded because previous
@@ -124,3 +125,29 @@ Original files remain in the user's home directory. Extracted APKs, decompiled
 code, capture data, hashes, and an offline browser/capture verifier are in
 `~/shimano-analysis/`, outside this public repository. No raw capture,
 user passkey, device address, or captured authentication ciphertext is committed.
+
+## Live result and build 2026-09-09.4
+
+The user's September 9 build .3 test received `10 01 01` and `10 02 01`,
+but 2AF7 still returned GATT operation not permitted about 73 ms after the
+second acknowledgement. This proves live acceptance of both stages; it does
+not distinguish delayed availability from additional required setup.
+
+The successful capture writes `FF 00` to 2AFF at frame 637, immediately after
+stage 2, and receives the ATT write response at frame 639. It also enables
+2AF9, 2AFB and 2AFD notifications before reading 2AF7 successfully roughly
+575 ms after stage 2. Those additional subscriptions remain untested here.
+
+Both APKs corroborate the setup command: old `d/a/a/a/c.java` case -15 calls
+`g.k([-1, 0])`; new `Q5.java` case -15 calls `C0549qn.g0([-1, 0])`, which
+writes `C0483on.X`. Decoding its UUID mapping confirms X is 2AFF. These paths
+also schedule a 500 ms state-machine delay. This establishes the command's
+placement in session initialization, not its complete internal semantics.
+
+Build .4 first waits 500 ms and attempts 2AF7 without extra writes. If that
+read fails, it sends `FF 00` to 2AFF exactly once, waits for the ATT write
+response, waits another 500 ms and reads 2AF7 again. Successful identification
+before setup avoids the write. Failed setup or timeout stops and disconnects;
+failed identification after setup stops without additional commands. Browser
+simulation covers setup success, failure, timeout, disconnect and continued
+blocked access. Live validation of this additional step remains pending.

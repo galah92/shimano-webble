@@ -5,7 +5,7 @@
 SHIMANO WEBBLE REVERSE-ENGINEERING HANDOFF NOTES
 
 Historical import. For current verified findings, see RESEARCH.md.
-Build 2026-09-09.3 adds explicit 2AF3 session-authentication writes only.
+Build 2026-09-09.4 adds a conditional, captured 2AFF session setup attempt.
 The original read-only behavior and pending milestones below are historical.
 ===============================================================================
 
@@ -340,13 +340,13 @@ END HANDOFF NOTES
 <label for="passkey">Shimano passkey (six digits)</label>
 <input id="passkey" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" disabled />
 <div class="row"><button id="authenticate" disabled>Authenticate session</button></div>
-<div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged.</div>
+<div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged. If identification stays blocked after authentication, the app sends the captured session setup command once and checks again.</div>
 </div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clear">Clear log</button></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.3';
+const BUILD = '2026-09-09.4';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -472,7 +472,7 @@ async function connect() {
     s.service = await server.getPrimaryService(SERVICE_18FF);
     assertCurrent(s);
     $('svc').textContent = 'Found';
-    for (const short of ['2af3', '2af4', '2af6', '2af7']) {
+    for (const short of ['2af3', '2af4', '2af6', '2af7', '2aff']) {
       try {
         s.chars[short] = await s.service.getCharacteristic(UUID(short));
         assertCurrent(s);
@@ -558,6 +558,26 @@ function sendAuthStage(s, packet) {
     } catch (e) { finish(e); }
   });
 }
+// Captured immediately after the two auth acknowledgements; also present in
+// both APK state machines. Its full semantics remain under investigation.
+function sendSessionSetup(s) {
+  assertCurrent(s);
+  const ch = s.chars['2aff'];
+  if (!ch) throw new Error('2AFF session setup characteristic unavailable');
+  log('TX 2AFF session setup: FF 00 (one attempt)');
+  return new Promise((resolve, reject) => {
+    const finish = error => {
+      clearTimeout(timer);
+      s.controller.signal.removeEventListener('abort', onAbort);
+      if (error) reject(error); else resolve();
+    };
+    const onAbort = () => finish(new Error('Disconnected during session setup'));
+    const timer = setTimeout(() => finish(new Error('Session setup write timed out')), 8000);
+    s.controller.signal.addEventListener('abort', onAbort, {once: true});
+    try { ch.writeValueWithResponse(new Uint8Array([0xff, 0x00])).then(() => finish(), finish); }
+    catch (e) { finish(e); }
+  });
+}
 async function authenticate() {
   if (busy || !session || session.authenticated) return;
   let passkey = $('passkey').value;
@@ -581,14 +601,25 @@ async function authenticate() {
       assertCurrent(s);
     }
     s.authenticated = true;
-    log('Both session authentication stages acknowledged. Checking 2AF7.');
-    const identity = await readCharacteristic(s, '2af7');
+    log('Both session authentication stages acknowledged. Waiting 500 ms before checking 2AF7.');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assertCurrent(s);
+    let identity = await readCharacteristic(s, '2af7');
+    if (!identity) {
+      log('2AF7 still unavailable after delay. Testing captured session setup.');
+      await sendSessionSetup(s);
+      assertCurrent(s);
+      log('2AFF write acknowledged. Waiting 500 ms before rechecking 2AF7.');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      assertCurrent(s);
+      identity = await readCharacteristic(s, '2af7');
+    }
     if (identity && /^SCE7000\0*$/.test(new TextDecoder().decode(bytes(identity)))) {
       protectedStatus('Session verified: SC-E7000 identification readable', 'ok');
       log('MILESTONE: both auth acknowledgements and SC-E7000 identification verified.');
     } else {
       protectedStatus('Authentication acknowledged; SC-E7000 identification not verified', 'warn');
-      log('Stop here: further setup may be required. No additional writes sent.');
+      log('Stop here: identification remains unverified. No further writes sent.');
     }
   } catch (e) {
     if (session === s) {

@@ -14,7 +14,7 @@ class Characteristic extends EventTarget {
     operations.push(['read', this.short]);
     if (this.short === '2af4') return value(options.shortChallenge ? [0] : [...Array(16).keys()]);
     if (this.short === '2af6') throw new DOMException('GATT operation not permitted', 'NotAllowedError');
-    if (this.short === '2af7' && window.stage === 2 && !options.blockIdentity)
+    if (this.short === '2af7' && window.stage === 2 && !options.blockIdentity && (!options.requireSetup || window.setupDone))
       return value([...new TextEncoder().encode('SCE7000'), 0]);
     throw new DOMException('GATT operation not permitted', 'NotAllowedError');
   }
@@ -22,6 +22,13 @@ class Characteristic extends EventTarget {
   async writeValueWithResponse(packet) {
     packet = [...packet];
     operations.push(['write', this.short, packet]);
+    if (this.short === '2aff') {
+      if (options.setupFailure) throw new DOMException('Setup write failed', 'NetworkError');
+      if (options.setupDisconnect) { window.bike.gatt.disconnect(); return; }
+      if (options.setupTimeout) return new Promise(() => {});
+      window.setupDone = true;
+      return;
+    }
     if (options.writeFailure) throw new DOMException('Write failed', 'NetworkError');
     if (options.disconnect) { window.bike.gatt.disconnect(); return; }
     if (options.timeout) return;
@@ -164,7 +171,39 @@ class BrowserTests(unittest.TestCase):
         self.page.wait_for_function("!document.getElementById('probe').disabled")
         self.assertIn('identification not verified', self.page.locator('#protected').inner_text())
         self.assertNotIn('MILESTONE', self.page.locator('#log').inner_text())
+        self.assertEqual(self.writes()[-1], ['write', '2aff', [255, 0]])
+        self.assertEqual(len(self.writes()), 3)
+
+    def test_setup_unlocks_identity_after_delayed_read(self):
+        self.open(requireSetup=True)
+        self.auth()
+        self.page.wait_for_function("document.getElementById('protected').textContent.startsWith('Session verified')")
+        self.assertEqual([x[1] for x in self.writes()], ['2af3', '2af3', '2aff'])
+        self.assertEqual(self.writes()[-1][2], [255, 0])
+        operations = self.page.evaluate('operations')
+        stage2 = next(i for i, x in enumerate(operations) if x[0] == 'write' and x[2][0] == 2)
+        self.assertEqual(operations[stage2 + 1:], [['read', '2af7'], ['write', '2aff', [255, 0]], ['read', '2af7']])
+        self.assertFalse(self.errors)
+
+    def test_setup_failure_disconnect_and_timeout_stop(self):
+        for option in ('setupFailure', 'setupDisconnect', 'setupTimeout'):
+            with self.subTest(option=option):
+                self.open(requireSetup=True, **{option: True})
+                self.auth()
+                self.page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'", timeout=12000)
+                self.assertEqual(len(self.writes()), 3)
+                self.assertNotIn('MILESTONE', self.page.locator('#log').inner_text())
+                self.assertFalse(self.errors)
+                self.context.close()
+
+    def test_disconnect_during_post_auth_delay_prevents_setup(self):
+        self.open(requireSetup=True)
+        self.auth()
+        self.page.wait_for_function('window.stage === 2')
+        self.page.locator('#disconnect').click()
+        self.page.wait_for_timeout(600)
         self.assertEqual(len(self.writes()), 2)
+        self.assertFalse(self.errors)
 
     def test_aes_known_answer(self):
         self.open()
