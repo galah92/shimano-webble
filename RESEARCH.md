@@ -1789,3 +1789,43 @@ There is no retry after uncertain delivery. This adapter remains unwired;
 future component orchestration must use it, not pass logical messages directly
 to a characteristic. Bootloader entry, paired handover, recovery and actual
 firmware traffic validation remain unfinished. No bike test is requested.
+
+## Update-mode entry and M slot selection — build .35
+
+Th.k3/p3's ordinary non-EP path is now modeled as an unwired operation.
+k3 reads bridge command04 and requires bit80 in Hn.Z/M's status. p3 preserves
+bit20, requests command03 with that bit as its argument, waits1000ms and
+reads04 again. Cn requires bit80, bit40 cleared, and bit20 unchanged. The
+low five status bits become the target selector; they must not be inferred
+from the motor model. Bridge replies use Hn.H's raw/leading-zero prefix
+layouts; Hn.Z also permits a raw status byte with bit80 set.
+
+Hn.p0 then sends logical 00 32 20 01 through n0. Selector0 routes it through
+2AFA as logical 13 32 20 01; other selectors use direct2AFE. Hn.R/p0 requires
+32 22 followed by value01. A 32 23 reply rejects the request; a success opcode
+without value01 is also failure. Supported prefix layouts are raw32,
+48/32, 48/one-byte/32 and 00/48/one-byte/32. No arbitrary payload scan is
+used. Successful p3 waits2000ms before returning. The browser result is
+update-entry-acknowledged, not bootloader identity verified. The source's
+special recovery and EP branches are outside this implementation.
+
+C0776xk.G0 separately calls Hn.s0(0) before the M bootloader-version query.
+That is logical2AFA 06 00. Wi12 accepts Hn.H(26) only if its next byte is
+absent or zero. selectMFirmwareSlot models this separately; transferMFirmware
+still requires it as a precondition. The entry helper deliberately performs
+one attempt per command, rather than the source's multiple retries after
+uncorrelated replies. Missing replies stop after3s (PCA request6s).
+
+Integration tests drive these operations through createFirmwareGattWriter
+and check physical ATT values, routes for selectors0/13/31, mode0/20,
+source delays, PCA success-value validation, slot rejection, timeout and
+native failure at every write, plus cancellation. Synthetic tests establish
+implementation behavior, not permission to flash or successful boot entry
+on this bike. No entry operation is connected to a UI control.
+
+The Th.v3 instruction dump at L1bb7 calls e3, disposes Sh resources, then
+calls p3 again before constructing the D worker. This is evidence that M
+completion alone does not establish the D entry state. e3 branches through
+Sh.f (e && !d); its applicability and transport cleanup still need tracing
+before assembling paired handover. No automatic M reset or mixed-pair boot
+is assumed.

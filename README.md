@@ -315,3 +315,9 @@ vectors and stops after any uncertain fragment delivery. Run
 `node tests/firmware_gatt.cjs`. Earlier component simulations cover logical
 exchanges; they do not establish a working live firmware transfer. The updater
 still requires bootloader entry, paired handover and recovery validation.
+
+Build .35 models ordinary update-mode entry and M slot selection. Integration
+checks now pass through the physical GATT framing adapter, including routes,
+mode checks, acknowledgement values, delays and failure at each exchange:
+`node tests/firmware_entry.cjs`. These helpers have no UI caller. Entry on the
+real bike, paired handover and recovery still need validation before flashing.

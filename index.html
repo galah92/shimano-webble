@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.34';
+const BUILD = '2026-09-09.35';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -752,6 +752,75 @@ function sendMFirmwareCommand({write, subscribe, signal, command, args, targetSe
     signal, packet: plan.packet, evidence, replyTimeoutMs: plan.replyTimeoutMs});
 }
 // END M FIRMWARE COMMANDS
+
+// BEGIN FIRMWARE UPDATE ENTRY
+// Hn.H/Z and Th.k3/p3, ordinary non-EP path only. This is update-mode
+// negotiation, not proof of bootloader identity or recovery compatibility.
+function firmwareBridgeReply(raw, opcode) {
+  const offset = raw[0] === opcode ? 0 : raw[0] === 0 && raw[1] === opcode ? 1 : -1;
+  return offset < 0 ? null : raw.slice(offset);
+}
+function firmwareBridgeStatus(raw) {
+  const reply = firmwareBridgeReply(raw, 0x24);
+  if (reply?.length >= 2) return reply[1];
+  return raw.length && (raw[0] & 128) ? raw[0] : null;
+}
+function firmwareUpdateReply(raw) {
+  // Hn.R/p0 supports these four prefix layouts; never scan payload data.
+  const offsets = [];
+  if (raw[0] === 0x32) offsets.push(0);
+  if (raw[0] === 0x48) offsets.push(1, 2);
+  if (raw[0] === 0 && raw[1] === 0x48) offsets.push(3);
+  for (const offset of offsets) {
+    if (raw[offset] !== 0x32) continue;
+    if (raw[offset + 1] === 0x23) return {error: 'PCA update request rejected'};
+  }
+  for (const offset of offsets) {
+    if (raw[offset] !== 0x32 || raw[offset + 1] !== 0x22) continue;
+    return raw.length > offset + 2 && raw[offset + 2] === 1 ?
+      {accepted: true} : {error: 'PCA update reply missing required value 1'};
+  }
+  return null;
+}
+function firmwareEntryExchange({write, subscribe, signal, characteristic, packet, match, timeout = 3000}) {
+  let result = null, closed = false;
+  const status = () => ({...result, state: !result ? 'waiting' : result.error ? 'failed' : 'evidence-complete',
+    commandCorrelated: false, installable: false});
+  const evidence = {status, close() { closed = true; return status(); },
+    receive(raw) { if (!closed && !result) result = match(raw); return status(); }};
+  return runFirmwareExchange({write: p => write(characteristic, p), subscribe, signal,
+    packet, evidence, replyTimeoutMs: timeout});
+}
+async function enterFirmwareUpdateSession({write, subscribe, signal}) {
+  const transport = {write, subscribe, signal};
+  const bridge = (packet, match) => firmwareEntryExchange({...transport,
+    characteristic: '2afa', packet: Uint8Array.from(packet), match});
+  const initial = await bridge([4], raw => {
+    const value = firmwareBridgeStatus(raw);
+    return value !== null && (value & 128) ? {value} : null;
+  });
+  const mode = initial.value & 32;
+  await bridge([3, mode], raw => firmwareBridgeReply(raw, 0x23) ? {accepted: true} : null);
+  await firmwareDelay(1000, signal);
+  const configured = await bridge([4], raw => {
+    const value = firmwareBridgeStatus(raw);
+    return value !== null && (value & 128) && !(value & 64) && (value & 32) === mode ? {value} : null;
+  });
+  const targetSelector = configured.value & 31;
+  const route = mFirmwareRoute([0, 0x32, 0x20, 1], targetSelector);
+  await firmwareEntryExchange({...transport, ...route, match: firmwareUpdateReply, timeout: 6000});
+  await firmwareDelay(2000, signal);
+  return {state: 'update-entry-acknowledged', mode, targetSelector, bootloaderVerified: false, installable: false};
+}
+function selectMFirmwareSlot({write, subscribe, signal}) {
+  // C0776xk.G0 -> Hn.s0(0), required before the M version query.
+  return firmwareEntryExchange({write, subscribe, signal, characteristic: '2afa',
+    packet: Uint8Array.of(6, 0), match: raw => {
+      const reply = firmwareBridgeReply(raw, 0x26);
+      return reply && (reply.length === 1 || reply[1] === 0) ? {accepted: true} : null;
+    }});
+}
+// END FIRMWARE UPDATE ENTRY
 
 // BEGIN M FIRMWARE SESSION
 function mBootloaderVersionMatch(raw) {
