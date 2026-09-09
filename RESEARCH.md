@@ -2062,3 +2062,20 @@ priority if necessary. Omitted-line counts and the END marker make this
 explicit. Full displayed/stored logs are not modified. Tests cover a large
 log, entry failure plus restart separated by thousands of routine lines,
 latest-session outcomes, and clipboard failure. No bike protocol changes.
+
+
+### Build .43 report: restart verification incomplete; .44 stops duplicate reads
+
+The compact user report includes the .42 17:12/17:13 reconnect: EU0 and native
+D4.5.0.0 are readable, ordinary drive firmware has no matching reply, and M
+returns 00 01 87 39 00. Physical power-cycle and normal bike operation have
+been asked about; not yet confirmed. Error39 semantics are not inferred.
+No new entry probe occurred. The old verification reader ignored negative
+replies and the UI ran it even after failed native reads.
+
+Build .44 requires successful model, ordinary firmware, region and native D/M
+batch results before additional identity verification. A failed batch stops
+with named missing reads. The verification reader now recognizes the matching
+negative reply opcode, names each read on failure, and stops immediately on
+device rejection. Tests cover rejection on all five reads and the full browser
+batch stopping at M with no follow-on reads. Probe command sequence unchanged.

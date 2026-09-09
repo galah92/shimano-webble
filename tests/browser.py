@@ -299,6 +299,18 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(len(self.writes()), 3)  # No automatic information queries.
         self.page.locator('#identify').click()
 
+    def test_pending_restart_stops_after_native_error(self):
+        self.ready_for_identify(nativeError=1)
+        self.page.evaluate("""() => {
+          probeRecord={verified:false};window.extraVerification=0;
+          verifyPendingBootloaderProbe=async()=>{window.extraVerification++;};
+        }""")
+        self.wait_batch()
+        self.assertEqual(self.page.evaluate('window.extraVerification'),0)
+        self.assertIn('Restart verification incomplete: Native M firmware',self.page.locator('#log').inner_text())
+        self.assertEqual(self.writes()[-1],['write','2afe',[0,1,132,1]])
+        self.assertFalse(self.errors)
+
     def test_drive_identity_both_response_orders(self):
         for delayed in (False, True):
             with self.subTest(delayed=delayed):

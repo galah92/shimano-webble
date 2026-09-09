@@ -3,7 +3,7 @@ const {webcrypto,createHash}=require('node:crypto');
 const code=fs.readFileSync(__dirname+'/../index.html','utf8').split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE FILE CHECKS')[0];
 const salt=new Uint8Array(16).fill(7),serial=Uint8Array.of(1,2,3,4,5,6);
 const identity=createHash('sha256').update(salt).update(serial).digest('hex');
-async function run({fail=-1,silent=-1,truncated=-1,family=34,otherSerial=false,dVersion=[0x43,0,0],mVersion=[0x42,1,0],destination=1,sameSession=false,mutate=false}={}){
+async function run({fail=-1,silent=-1,rejected=-1,truncated=-1,family=34,otherSerial=false,dVersion=[0x43,0,0],mVersion=[0x42,1,0],destination=1,sameSession=false,mutate=false}={}){
  let now=0,id=0,listener,result,error;const timers=new Map(),calls=[];
  const ctx=vm.createContext({Uint8Array,Error,AbortController,crypto:webcrypto,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});vm.runInContext(code,ctx);
  const expected={identity,dVersion:'4.3.0.0',mVersion:'4.2.1.0',destination:1};
@@ -12,7 +12,7 @@ async function run({fail=-1,silent=-1,truncated=-1,family=34,otherSerial=false,d
  const writer=ctx.createFirmwareGattWriter({'2afe':{async writeValueWithResponse(bytes){
   const n=calls.length;calls.push([...bytes]);assert.deepEqual([...bytes],packets[n]);
   if(mutate){expected.identity='0'.repeat(64);expected.destination=0;}
-  if(n!==silent)listener(Uint8Array.from(n===truncated?replies[n].slice(0,-1):replies[n]));
+  if(n!==silent)listener(Uint8Array.from(n===rejected?[...replies[n].slice(0,2),replies[n][2]+1,57]:n===truncated?replies[n].slice(0,-1):replies[n]));
   if(n===fail)throw new Error('ATT failed after reply');
  }}});
  const connection={},previousConnection=sameSession?connection:{};
@@ -36,8 +36,8 @@ async function run({fail=-1,silent=-1,truncated=-1,family=34,otherSerial=false,d
   const r=await run(changes);assert(!r.error);assert.equal(r.result.state,'reconnected-readback-mismatch');
   if(changes.otherSerial){assert.equal(r.result.firmwareReadbackMatches,false);assert.equal(r.result.regionReadbackMatches,false);}
  }
- for(let n=0;n<5;n++)for(const type of ['fail','silent','truncated']){
-  const r=await run({[type]:n});assert(r.error);assert.equal(r.calls.length,n+1);
+ for(let n=0;n<5;n++)for(const type of ['fail','silent','truncated','rejected']){
+  const r=await run({[type]:n});assert(r.error);assert.equal(r.calls.length,n+1);if(type==='rejected')assert(r.error.message.includes('Device rejected read:'));
  }
  let r=await run({sameSession:true});assert(r.error);assert.equal(r.calls.length,0);
  r=await run({family:35});assert(r.error);assert.equal(r.calls.length,1);

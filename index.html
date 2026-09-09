@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.43';
+const BUILD = '2026-09-09.44';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1325,18 +1325,29 @@ async function readFirmwareBaseline({write, subscribe, signal, identitySalt}) {
   if (!(identitySalt instanceof Uint8Array) || identitySalt.length !== 16)
     throw new Error('Expected a private 16-byte identity salt');
   const salt = identitySalt.slice();
-  const read = (packet, prefix, length) => firmwareEntryExchange({write, subscribe, signal,
-    characteristic: '2afe', packet: Uint8Array.from(packet), timeout: 3000,
-    match: raw => {
-      if (!prefix.every((value, i) => raw[i] === value)) return null;
-      if (raw.length < length) return {error: 'Truncated application verification reply'};
-      return {fields: raw.slice(0, length)};
-    }});
+  const read = async (label, packet, prefix, length) => {
+    try {
+      return await firmwareEntryExchange({write, subscribe, signal,
+        characteristic:'2afe',packet:Uint8Array.from(packet),timeout:3000,
+        match:raw=>{
+          if(raw[0]===prefix[0] && raw[1]===prefix[1] && raw[2]===prefix[2]+1)
+            return {error:`Device rejected read: ${raw[2].toString(16).toUpperCase()} ${raw.length>3?raw[3].toString(16).toUpperCase():'missing status'}`};
+          if(!prefix.every((value,i)=>raw[i]===value))return null;
+          if(raw.length<length)return {error:'Truncated verification reply'};
+          return {fields:raw.slice(0,length)};
+        }});
+    } catch(error) {
+      const reason=error.message.startsWith('Device rejected read:')?error.message
+        :/timed out/.test(error.message)?'reply or ATT timeout'
+        :signal?.aborted?'disconnected':'read failed or incomplete reply';
+      throw new Error(`${label}: ${reason}`);
+    }
+  };
   let serial;
   try {
-    const model = (await read([0,1,0x1c,0], [0,1,0x1e], 5)).fields;
+    const model = (await read('Motor model verification', [0,1,0x1c,0], [0,1,0x1e], 5)).fields;
     if (model[3] !== 34 || model[4] !== 0) throw new Error('Verification motor family/unit mismatch');
-    serial = (await read([0,1,0x3c,0], [0,1,0x3e], 9)).fields.slice(3,9);
+    serial = (await read('Motor identity verification', [0,1,0x3c,0], [0,1,0x3e], 9)).fields.slice(3,9);
     if (serial.every(b => b === 0) || serial.every(b => b === 255)) throw new Error('Unavailable verification motor serial');
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.of(...salt, ...serial)));
     const identity = Array.from(digest, b => b.toString(16).padStart(2,'0')).join('');
@@ -1344,12 +1355,12 @@ async function readFirmwareBaseline({write, subscribe, signal, identitySalt}) {
     // incomplete exchange; never retry and then reuse the same reply window.
     const native = [];
     for (const ic of [0,1]) {
-      const reply = (await read([0,1,0x84,ic], [0,1,0x86], 6)).fields;
+      const reply = (await read(ic===0?'Native D verification':'Native M verification', [0,1,0x84,ic], [0,1,0x86], 6)).fields;
       const version = firmwareVersion(reply, 3);
       if (!version) throw new Error('Unsupported native verification version');
       native.push(version.join('.'));
     }
-    const destination = (await read([0,0x16,0xac,1], [0,0x16,0xae,1], 5)).fields[4];
+    const destination = (await read('Region verification', [0,0x16,0xac,1], [0,0x16,0xae,1], 5)).fields[4];
     if (destination > 5) throw new Error('Unknown verification destination');
     return {family:34, unit:0, identity, dVersion:native[0], mVersion:native[1], destination};
   } finally { salt.fill(0); serial?.fill(0); }
@@ -1957,6 +1968,11 @@ async function identifyDrive() {
       : regionReadiness(model, firmware, destination);
     $('regionStatus').textContent = readiness;
     log(readiness);
+    if (probeRecord && !probeRecord.verified) {
+      const required=['Drive-unit model','Drive-unit firmware','Current destination','Native D firmware','Native M firmware'];
+      const failed=required.filter(name=>results.find(item=>item.name===name)?.status!=='reply received');
+      if(failed.length) throw new Error(`Restart verification incomplete: ${failed.join(', ')}. No additional verification reads sent`);
+    }
     await verifyPendingBootloaderProbe(s);
   } catch (e) {
     if (session === s) {
