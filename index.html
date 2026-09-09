@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.37';
+const BUILD = '2026-09-09.38';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1284,7 +1284,10 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
   } catch (cause) {
     // Do not log arbitrary native errors or private command payloads.
     const error = new Error(`Paired firmware workflow stopped during ${stage}; no automatic reset or recovery`);
-    Object.assign(error, {stage, mFinished, dFinished, reset: false, recoveryVerified: false});
+    // These booleans mean confirmed worker completion, not proof of unchanged
+    // device state after an uncertain ATT result.
+    Object.assign(error, {stage, mFinished, dFinished, deviceStateUnknown: stage !== 'file-validation',
+      reset: false, recoveryVerified: false});
     throw error;
   } finally { writer?.close(); keys.fill(0); firmwarePairTransports.delete(owner); }
 }

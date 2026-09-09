@@ -1920,3 +1920,39 @@ GATT suites test those layers separately. An integrated physical-protocol
 simulation and live recovery/entry evidence remain necessary before enabling
 an updater. The real private assets pass the shared loader without changing
 the public allowlist or adding firmware binaries to git.
+
+## Full paired wire simulation — build .38
+
+The new firmware_pair_wire.cjs runs the real coordinator, all entry and transfer
+workers, reply matchers, and GATT adapter together. Only the device, clock and
+synthetic-image trust entries are substituted. The simulated device validates
+physical write modes/lengths and reassembles fragments, checks image bytes,
+M zero padding/checkpoints, D FF padding/checksum/block indices, and finish
+checksums, and emits the modeled reply shapes. It never accepts a reset.
+Synthetic images are trusted only in the test VM; deployed hashes are unchanged.
+
+The256-byte pair uses85 physical ATT writes. Tests inject failure before
+processing and after processing at every one of those writes, and cancellation
+at every write. Every acknowledged workflow phase is also tested with dropped
+replies. Wrong D identity after M completion stops before D data. Larger cases
+cover a D bank boundary and M checkpoint/final partial window, plus synthetic
+images matching both actual pair lengths (132072/116320 and138072/119824).
+All complete the coordinator with correct block counts and finish checksums.
+The fake clock drains native Promise microtasks before advancing deadlines;
+advancing after a fixed microtask count incorrectly timed out long synchronous
+simulation chains and was corrected in the harness.
+
+A material reporting ambiguity was exposed by failure-after-processing tests:
+the simulated device can accept M or D finish and emit its reply, while the
+native write promise subsequently fails. In that case the worker correctly
+rejects, but mFinished/dFinished=false does not establish unchanged firmware.
+Coordinator errors now include deviceStateUnknown=true after file validation;
+the finish flags mean confirmed worker completion only. Tests explicitly
+exercise accepted-but-unconfirmed finishes for both components. No reset,
+rollback, success claim or continued write follows those failures.
+
+This integration evidence catches software-layer mismatches but is not a
+capture of real firmware traffic. The simulated reply model comes from the
+source analysis and still requires live validation. Native component/region
+verification after restart, recovery after interrupted paired changes and
+controlled entry on this bike remain incomplete. No firmware control is enabled.

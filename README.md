@@ -336,3 +336,10 @@ or retrying. `node tests/firmware_pair.cjs` checks orchestration with controlled
 workers; the component suites cover their protocols separately. Full integrated
 wire simulation, fresh live baseline acquisition and recovery remain required
 before exposing an updater or requesting a firmware test.
+
+Build .38 adds a full paired BLE-device simulation using all real app workers:
+`node tests/firmware_pair_wire.cjs`. It covers both reviewed image sizes,
+fragmentation, checkpoints, bank boundaries and failure before/after every
+write in the small pair. Failures now explicitly mark device state unknown:
+an unconfirmed finish does not prove the component stayed unchanged. Live
+entry, recovery and post-restart verification remain unfinished.
