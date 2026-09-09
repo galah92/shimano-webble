@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.44';
+const BUILD = '2026-09-09.45';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -775,9 +775,11 @@ function firmwareBridgeStatus(raw) {
   return raw.length && (raw[0] & 128) ? raw[0] : null;
 }
 function firmwareUpdateReply(raw) {
-  // Hn.R/p0 supports these four prefix layouts; never scan payload data.
+  // Source-normalized layouts plus the leading-zero GATT envelope observed
+  // on this bike in build .44. Never scan arbitrary payload offsets.
   const offsets = [];
   if (raw[0] === 0x32) offsets.push(0);
+  if (raw[0] === 0 && raw[1] === 0x32) offsets.push(1);
   if (raw[0] === 0x48) offsets.push(1, 2);
   if (raw[0] === 0 && raw[1] === 0x48) offsets.push(3);
   for (const offset of offsets) {
@@ -787,7 +789,7 @@ function firmwareUpdateReply(raw) {
   for (const offset of offsets) {
     if (raw[offset] !== 0x32 || raw[offset + 1] !== 0x22) continue;
     return raw.length > offset + 2 && raw[offset + 2] === 1 ?
-      {accepted: true} : {error: 'PCA update reply missing required value 1'};
+      {accepted: true} : {error: `PCA update reply requires value 1; got ${raw[offset+2] ?? 'missing'}`};
   }
   return null;
 }
@@ -817,7 +819,7 @@ async function enterFirmwareUpdateSession({write, subscribe, signal, onDiagnosti
       emit({event:'accepted',...(result.value!==undefined?{status:result.value}:{})});
       return result;
     } catch (error) {
-      const reason=/ATT write timed out/.test(error.message)?'ATT-timeout':/timed out/.test(error.message)?'reply-timeout':signal?.aborted?'disconnected':'rejected-or-transport-failed';
+      const reason=error.message.startsWith('PCA update')?error.message:/ATT write timed out/.test(error.message)?'ATT-timeout':/timed out/.test(error.message)?'reply-timeout':signal?.aborted?'disconnected':'rejected-or-transport-failed';
       emit({event:'stopped',reason});throw error;
     }
   };

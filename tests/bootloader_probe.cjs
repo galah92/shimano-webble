@@ -23,7 +23,7 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
    if(name==='2afa'&&logical[0]===3){status=128|(logical[1]&96)|selector;rx([35,0]);}
    else if(name==='2afa'&&logical[0]===4)rx([36,status]);
    else if(name==='2afa'&&logical[0]===6)rx([38,0]);
-   else if(logical[1]===50){if(!dropPca)rx([50,34,1]);}
+   else if(logical[1]===50){if(!dropPca)rx([0,50,34,1,0,0,0,0,0,0]);}
    else if(stage==='M-bootloader-version'){assert.deepEqual(logical,[0,240,0,65,0,0,0]);rx([242,0,81,32,3,0]);}
    else if(stage==='D-bootloader-entry'){
     assert.equal(logical[0],136);const s=logical[1];assert(s>=1&&s<=5);assert.deepEqual(logical.slice(2),[3*s-2,3*s-1,3*s]);rx([0,136,17,s]);

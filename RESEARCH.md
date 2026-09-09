@@ -2079,3 +2079,20 @@ with named missing reads. The verification reader now recognizes the matching
 negative reply opcode, names each read on failure, and stops immediately on
 device rejection. Tests cover rejection on all five reads and the full browser
 batch stopping at M with no follow-on reads. Probe command sequence unchanged.
+
+
+### Build .44 live reply framing; .45 correction
+
+The 17:24:02 readback matched the original motor fingerprint, native
+D4.5.0.0/M4.4.8.0 and EU0. A subsequent .44 probe obtained bridge status8D,
+set-mode acknowledgement23, and configured status8D. The PCA request
+00 32 20 01 received a ten-byte notification beginning00 32 22 roughly7ms
+after ATT completion. The parser ignored this leading-zero GATT envelope and
+timed out six seconds later. No reset or image commands were sent.
+
+Build .45 adds exactly offset1 for a00 32 prefix. It still requires response
+22 followed by value1; the old header-only log did not reveal that value, so
+acceptance remains unverified. Rejection/missing-value diagnostics now retain
+the parser's explicit reason. Tests cover the envelope on both routes and
+all selectors/modes, rejection/truncation, and the full bounded probe using
+ten-byte zero-prefixed PCA replies. Commands and write allowlist unchanged.

@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const html=fs.readFileSync(__dirname+'/../index.html','utf8');
 const code=html.split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE UPDATE ENTRY')[0];
 const flush=async()=>{for(let i=0;i<120;i++)await Promise.resolve();};
-async function run({selector=13,mode=0,fail=-1,reject=false,wrongMode=false,abort=false,silent=-1,badSlot=false}={}){
+async function run({selector=13,mode=0,fail=-1,reject=false,wrongMode=false,abort=false,silent=-1,badSlot=false,leadingZero=false}={}){
  let now=0,id=0,listener,result,error;const timers=new Map(),calls=[];
  const controller=new AbortController();
  const ctx=vm.createContext({Uint8Array,Error,AbortController,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});
@@ -15,7 +15,7 @@ async function run({selector=13,mode=0,fail=-1,reject=false,wrongMode=false,abor
   if(n===0)listener(Uint8Array.of(0x24,128|mode|selector));
   if(n===1)listener(Uint8Array.of(0x23,0));
   if(n===2)listener(Uint8Array.of(0x24,128|mode|selector|(wrongMode?64:0)));
-  if(n===3)listener(Uint8Array.of(0x32,reject?0x23:0x22,1));
+  if(n===3)listener(Uint8Array.of(...(leadingZero?[0]:[]),0x32,reject?0x23:0x22,1));
   if(n===4)listener(Uint8Array.of(0x26,badSlot?1:0));
  }});
  const writer=ctx.createFirmwareGattWriter({'2afa':native('2afa'),'2afe':native('2afe')},controller.signal);
@@ -30,8 +30,8 @@ async function run({selector=13,mode=0,fail=-1,reject=false,wrongMode=false,abor
  return {ctx,result,error,calls,now};
 }
 (async()=>{
- for(const selector of [0,13,31])for(const mode of [0,32]){
-  const {result,error,calls}=await run({selector,mode});assert(!error);
+ for(const leadingZero of [false,true])for(const selector of [0,13,31])for(const mode of [0,32]){
+  const {result,error,calls}=await run({selector,mode,leadingZero});assert(!error);
   assert.equal(result.targetSelector,selector);assert.equal(result.mode,mode);assert.equal(result.bootloaderVerified,false);
   assert.deepEqual(calls.map(c=>c.p),[[0,4],[0,3,mode],[0,4],selector===0?[0,19,50,32,1]:[0,50,32,1],[0,6,0]]);
   assert.equal(calls[3].name,selector===0?'2afa':'2afe');assert.equal(calls[2].at,1000);assert.equal(calls[4].at,3000);
@@ -41,11 +41,11 @@ async function run({selector=13,mode=0,fail=-1,reject=false,wrongMode=false,abor
  const bad=await run({badSlot:true});assert(bad.error);assert.equal(bad.now,6000);
  for(const option of [{reject:true},{wrongMode:true},{abort:true}]){const r=await run(option);assert(r.error);assert(r.calls.length<5);}
  const {ctx}=await run();
- for(const prefix of [[50],[72,50],[72,7,50],[0,72,7,50]]){
+ for(const prefix of [[50],[0,50],[72,50],[72,7,50],[0,72,7,50]]){
   assert.equal(ctx.firmwareUpdateReply(Uint8Array.from([...prefix,34,1])).accepted,true);
   for(const suffix of [[34],[34,0],[35,1]])assert(ctx.firmwareUpdateReply(Uint8Array.from([...prefix,...suffix])).error);
  }
- for(const p of [[],[1,50,34,1],[50,33,1],[0,50,34,1]])assert.equal(ctx.firmwareUpdateReply(Uint8Array.from(p)),null);
+ for(const p of [[],[1,50,34,1],[50,33,1]])assert.equal(ctx.firmwareUpdateReply(Uint8Array.from(p)),null);
  assert.equal(ctx.firmwareBridgeStatus(Uint8Array.of(0,36,141)),141);
  assert.equal(ctx.firmwareBridgeStatus(Uint8Array.of(141)),141);
  assert.equal(ctx.firmwareBridgeStatus(Uint8Array.of(36)),null);
