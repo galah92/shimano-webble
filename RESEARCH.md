@@ -2016,3 +2016,15 @@ reset gating, and forbidden commands. Browser tests cover profile validation
 and pending verification across reload. Existing paired-wire and readback
 regressions also pass. These results establish software behavior, not live
 bootloader entry, reset, recovery, firmware compatibility, or US persistence.
+
+
+### Build .41: embedded profile and guided UI
+
+At the user's request, the fixed 15-byte source-derived profile is embedded in
+the page. No phone file download or input remains. This changes distribution
+of those constants, not the bike passkey/serial logging rules. A guided click
+executes the existing session, information, motor-auth and bounded probe
+functions, checking each prerequisite's resulting state. Manual controls are
+under Advanced diagnostics. A pending baseline changes the guided click to
+verification-only; clearing that pending state cannot fall through into a
+second probe. Physical probe packets and its allowlist are unchanged.

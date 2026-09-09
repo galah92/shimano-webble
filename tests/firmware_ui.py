@@ -9,7 +9,7 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('https://shimano.test/', lambda route: route.fulfill(body=html, content_type='text/html'))
     page.goto('https://shimano.test/')
-    expect(page.locator('#build')).to_contain_text('2026-09-09.40')
+    expect(page.locator('#build')).to_contain_text('2026-09-09.41')
     expect(page.locator('#setUS')).to_be_disabled()
     page.locator('#firmwareFiles').set_input_files([
         {'name': 'D.dat', 'mimeType': 'application/octet-stream', 'buffer': bytes(256)},

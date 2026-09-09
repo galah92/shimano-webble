@@ -320,7 +320,7 @@ END HANDOFF NOTES
 <body>
 <h1>Shimano BLE Diagnostic</h1>
 <div class="muted" id="build"></div>
-<p>Connect, read the bike configuration, and authenticate. Region changes are unavailable while the required preparation workflow is under investigation.</p>
+<p>Connect, enter your passkey, and tap Run bike test. The page will guide you through the next check. US-region configuration is not ready yet.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -336,15 +336,23 @@ END HANDOFF NOTES
 </div></div>
 <div class="row">
 <button id="connect">Connect Shimano</button>
-<button id="probe" disabled>Run read-only probe</button>
+
 <button id="disconnect" disabled>Disconnect</button>
 </div>
 <div class="card">
 <label for="passkey">Shimano passkey (six digits)</label>
 <input id="passkey" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" disabled />
-<div class="row"><button id="authenticate" disabled>Authenticate session</button></div>
-<div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged. If identification stays blocked after authentication, the app sends the captured session setup command once and checks again.</div>
+
+<div class="muted">Use the passkey configured in E-TUBE. It is used locally and is not saved or logged.</div>
 </div>
+<div class="card">
+<strong>Next bike test</strong>
+<p>The test checks bootloader entry and exit without erasing or transferring firmware. It does not change the region. Entry and exit on this bike are still experimental.</p>
+<div class="row"><button id="bootProbe" disabled>Run bike test</button></div>
+<div id="bootProbeStatus" role="status">Connect, enter your passkey, then tap Run bike test. Setup runs automatically.</div>
+</div>
+<details class="card"><summary>Advanced diagnostics</summary>
+<div class="row"><button id="probe" disabled>Run read-only probe</button><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
@@ -354,19 +362,13 @@ END HANDOFF NOTES
 <input id="firmwareFiles" type="file" accept=".dat" multiple aria-label="Select D and M firmware files" />
 <div id="firmwareStatus" role="status">Choose both files from the same package.</div>
 </details>
-<details class="card"><summary>Bootloader entry/exit experiment</summary>
-<p>This temporarily enters update mode, reads bootloader information, then requests reset. Entry and exit on this bike are not yet verified. The probe cannot send erase commands or firmware images.</p>
-<p>Load the private probe profile, then connect, authenticate the session, read compatibility, and authenticate the motor. After the test, turn the bike off and on, reconnect and read compatibility again to check the original configuration.</p>
-<input id="bootProfileFile" type="file" accept=".bin" aria-label="Private bootloader probe profile" />
-<div class="row"><button id="bootProbe" disabled>Test bootloader entry and exit</button></div>
-<div id="bootProbeStatus" role="status">A private probe profile is required. It is used locally and not saved.</div>
 </details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.40';
+const BUILD = '2026-09-09.41';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1453,8 +1455,9 @@ function controls() {
   $('setUS').disabled = busy || !connected || !canSetUS(session);
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || !connected || session?.authenticated;
-  $('bootProfileFile').disabled = busy;
-  $('bootProbe').disabled = busy || !connected || !session?.motorAuthenticated || !session?.motorEligible || !bootProfile || session?.bootProbeAttempted || !!(probeRecord && !probeRecord.verified);
+  $('bootProbe').disabled = busy || guidedTestRunning || !connected || session?.bootProbeAttempted;
+  $('bootProbe').textContent = probeRecord && !probeRecord.verified ? 'Verify after restart' : 'Run bike test';
+  if (guidedTestRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
 }
 function protectedStatus(message, css = '') {
   $('protected').textContent = message;
@@ -2215,9 +2218,11 @@ $('clearLog').onclick = () => {
   $('exportStatus').textContent = 'Log cleared.';
 };
 
-const BOOT_PROFILE_HASH = '8c41e5118b85b15506a01bbf1934f8ee9c7d8d058d1f595d52b4ec404186ba6a';
+// Fixed source-derived entry profile, embedded at the user's request.
+// This is not the bike passkey or its serial number.
+const BOOT_PROFILE = Object.freeze([49, 65, 89, 38, 83, 88, 151, 147, 35, 132, 98, 100, 51, 131, 39]);
 const PROBE_RECORD_KEY = 'shimano-probe-readback-v1';
-let bootProfile = null, bootProfileGeneration = 0, probeRecord = null;
+let probeRecord = null, guidedTestRunning = false;
 try {
   const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)||'null');
   if(record?.version===1 && /^[a-f0-9]{32}$/.test(record.salt) && typeof record.connection==='string' && record.expected) probeRecord=record;
@@ -2251,9 +2256,8 @@ async function verifyPendingBootloaderProbe(s) {
   } finally {writer.close();salt.fill(0);}
 }
 async function runBootloaderProbe() {
-  if(busy || !bootProfile || !session?.motorAuthenticated || !session.motorEligible || session.bootProbeAttempted || probeRecord&&!probeRecord.verified) return;
-  const s=session,profile=bootProfile.slice(),salt=crypto.getRandomValues(new Uint8Array(16));
-  bootProfile.fill(0);bootProfile=null;$('bootProfileFile').value='';
+  if(busy || !session?.motorAuthenticated || !session.motorEligible || session.bootProbeAttempted || probeRecord&&!probeRecord.verified) return;
+  const s=session,profile=Uint8Array.from(BOOT_PROFILE),salt=crypto.getRandomValues(new Uint8Array(16));
   s.bootProbeAttempted=true;busy=true;controls();
   log('Bootloader entry/exit probe started. Firmware erase and data commands are blocked.');
   try {
@@ -2265,27 +2269,49 @@ async function runBootloaderProbe() {
     log(`Bootloader probe stopped at ${error.stage||'initialization'}. Reset requested: ${error.resetRequested?'yes':'no'}. Firmware images were not sent.`);
   } finally {
     profile.fill(0);salt.fill(0);
-    $('bootProbeStatus').textContent='Turn the bike off and on. Reconnect, authenticate the session and read compatibility to verify the original configuration. Copy the log afterward.';
+    $('bootProbeStatus').textContent='Turn the bike off and on. Connect again, enter your passkey, then tap Verify after restart. Copy the log afterward.';
     if(session===s) disconnect();
     busy=false;controls();
   }
 }
-$('bootProfileFile').onchange=async()=>{
-  const generation=++bootProfileGeneration;
-  bootProfile?.fill(0);bootProfile=null;controls();
-  const file=$('bootProfileFile').files[0];
-  let data;
+async function runGuidedBikeTest() {
+  if (busy || guidedTestRunning || !session?.device.gatt.connected) return;
+  const s = session;
+  const verifying = !!(probeRecord && !probeRecord.verified);
+  if (!s.verified && !/^[0-9]{6}$/.test($('passkey').value)) {
+    $('bootProbeStatus').textContent = 'Enter your six-digit Shimano passkey first.';
+    $('passkey').focus();return;
+  }
+  guidedTestRunning = true;controls();
   try {
-    if(!file||file.size!==15) throw new Error('Expected the supplied 15-byte probe profile');
-    data=new Uint8Array(await file.arrayBuffer());
-    const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',data));
-    if(hex(digest).replaceAll(' ','').toLowerCase()!==BOOT_PROFILE_HASH) throw new Error('Profile does not match the reviewed source');
-    if(generation!==bootProfileGeneration)return;
-    bootProfile=data;data=null;$('bootProbeStatus').textContent='Profile loaded locally. Complete session and motor authentication to run the probe.';
-  } catch(error) {if(generation===bootProfileGeneration)$('bootProbeStatus').textContent=error.message;}
-  finally {data?.fill(0);controls();}
-};
-$('bootProbe').onclick=runBootloaderProbe;
+    if (!s.verified) {
+      $('bootProbeStatus').textContent = 'Authenticating the connection…';
+      await authenticate();assertCurrent(s);
+      if (!s.verified) throw new Error('Session authentication did not complete. Reconnect and try again.');
+    }
+    if (!s.batchDone) {
+      $('bootProbeStatus').textContent = verifying ? 'Checking the bike after restart…' : 'Reading region and compatibility…';
+      await identifyDrive();assertCurrent(s);
+    }
+    if (verifying) {
+      // This click is verification only, even if readback clears the pending record.
+      if (!probeRecord?.verified) throw new Error('Original configuration could not be verified. Copy the log.');
+      $('bootProbeStatus').textContent = 'Original motor, firmware and region match. Test finished — tap Copy log.';
+      return;
+    }
+    if (!s.motorEligible) throw new Error('Bike compatibility was not verified. Copy the log.');
+    if (!s.motorAuthenticated) {
+      $('bootProbeStatus').textContent = 'Authenticating the motor…';
+      await authenticateMotor();assertCurrent(s);
+      if (!s.motorAuthenticated) throw new Error('Motor authentication did not complete. Copy the log.');
+    }
+    await runBootloaderProbe();
+  } catch (error) {
+    $('bootProbeStatus').textContent = error.message;
+  } finally {guidedTestRunning = false;controls();}
+}
+$('bootProbe').onclick=runGuidedBikeTest;
+if (probeRecord && !probeRecord.verified) $('bootProbeStatus').textContent = 'Turn the bike off and on, connect and enter your passkey, then tap Verify after restart.';
 
 let firmwareCheckGeneration = 0;
 $('firmwareFiles').onchange = async () => {

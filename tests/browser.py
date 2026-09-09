@@ -161,6 +161,7 @@ class BrowserTests(unittest.TestCase):
         self.page.add_init_script(MOCK.replace('OPTIONS', json.dumps(options)))
         self.page.route('https://shimano.test/', lambda route: route.fulfill(body=HTML, content_type='text/html'))
         self.page.goto('https://shimano.test/')
+        self.page.locator('summary').filter(has_text='Advanced diagnostics').click()
         self.page.locator('#connect').click()
         self.page.wait_for_function("!document.getElementById('probe').disabled")
         return self.page

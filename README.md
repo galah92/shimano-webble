@@ -351,28 +351,29 @@ supply actual connection lifecycle tokens and the same private identity salt.
 Matching readback does not establish power-cycle persistence; that remains
 an explicit live verification requirement.
 
-## Bootloader entry/exit probe (build .40)
+## Guided bike test (build .41)
 
-This is an experimental entry/read/reset test, not a firmware update. It requires
-the privately supplied 15-byte probe profile; no paid account is needed.
+No profile download, file selection, or paid account is required.
 
-1. Download the supplied profile to the phone. Open **Bootloader entry/exit experiment** and select it.
-2. Connect, authenticate the session, read region and compatibility, then authenticate the motor.
-3. Tap **Test bootloader entry and exit** once. Keep Chrome foregrounded.
-4. After it ends, turn the bike off and on. Reconnect, authenticate the session, and read region and compatibility.
-5. Copy the log. The page checks the same motor identity, native D 4.5.0.0 / M 4.4.8.0, and EU destination against the pre-probe baseline.
+1. Connect and enter the six-digit Shimano passkey.
+2. Tap **Run bike test**. Session authentication, compatibility reads, motor authentication and the entry/read/reset probe run automatically. Keep Chrome foregrounded.
+3. When prompted, turn the bike off and on, connect again and enter the passkey.
+4. Tap **Verify after restart**, then **Copy log**.
 
-Entry and reset have not yet been verified on the bike. The transport permits
-only the reviewed entry, information-read, and gated reset packets; it rejects
-erase, image transfer, and region-write packets. A failure stops the sequence.
-Reset ATT completion does not prove reboot or recovery from interrupted flashing.
+The verification click only reads the original motor identity, native D4.5.0.0 /
+M4.4.8.0 and EU destination; it never starts a second probe. Manual controls and
+the optional firmware-file checker are under **Advanced diagnostics**.
 
-The profile stays in memory and is consumed by the attempt. The same tab stores
-a salted motor fingerprint and original configuration for reconnect comparison;
-it does not save the raw serial or profile. A new BLE connection alone does not
-prove a physical power cycle or configuration persistence.
+The entry profile is now embedded at the user's request. It contains fixed
+source-derived entry parameters, not the user's passkey or motor serial. The
+passkey is still used locally, cleared after authentication, and not saved or
+logged. The same tab retains a salted motor fingerprint and configuration for
+reconnect comparison.
 
-Tests: `node tests/bootloader_probe.cjs` exercises the complete physical GATT
-sequence, all write failures/aborts, response timeouts, baseline/identity gates,
-and forbidden commands. `python tests/bootloader_probe_ui.py` checks profile
-validation, UI gates, one-attempt consumption, and reconnect verification wiring.
+Entry and reset remain unverified on the bike. This probe cannot send erase,
+firmware-data or region-write commands. Reset delivery does not prove reboot,
+interrupted-update recovery, or US-region persistence.
+
+Tests: `node tests/bootloader_probe.cjs` checks the physical sequence and failure
+handling. `python tests/bootloader_probe_ui.py` checks automatic sequencing,
+failed prerequisites and verification without a second probe.
