@@ -484,3 +484,80 @@ sequence is insufficient; it would not establish that a downgrade is required.
 The motor identification discrepancy also remains open: repeated live results
 and the original capture agree with the APK decoder's E50X0 / 4.5.0, rather
 than the original handoff's E7000 / 4.7.1. No firmware image is selected.
+
+## Build .13 live success and preparation/authorization trace
+
+The live test at 08:04:42 UTC returned `00 16 AE 00 00` and
+`00 16 AE 01 00`: both destination reads now work, and current destination
+is EU (0). The seven added setup steps are sufficient with our preceding
+sequence to enable these reads. Their individual necessity is not established.
+No unmatched capture 88 writes were needed.
+
+### The firmware gate is an application decision
+
+In eTuning 3.0.7, region activity `w.z` (lines 454–485) calls `Gh.w`.
+For the model decoded as DUE50X0, `Gh.a` yields family `Fh.k` (ordinal 10);
+`Gh.D` accepts only version 430. `Gh.w = Gh.x && !Gh.g && Gh.D`.
+Consequently 4.5.0 fails the direct-write gate and 4.3.0 passes it. This is
+not a device rejection or proof that a direct write would fail on 4.5.0.
+
+The preparation activity `f91a2.e0` contains a DUE50X0/E5000 choice
+`Ju(Ih.n, 0, "4.3.0")`. JADX warns about this method's reconstructed
+control flow, so the selection is a strong lead, not a verified full workflow.
+Independent decoding of `Ih.n` identifies family E5000, display label
+E5000 / E5080 / E5080-H, model identifiers DUE5000-D and DUE5000-M,
+and model code 34. Its separate `h` field contains 4.5.0; do not confuse
+that family metadata with the choice's explicit 4.3.0 target.
+
+The choice handler `f91a2.v0` dispatches `C0791y2.D`, which checks
+`Gh.c` and `X2.a`, obtains a file via `W2.a(choice.b, context, identifier)`,
+and passes it to `Oa.s(file, choice.a)`. `Oa` parses archive contents,
+constructs firmware candidate records and uses a digest routine. Preparation
+then leads to `f64d9`, which binds foreground service `f9c41`; its worker
+invokes `f9c41.U`, with `Th` implementing Bluetooth-related update logic.
+This establishes a firmware-package and installation path, not merely more
+session setup. Package selection, integrity/authenticity checks, bootloader
+entry, transfer acknowledgements and interruption recovery are not yet
+reconstructed sufficiently for a WebBLE firmware implementation. No package
+was downloaded or selected for flashing in this investigation.
+
+### A separate motor challenge/response path is still missing
+
+The new APK's `In.F6` model-code-34 branch calls `AbstractC0640tg.Q0`,
+setting flag L. The firmware handler enables Y when `f0()` (flag L) is true
+and version >=410. A motor serial reply (`00 01 3E`, at least ten bytes
+needed for all accesses) sets X through `b1()`. Thus E50X0 / 4.5.0 is
+eligible for this branch once the serial is read; this is also true at 4.3.0.
+
+`Q5` states 68–74 conditionally perform the following exchange on 2AFE:
+
+- Generate seven challenge bytes and a sixteen-byte key from the serial via
+  `J0` and its PRNG helper.
+- Send D8, with conditional E8 and D8 follow-ups based on response flags.
+- Assemble returned challenge data and encrypt it when the required flags
+  are present.
+- Send the sixteen-byte result in three E0 fragments, tagged 16, 26 and 34
+  (hexadecimal tags), conditional on the crypto-ready flag.
+
+The older APK has a corresponding branch at states 67–73. This is a
+motor-level challenge/response sequence distinct from 2AF3 session auth and
+from the setup that enabled destination reads. Its precise authorization
+scope and the necessary terminal-success criterion are not yet established.
+The current WebBLE app neither reads the motor serial nor runs this exchange.
+A scan of the supplied ATT trace found no 2AFE/2AFD packets with D8, E8,
+E0, DA, EA or E2 opcodes under `00 16`, so it supplies no ground-truth
+example for validating this branch. Serial and generated payloads must remain
+private and must not be included in public logs or fixtures.
+
+The direct destination setter remains `00 16 A8 01 <value>`; US is 1.
+The activity sends it after its gates; the receive parser has an AA callback.
+An ATT acknowledgement or that callback alone would not demonstrate durable
+configuration: a verified implementation needs current-destination readback
+and a reconnect/power-cycle persistence check. Nothing here establishes that
+this command alone is sufficient on 4.5.0, or that motor auth bypasses the
+firmware requirement. No destination setter, motor auth exchange, or firmware
+transfer has been sent by the WebBLE app.
+
+Next implementation boundary: reconstruct and test the motor exchange and its
+success criterion before attempting a persistent region change. Firmware
+preparation remains a separate, substantially larger implementation task.
