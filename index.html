@@ -347,12 +347,12 @@ END HANDOFF NOTES
 </div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
-<div class="row"><button id="copyLog">Copy log</button></div>
+<div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.11';
+const BUILD = '2026-09-09.12';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -856,6 +856,11 @@ function exportLog() {
     `BEGIN LOG (${snapshot.length} JavaScript characters)\n` + snapshot +
     `\nEND SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
 }
+$('clearLog').onclick = () => {
+  logEl.textContent = '';
+  try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+  $('exportStatus').textContent = 'Log cleared.';
+};
 $('copyLog').onclick = async () => {
   const snapshot = exportLog();
   try {

@@ -81,3 +81,6 @@ types. No new bike commands were added. Export tests: `python tests/log_export.p
 Build .11 recognizes the observed destination response `00 16 AF 3A` and stops
 further destination reads promptly. Its meaning is unresolved; it is never
 decoded as a region or treated as permission to change configuration.
+
+**Clear log** clears the visible and saved log history. It leaves the Bluetooth
+connection and bike state unchanged; subsequent messages continue logging normally.
