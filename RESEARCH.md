@@ -2171,3 +2171,23 @@ was added to the probe. The source D-only path does not establish recovery
 from an interrupted M transfer or compatibility of a mixed native pair.
 Those cases, same-motor identity and durable transaction tracking remain
 requirements before exposing firmware preparation.
+
+### Build .48: retain a bootloader identity reference
+
+The entry-only probe already reads the D loader's six serial bytes but used
+only family/unit in its result. It now hashes a snapshot of those bytes with
+the probe's random16-byte salt, domain DBL1, family and unit. The resulting
+versioned fingerprint is stored alongside the application baseline in the
+existing sessionStorage probe record before requesting reset. Application and
+bootloader serial formats are not assumed equivalent. Raw loader serial bytes
+are cleared after hashing and excluded from results and saved records.
+
+This adds no BLE commands: the probe still uses38 physical writes. Tests
+cover repeatability, different identity/salt, input snapshots, invalid serial
+fields, callback isolation/failure, all existing probe failures and UI record
+retention through reload and reconnect verification. No recovery or transfer
+caller consumes this reference yet. Older records lack it; they must not be
+treated as having a verified bootloader reference. Session storage is not a
+durable cross-tab or browser-loss recovery journal. No additional live probe
+is requested merely to populate this field; a future preparation preflight
+will need a fresh identity reference once the full procedure is established.

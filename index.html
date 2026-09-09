@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.47';
+const BUILD = '2026-09-09.48';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1190,6 +1190,20 @@ async function queryDBootloaderIdentity({write, subscribe, signal}) {
     // j1 requests these but does not decode them; do not invent a version.
     versionReplies: fields.slice(0, 2), installable: false};
 }
+async function fingerprintDBootloaderIdentity(identity, identitySalt) {
+  if (!identity || identity.family !== 34 || identity.unit !== 0 ||
+      !(identity.serial instanceof Uint8Array) || identity.serial.length !== 6 ||
+      identity.serial.every(b=>b===0) || identity.serial.every(b=>b===255) ||
+      !(identitySalt instanceof Uint8Array) || identitySalt.length !== 16)
+    throw new Error('Complete E5000 bootloader identity and salt required');
+  // Separate bootloader and application identities: their serial layouts
+  // have not been shown equivalent. Snapshot before the asynchronous hash.
+  const input=Uint8Array.of(68,66,76,49,...identitySalt,identity.family,identity.unit,...identity.serial);
+  try {
+    const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',input));
+    return {version:1,family:34,unit:0,identity:Array.from(digest,b=>b.toString(16).padStart(2,'0')).join('')};
+  } finally {input.fill(0);}
+}
 function checkDBootloaderImage(data, identity) {
   const header = firmwareHeader(data);
   if (header.component !== 'D') throw new Error('Expected a D image');
@@ -1433,16 +1447,17 @@ function createBootloaderProbeWriter(characteristics, credentials, signal) {
     close() { closed=true;signatures.clear();writer.close(); }
   };
 }
-async function probeBootloaderRoundTrip({characteristics,subscribe,signal,credentials,identitySalt,onBaseline,onStage,onDiagnostic}) {
+async function probeBootloaderRoundTrip({characteristics,subscribe,signal,credentials,identitySalt,onBaseline,onBootloaderIdentity,onStage,onDiagnostic}) {
   if (!(credentials instanceof Uint8Array)||credentials.length!==15) throw new Error('Invalid probe profile');
-  const profile=credentials.slice();
+  if (!(identitySalt instanceof Uint8Array)||identitySalt.length!==16) throw new Error('Invalid identity salt');
+  const probeSalt=identitySalt.slice(),profile=credentials.slice();
   const writer=createBootloaderProbeWriter(characteristics,profile,signal);
   const transport={write:writer.write,subscribe,signal,onDiagnostic};
   let stage='baseline',resetRequested=false;
   const advance=name=>{stage=name;onStage?.(name);};
   try {
     advance('baseline');
-    const baseline=await readFirmwareBaseline({...transport,identitySalt});
+    const baseline=await readFirmwareBaseline({...transport,identitySalt:probeSalt});
     if (baseline.dVersion!=='4.5.0.0'||baseline.mVersion!=='4.4.8.0'||baseline.destination!==0)
       throw new Error('Probe baseline differs from the verified original EU pair');
     onBaseline?.(baseline);
@@ -1458,15 +1473,19 @@ async function probeBootloaderRoundTrip({characteristics,subscribe,signal,creden
     advance('D-bootloader-identity');
     const dBoot=await queryDBootloaderIdentity({...transport,write:p=>writer.write('2afa',p)});
     if(dBoot.family!==34||dBoot.unit!==0) throw new Error('Unexpected D bootloader family/unit');
+    let bootloaderIdentity;
+    try {bootloaderIdentity=await fingerprintDBootloaderIdentity(dBoot,probeSalt);}
+    finally {dBoot.serial.fill(0);}
+    await onBootloaderIdentity?.({...bootloaderIdentity});
     advance('reset-request');
     writer.allowReset();resetRequested=true;
     await requestDFirmwareReset({write:p=>writer.write('2afa',p),signal});
     return {state:'probe-reset-requested',mBootloaderVersion:mBoot.version,family:dBoot.family,unit:dBoot.unit,
-      resetRequested,firmwareDataSent:false,rebootVerified:false};
+      bootloaderIdentity,resetRequested,firmwareDataSent:false,rebootVerified:false};
   } catch(cause) {
     const error=new Error(`Bootloader probe stopped during ${stage}; reconnect and verify the original pair`);
     Object.assign(error,{stage,resetRequested,firmwareDataSent:false});throw error;
-  } finally {writer.close();profile.fill(0);}
+  } finally {writer.close();profile.fill(0);probeSalt.fill(0);}
 }
 // END FIRMWARE FILE CHECKS
 const STORAGE_KEY = 'shimano-webble-log-v2';
@@ -2340,6 +2359,7 @@ async function runBootloaderProbe() {
   try {
     const result=await probeBootloaderRoundTrip({characteristics:s.chars,subscribe:probeSubscription(s),signal:s.controller.signal,credentials:profile,identitySalt:salt,
       onBaseline(baseline){probeRecord={version:1,connection:s.probeToken,salt:hex(salt).replaceAll(' ','').toLowerCase(),expected:baseline,verified:false};saveProbeRecord();},
+      onBootloaderIdentity(identity){assertCurrent(s);probeRecord.bootloaderIdentity=identity;saveProbeRecord();},
       onDiagnostic(event){
         const detail=event.packet?` TX ${event.characteristic.toUpperCase()} ${hex(event.packet)}`
           :event.prefix?` ${hex(event.prefix)} (${event.length} bytes; header only)`

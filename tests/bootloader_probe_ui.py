@@ -22,6 +22,7 @@ with sync_playwright() as p:
         calls.push('probe');
         if(opts.credentials.length!==15)throw Error('Missing embedded profile');
         opts.onBaseline({identity:'a'.repeat(64),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:0});
+        await opts.onBootloaderIdentity({version:1,family:34,unit:0,identity:'b'.repeat(64)});
         opts.onStage('reset-request');
         return {mBootloaderVersion:[2,0,3,0],family:34,unit:0};
       };
@@ -46,6 +47,7 @@ with sync_playwright() as p:
     expect(page.locator('#bootProbeStatus')).to_contain_text('Test finished')
     assert page.evaluate('calls')==['session','read']
     assert page.evaluate('probeRecord.verified')
+    assert page.evaluate("probeRecord.bootloaderIdentity.identity==='b'.repeat(64)")
     # A failed prerequisite must never reach the probe.
     for failure,expected in [('session',['session']),('read',['session','read']),('motor',['session','read','motor'])]:
         page.evaluate('''failure=>{
@@ -60,6 +62,7 @@ with sync_playwright() as p:
         assert page.evaluate('calls')==expected
     page.reload()
     assert page.evaluate('probeRecord.verified')
+    assert page.evaluate("probeRecord.bootloaderIdentity.identity==='b'.repeat(64)")
     page.evaluate("text => { logEl.textContent=text; }", "[one] Connected; first\n[one] Bootloader entry/exit probe started.\n[one] stopped\n[two] Connected; second\n[two] Post-probe readback: matches\n")
     copied=page.evaluate('exportLog()')
     assert 'stopped' in copied and 'Post-probe readback' in copied

@@ -3,8 +3,8 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const {webcrypto}=require('node:crypto');
 const code=fs.readFileSync(__dirname+'/../index.html','utf8').split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE FILE CHECKS')[0];
 const credentials=()=>Uint8Array.from({length:15},(_,i)=>i+1);
-async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,wrongBaseline=false,dropPca=false}={}) {
- let now=0,id=0,listener=null,result,error,stage='',status=141,selector=13,baseline;
+async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,wrongBaseline=false,dropPca=false,failIdentityRecord=false}={}) {
+ let now=0,id=0,listener=null,result,error,stage='',status=141,selector=13,baseline,bootloaderIdentity;
  const timers=new Map(),calls=[],stages=[],diagnostics=[],controller=new AbortController();
  const ctx=vm.createContext({Uint8Array,Error,AbortController,crypto:webcrypto,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});
  vm.runInContext(code,ctx);
@@ -36,7 +36,7 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
  }
  const characteristic=name=>({async writeValueWithResponse(p){native(name,p);},async writeValueWithoutResponse(){throw Error('Probe must never send fragmented firmware data');}});
  const promise=ctx.probeBootloaderRoundTrip({characteristics:{'2afa':characteristic('2afa'),'2afe':characteristic('2afe')},credentials:credentials(),identitySalt:new Uint8Array(16).fill(7),signal:controller.signal,
-  subscribe(fn){assert.equal(listener,null);listener=fn;return()=>listener=null;},onDiagnostic(e){diagnostics.push(e);},onBaseline(b){baseline=b;},onStage(s){stage=s;stages.push(s);if(s==='D-update-entry'){selector=0;status=128;}}
+  subscribe(fn){assert.equal(listener,null);listener=fn;return()=>listener=null;},onDiagnostic(e){diagnostics.push(e);},onBaseline(b){baseline=b;},onBootloaderIdentity(value){assert.equal(stage,'D-bootloader-identity');bootloaderIdentity=value;if(failIdentityRecord)throw Error('Record failed');value.identity='mutated callback copy';},onStage(s){stage=s;stages.push(s);if(s==='D-update-entry'){selector=0;status=128;}}
  }).then(r=>result=r,e=>error=e);
  for(let i=0;i<1000&&!result&&!error;i++){
   await new Promise(setImmediate);if(result||error)break;
@@ -44,10 +44,25 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
   now=Math.min(...[...timers.values()].map(t=>t.at));for(const [key,t]of[...timers])if(t.at<=now){timers.delete(key);t.fn();}
  }
  await promise;assert.equal(timers.size,0);assert.equal(listener,null);
- return {result,error,calls,stages,baseline,ctx,diagnostics};
+ return {result,error,calls,stages,baseline,bootloaderIdentity,ctx,diagnostics};
 }
 (async()=>{
  const ok=await run();assert(!ok.error,ok.error?.message);assert(ok.result.resetRequested);assert.equal(ok.result.rebootVerified,false);assert.equal(ok.result.firmwareDataSent,false);assert(ok.baseline.identity);
+ assert.match(ok.result.bootloaderIdentity.identity,/^[a-f0-9]{64}$/);
+ assert.notEqual(ok.result.bootloaderIdentity.identity,ok.baseline.identity);
+ assert.equal(ok.bootloaderIdentity.identity,'mutated callback copy');
+ assert(!JSON.stringify(ok.result).includes('serial'));
+ const failedRecord=await run({failIdentityRecord:true});assert(failedRecord.error);assert(!failedRecord.error.resetRequested);assert.equal(failedRecord.calls.length,ok.calls.length-1);
+ const salt=new Uint8Array(16).fill(7),identity={family:34,unit:0,serial:Uint8Array.of(9,8,7,6,5,4)};
+ const proof=await ok.ctx.fingerprintDBootloaderIdentity(identity,salt);
+ assert.equal(proof.identity,ok.result.bootloaderIdentity.identity);
+ const pendingProof=ok.ctx.fingerprintDBootloaderIdentity(identity,salt);identity.serial.fill(3);salt.fill(2);
+ assert.equal((await pendingProof).identity,proof.identity);
+ assert.notEqual((await ok.ctx.fingerprintDBootloaderIdentity(identity,salt)).identity,proof.identity);
+ for(const serial of [new Uint8Array(6),new Uint8Array(6).fill(255),new Uint8Array(5)])
+  await assert.rejects(ok.ctx.fingerprintDBootloaderIdentity({...identity,serial},salt));
+ await assert.rejects(ok.ctx.fingerprintDBootloaderIdentity({...identity,family:35},salt));
+ await assert.rejects(ok.ctx.fingerprintDBootloaderIdentity(identity,new Uint8Array(15)));
  for(const late of [false,true])for(let fail=0;fail<ok.calls.length;fail++){
   const r=await run({fail,late});assert(r.error);assert.equal(r.calls.length,fail+1);assert.equal(r.error.resetRequested,fail===ok.calls.length-1);
  }
