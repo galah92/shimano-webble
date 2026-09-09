@@ -192,8 +192,10 @@ destination remained EU (0). The sanitized baseline is in
 `tests/bike_baseline.json`. Use `--installed-d 4.5.0.0 --installed-m 4.4.8.0`
 to compare candidate files with this observation. The archived D 4.3.0 / M 4.2.1
 pair selects two downgrades, M then D. This does not establish that both are
-required, that the pair matches eTuning's preparation package, or that it is
-installable. Exact-version restoration assets were subsequently recovered from
+required or that it is installable. The pair now matches eTuning's freely
+downloadable historical E5000 preparation ZIP byte for byte; this does not
+establish the current app server's response. No paid account is required to
+obtain these published files. Exact-version restoration assets were recovered from
 the archived desktop 5.3.4 package: raw M 4.4.8.0 and wrapped D 4.5.0.0.
 Offline D unwrapping passed its embedded digest/length checks and header
 inspection. Transfer and recovery compatibility remain unverified; see

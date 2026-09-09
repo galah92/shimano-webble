@@ -1149,7 +1149,7 @@ The goal remains incomplete against the actual acceptance criteria:
 | Motor identification | Repeated electronic family code 22/00; descriptor all zero; .18 native D 4.5.0.0 and M 4.4.8.0 |
 | Motor authentication | E2 FF FF observed repeatedly; does not establish region-write permission |
 | US destination change | Two direct writes rejected AB/3A; later read remained EU |
-| Preparation assets | Archived E5000 D 4.3.0 / M 4.2.1 present and classified; actual eTuning preparation pair and bike compatibility unverified |
+| Preparation assets | D 4.3.0 / M 4.2.1 matches the freely published historical eTuning E5000 package byte for byte; current server response and bike installation remain unverified |
 | Baseline restoration assets | Desktop 5.3.4 contains catalog-matched D 4.5.0 / M 4.4.8; D unwrapped with embedded digest/length verification; installation and recovery unverified |
 | Firmware update/recovery | Source-derived offline models and synthetic tests; no real transfer trace or controlled update validation |
 | Fresh US readback and power-cycle persistence | Not achieved |
@@ -1329,3 +1329,37 @@ M failure as a completed rollback is justified. A browser implementation
 needs a validated handover, bootloader identity/setup, and failure-recovery
 path in addition to the existing offline block codecs. Those gaps remain;
 no bootloader entry or firmware command was added to the live page.
+
+## Public historical preparation package resolves the asset-source gap
+
+The user has no paid eTuning access. Inspecting the embedded links in the
+public https://etuning-app.com/downgrade.pdf revealed an unauthenticated E5000
+download: https://etuning-app.com/wp-content/uploads/2024/11/5000_430.zip.
+The guide is marked historical because preparation is now integrated into the
+app. It identifies E5000/E5080 4.3.0 for downgrading from 4.4 or higher and
+describes installing renamed files through an older E-TUBE mobile version.
+This source supports an independently obtained historical asset pair; paid
+access is not a prerequisite for acquiring it.
+
+ZIP size: 146,098 bytes. SHA-256:
+`4dee4d75ee83c22e951114cbf57332709c15be637ec2a8171bd82f9345adb137`.
+
+| Public filename | Internal version | Bytes | SHA-256 |
+| --- | --- | --- | --- |
+| DUE5000-D.5.3.0.dat | 4.3.0.0 | 132072 | 3d3df4dfe3de333062f445b6719fa5033f93dc9d384448134ee6041d216c6af0 |
+| DUE5000-M.5.2.1.dat | 4.2.1.0 | 116320 | 10190fd78e6527908c0e43405184c414b612bc4becce9ca5483612665ced6b56 |
+
+Direct byte-array comparisons against the privately extracted desktop 4.0.2
+files returned equal for both images. The higher filename versions differ
+from the internal versions, as expected for the documented older updater
+workflow. Our inspector correctly uses the header, not the filename.
+The underlying payloads are unchanged; this finding supersedes the earlier
+requirement for paid access to establish *a published preparation package*.
+It does not prove what the modern app server currently supplies, but that
+response is no longer the sole possible source for the independent project.
+
+The public binaries remain outside the repository. No firmware was sent to
+the bike. Next work is implementation and validation of the paired BLE update,
+bootloader handover and recovery using this source-identified pair and the
+matching restoration assets. The guide is supporting evidence, not a live
+test of WebBLE on this Pixel/bike; US configuration remains unachieved.
