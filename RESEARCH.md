@@ -1034,3 +1034,36 @@ its D transport wrapper and throws on transport failure. A fresh connection
 and native D/M version readback are therefore required by our completion
 criterion even when this source worker returns true. Reset acknowledgement
 alone cannot prove application startup, version persistence or region change.
+
+## E5000 M reply correlation
+
+`C0776xk.F0` registers `C0644tk` before sending outer command 0B with payload
+`querySequence 03 dataSequence`. Its response deadline is three seconds after
+that write completes. The observer examines normalized `Dn` records from
+`Hn.K`; these are not the raw GATT payloads.
+
+For a protocol byte satisfying `(protocol & 0B) == 0B`, the observer recognizes:
+
+- normalized byte 1 = 83, byte 2 = query sequence: byte 3 is query status;
+  a positive status terminates `F0` as failure;
+- byte 1 = 91 or 92, byte 2 = data sequence: a data-status observation,
+  recorded separately from acknowledgement;
+- byte 1 = C0, byte 2 = data sequence: the matching packet acknowledgement.
+  C0 with another sequence is counted but does not acknowledge this packet.
+
+For E5000 checkpoint blocks, `e1` scans the normalized payload for the first
+`F2 00` marker. Status 31 is the checksum-success marker and 32 is failure.
+This marker has no sequence correlation and the source scan is not gated by
+the protocol mask. `F0` requires a matching packet acknowledgement and a
+checkpoint result; a missing checkpoint result fails at the shared deadline.
+Checksum failure and positive query-error status take precedence over success.
+Non-checkpoint blocks do not require a checksum result. The EP-specific extra
+checksum-query path (`p1`) is false for E5000 and must not be imported into it.
+
+`tools/m_reply.py` records these distinct observations from an already-normalized
+envelope. Four synthetic tests exercise wrong sequences, protocol masks,
+truncated messages, first-marker behavior and the lack of checksum correlation.
+It deliberately exposes `uncorrelated_checksum_status`; it does not decide that
+an image block can be committed or retried. Raw `Hn.K` framing, notification
+fragmentation and late checkpoint results remain to be validated before this
+can drive an updater. No new bike command or deployed HTML change was needed.
