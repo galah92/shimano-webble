@@ -359,7 +359,49 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.19';
+const BUILD = '2026-09-09.20';
+// BEGIN FIRMWARE PACKET ENCODERS
+// C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
+// scheduler must account for queries and retries. These functions never send.
+function firmwareSum(data) {
+  return data.reduce((sum, byte) => (sum + byte) & 255, 0);
+}
+function firmwareBlock(data, component, offset, sequence) {
+  const limit = component === 'D' ? 3 * 65536 : component === 'M' ? 0x40000 : 0;
+  if (!(data instanceof Uint8Array) || !data.length || data.length > limit)
+    throw new Error('Image outside modeled component address range');
+  if (!Number.isInteger(offset) || offset < 0 || offset >= data.length || offset % 64)
+    throw new Error('Expected a block-aligned offset within the image');
+  if (!Number.isInteger(sequence) || sequence < 0 || sequence > 255)
+    throw new Error('Expected an unsigned sequence byte');
+  const end = Math.min(data.length, offset + 64);
+  const chunk = data.subarray(offset, end);
+  const windowStart = Math.floor(offset / 1024) * 1024;
+  const checkpoint = component === 'M' && end === Math.min(data.length, windowStart + 1024);
+  // Outer transport command 0B followed by the component-specific inner payload.
+  const packet = new Uint8Array(component === 'D' || checkpoint ? 71 : 68);
+  packet.set([0x0b, sequence, component === 'D' ? 2 : checkpoint ? 0x12 : 0x11, 0]);
+  if (component === 'D') packet.fill(255, 4, 68);
+  packet.set(chunk, 4);
+  if (component === 'D') {
+    const index = offset / 64;
+    packet[68] = firmwareSum(packet.subarray(4, 68));
+    packet[69] = index & 255;
+    packet[70] = index >> 8;
+  } else if (checkpoint) {
+    packet[68] = firmwareSum(data.subarray(windowStart, end));
+  }
+  return packet;
+}
+function firmwareTransferGeometry(data, component) {
+  // Validate the range with the encoder, without constructing a transfer session.
+  firmwareBlock(data, component, 0, 0);
+  const blocks = Math.ceil(data.length / 64);
+  return {blocks, padding: blocks * 64 - data.length,
+    checksum: firmwareSum(data), checkpoints: component === 'M' ? Math.ceil(data.length / 1024) : 0};
+}
+// END FIRMWARE PACKET ENCODERS
+
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.
 // Hashes identify reviewed source files, not hardware compatibility or permission to flash.
@@ -402,13 +444,13 @@ async function checkFirmwarePair(files) {
     const hash = Array.from(digest, b => b.toString(16).padStart(2, '0')).join('');
     const source = FIRMWARE_IMAGES[hash];
     if (!source) throw new Error('File does not match a reviewed preparation or restoration image');
-    headers.push({...header, source});
+    headers.push({...header, source, geometry: firmwareTransferGeometry(data, header.component)});
   }
   const d = headers.find(h => h.component === 'D'), m = headers.find(h => h.component === 'M');
   if (!d || !m) throw new Error('A pair needs one D and one M image');
   if (d.source !== m.source || !firmwarePairRequirements(d, m)) throw new Error('Mixed or incompatible component pair');
   // No bytes or authorization token are retained. A future installer must revalidate its inputs.
-  return {source: d.source, dVersion: d.version.join('.'), mVersion: m.version.join('.'), installable: false};
+  return {source: d.source, dVersion: d.version.join('.'), mVersion: m.version.join('.'), dGeometry: d.geometry, mGeometry: m.geometry, installable: false};
 }
 // END FIRMWARE FILE CHECKS
 const STORAGE_KEY = 'shimano-webble-log-v2';
@@ -1212,7 +1254,7 @@ $('firmwareFiles').onchange = async () => {
   try {
     const pair = await checkFirmwarePair(files);
     if (generation !== firmwareCheckGeneration) return;
-    const message = `Verified ${pair.source} files: D ${pair.dVersion}, M ${pair.mVersion}. Pair requirements pass. Installation is not available yet.`;
+    const message = `Verified ${pair.source} files: D ${pair.dVersion}, M ${pair.mVersion}. Pair requirements pass. Transfer: ${pair.mGeometry.blocks} M blocks, ${pair.mGeometry.checkpoints} checkpoints, then ${pair.dGeometry.blocks} D blocks. Installation is not available yet.`;
     $('firmwareStatus').textContent = message;
     log(message);
   } catch (error) {

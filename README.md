@@ -217,3 +217,8 @@ uses internal versions rather than file names, and rejects mixed pairs. It
 requires raw files (the restoration D wrapper is not supported). Passing this
 check does not enable installation; firmware transfer and recovery remain in
 development. No additional bike test is needed for this build.
+
+Build .20 adds the D/M packet encoders and reports transfer block counts when
+local files pass validation. Their full output matches the offline codecs for
+both preparation and restoration images. Transfer remains unavailable until
+reply handling, bootloader handover and recovery are validated.

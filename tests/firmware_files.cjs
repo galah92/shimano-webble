@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const {webcrypto} = require('node:crypto');
 const html = fs.readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-const code = html.split('// BEGIN FIRMWARE FILE CHECKS')[1].split('// END FIRMWARE FILE CHECKS')[0];
+const code = html.split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE FILE CHECKS')[0];
 const context = vm.createContext({Uint8Array, crypto: webcrypto});
 vm.runInContext(code, context);
 const {firmwareHeader: header, firmwarePairRequirements: pair, checkFirmwarePair: check} = context;

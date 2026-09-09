@@ -1385,3 +1385,26 @@ Validation: Node tests exercise the exact page functions, including both mixed
 pair failures and unknown-file rejection. Private integration checks use all
 four actual images, reversed file order, duplicates and one-byte corruption.
 A Chromium check covers page startup and invalid-file/cleared-picker feedback.
+
+## Build .20: browser D/M packet encoders
+
+Ported the separately Java-oracle-validated Python encoders into the single
+HTML page. Both take an explicit sequence byte; neither allocates sequence
+numbers nor sends BLE operations. D pads with FF, includes a padded block
+checksum and little-endian block index. M pads with zero and includes the
+1024-byte window checksum at checkpoints, including a zero-valued checksum.
+The final image checksum excludes padding. Modeled address ranges are enforced,
+not claimed as verified device flash capacities.
+
+The local pair checker now reports block/checkpoint counts after file hashes
+and headers pass. It retains no packets or firmware bytes. Packet generation
+is available for the future scheduler but not connected to BLE writes.
+
+`tests/firmware_packets.py` compares whole JS packet streams to the Python
+codecs (whose byte layouts were checked against the decompiled Java), using
+24 synthetic cases plus four optional private real images. All 28 matched,
+including non-aligned image ends, window/bank transitions, maximum modeled
+sizes, sequence wraparound and all-zero checksum windows. This validates
+encoding parity, not successful transfer on SC-E7000. Local file-check tests
+and the Chromium picker test also pass. Next: correlated reply handling and
+worker state transitions, followed by paired handover/recovery validation.
