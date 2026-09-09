@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.49';
+const BUILD = '2026-09-09.50';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -931,7 +931,7 @@ function dFirmupReply(raw, stage) {
   return raw.length > offset + 1 && raw[offset + 1] === stage ?
     {accepted: true} : {error: 'FIRMUP reply has wrong or missing stage'};
 }
-async function enterDBootloader({write, subscribe, signal, mode, targetSelector, credentials, recoveryInstall=false}) {
+async function enterDBootloader({write, subscribe, signal, mode, targetSelector, credentials, recoveryInstall=false, onDiagnostic}) {
   if (typeof recoveryInstall !== 'boolean' || recoveryInstall && (mode !== 32 || targetSelector !== 0))
     throw new Error('D recovery requires explicit mode32/selector0');
   if ((mode !== 0 && mode !== 32) || !Number.isInteger(targetSelector) || targetSelector < 0 || targetSelector > 31)
@@ -964,18 +964,25 @@ async function enterDBootloader({write, subscribe, signal, mode, targetSelector,
     } finally { packet.fill(0); }
   };
   try {
-    await setMode(mode, targetSelector);
+    const recoveryStep=async(name,run)=>{
+      const step='D-recovery-'+name;
+      onDiagnostic?.({step,event:'request'});
+      try {await run();onDiagnostic?.({step,event:'accepted'});}
+      catch(error){onDiagnostic?.({step,event:'stopped',reason:signal?.aborted?'disconnected':'rejected-or-timeout'});throw error;}
+    };
     if (recoveryInstall) {
+      await recoveryStep('mode',()=>setMode(mode,targetSelector));
       // Th.d3 -> C0041b7.t1/o1/v1: D-only recovery, no normal priming
       // or second bridge-mode change. Bound this to one attempt.
       await firmwareDelay(100, signal);
-      await slot(0);
-      for (let stage = 1; stage <= 4; stage++) await sendStage(stage, true);
-      await sendStage(5, false);
+      await recoveryStep('slot',()=>slot(0));
+      for (let stage = 1; stage <= 4; stage++) await recoveryStep('stage-'+stage,()=>sendStage(stage,true));
+      await recoveryStep('stage-5-write',()=>sendStage(5,false));
       await firmwareDelay(150, signal);
-      await sendStage(5, true);
+      await recoveryStep('stage-5-reply',()=>sendStage(5,true));
       return {state:'D-recovery-entry-acknowledged',bootloaderVerified:false,installable:false};
     }
+    await setMode(mode,targetSelector);
     await slot(31);
     // Source deliberately primes stage1 four times without response matching.
     // This is a fixed entry sequence, not a retry after uncertain delivery.
@@ -1497,11 +1504,19 @@ async function probeBootloaderRoundTrip({characteristics,subscribe,signal,creden
     try {bootloaderIdentity=await fingerprintDBootloaderIdentity(dBoot,probeSalt);}
     finally {dBoot.serial.fill(0);}
     await onBootloaderIdentity?.({...bootloaderIdentity});
+    advance('D-recovery-entry');
+    await enterDBootloader({...transport,mode:32,targetSelector:0,credentials:profile,recoveryInstall:true});
+    advance('D-recovery-identity');
+    const recovered=await queryDBootloaderIdentity({...transport,write:p=>writer.write('2afa',p)});
+    try {
+      const fingerprint=await fingerprintDBootloaderIdentity(recovered,probeSalt);
+      if(fingerprint.identity!==bootloaderIdentity.identity) throw new Error('Recovery motor identity differs');
+    } finally {recovered.serial.fill(0);}
     advance('reset-request');
     writer.allowReset();resetRequested=true;
     await requestDFirmwareReset({write:p=>writer.write('2afa',p),signal});
     return {state:'probe-reset-requested',mBootloaderVersion:mBoot.version,family:dBoot.family,unit:dBoot.unit,
-      bootloaderIdentity,resetRequested,firmwareDataSent:false,rebootVerified:false};
+      bootloaderIdentity,recoveryEntryIdentityMatches:true,resetRequested,firmwareDataSent:false,rebootVerified:false};
   } catch(cause) {
     const error=new Error(`Bootloader probe stopped during ${stage}; reconnect and verify the original pair`);
     Object.assign(error,{stage,resetRequested,firmwareDataSent:false});throw error;
@@ -2387,7 +2402,7 @@ async function runBootloaderProbe() {
         log(`Entry ${event.step}: ${event.event}${detail}`);
       },
       onStage(stage){log(`Bootloader probe stage: ${stage}`);$('bootProbeStatus').textContent=stage;}});
-    log(`Bootloader information: M loader ${result.mBootloaderVersion.join('.')}; D family ${result.family}, unit ${result.unit}. Reset write completed; reboot not yet verified.`);
+    log(`Bootloader information: M loader ${result.mBootloaderVersion.join('.')}; D family ${result.family}, unit ${result.unit}. Recovery entry identity matches: ${result.recoveryEntryIdentityMatches===true?'yes':'unverified'}. Reset write completed; reboot not yet verified.`);
   } catch(error) {
     log(`Bootloader probe stopped at ${error.stage||'initialization'}. Reset requested: ${error.resetRequested?'yes':'no'}. Firmware images were not sent.`);
   } finally {

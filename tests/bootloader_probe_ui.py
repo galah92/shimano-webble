@@ -24,7 +24,7 @@ with sync_playwright() as p:
         opts.onBaseline({identity:'a'.repeat(64),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:0});
         await opts.onBootloaderIdentity({version:1,family:34,unit:0,identity:'b'.repeat(64)});
         opts.onStage('reset-request');
-        return {mBootloaderVersion:[2,0,3,0],family:34,unit:0};
+        return {mBootloaderVersion:[2,0,3,0],family:34,unit:0,recoveryEntryIdentityMatches:true};
       };
     }''')
     page.locator('#bootProbe').click()
@@ -35,6 +35,7 @@ with sync_playwright() as p:
     expect(page.locator('#bootProbeStatus')).to_contain_text('Turn the bike off and on')
     assert page.evaluate('calls')==['session','read','motor','probe']
     assert page.evaluate('session===null && !busy && !guidedTestRunning')
+    expect(page.locator('#log')).to_contain_text('Recovery entry identity matches: yes')
     assert page.evaluate("JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)).verified===false")
     # Verification must stop after reading, without motor authentication or a second probe.
     page.evaluate('''() => {

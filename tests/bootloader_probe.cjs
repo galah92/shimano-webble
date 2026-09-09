@@ -3,7 +3,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const {webcrypto}=require('node:crypto');
 const code=fs.readFileSync(__dirname+'/../index.html','utf8').split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE FILE CHECKS')[0];
 const credentials=()=>Uint8Array.from({length:15},(_,i)=>i+1);
-async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,wrongBaseline=false,dropPca=false,failIdentityRecord=false}={}) {
+async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,wrongBaseline=false,dropPca=false,failIdentityRecord=false,wrongRecoveryIdentity=false}={}) {
  let now=0,id=0,listener=null,result,error,stage='',status=141,selector=13,baseline,bootloaderIdentity;
  const timers=new Map(),calls=[],stages=[],diagnostics=[],controller=new AbortController();
  const ctx=vm.createContext({Uint8Array,Error,AbortController,crypto:webcrypto,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});
@@ -25,10 +25,10 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
    else if(name==='2afa'&&logical[0]===6)rx([38,0]);
    else if(logical[1]===50){if(!dropPca)rx([0,50,34,1,0,0,0,0,0,0]);}
    else if(stage==='M-bootloader-version'){assert.deepEqual(logical,[0,240,0,65,0,0,0]);rx([242,0,81,32,3,0]);}
-   else if(stage==='D-bootloader-entry'){
+   else if((stage==='D-bootloader-entry'||stage==='D-recovery-entry')){
     assert.equal(logical[0],136);const s=logical[1];assert(s>=1&&s<=5);assert.deepEqual(logical.slice(2),[3*s-2,3*s-1,3*s]);rx([0,136,17,s]);
-   } else if(stage==='D-bootloader-identity'){
-    const replies={46:[58],47:[59],48:[60,wrongIdentity?35:34,0],41:[53,9,8,7],42:[54,6,5,4]};
+   } else if((stage==='D-bootloader-identity'||stage==='D-recovery-identity')){
+    const replies={46:[58],47:[59],48:[60,wrongIdentity?35:34,0],41:[53,wrongRecoveryIdentity&&stage==='D-recovery-identity'?8:9,8,7],42:[54,6,5,4]};
     assert.equal(logical[0],136);assert(replies[logical[1]]);rx([136,...replies[logical[1]]]);
    } else {assert.equal(stage,'reset-request');assert.deepEqual(logical,[136,40,0,0,0]);}
   }
@@ -48,11 +48,14 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
 }
 (async()=>{
  const ok=await run();assert(!ok.error,ok.error?.message);assert(ok.result.resetRequested);assert.equal(ok.result.rebootVerified,false);assert.equal(ok.result.firmwareDataSent,false);assert(ok.baseline.identity);
+ assert.equal(ok.calls.length,52);assert.equal(ok.result.recoveryEntryIdentityMatches,true);
+ const wrongRecovery=await run({wrongRecoveryIdentity:true});assert(wrongRecovery.error);assert.equal(wrongRecovery.error.stage,'D-recovery-identity');assert(!wrongRecovery.error.resetRequested);
+ assert(ok.diagnostics.some(e=>e.step==='D-recovery-stage-5-reply'&&e.event==='accepted'));
  assert.match(ok.result.bootloaderIdentity.identity,/^[a-f0-9]{64}$/);
  assert.notEqual(ok.result.bootloaderIdentity.identity,ok.baseline.identity);
  assert.equal(ok.bootloaderIdentity.identity,'mutated callback copy');
  assert(!JSON.stringify(ok.result).includes('serial'));
- const failedRecord=await run({failIdentityRecord:true});assert(failedRecord.error);assert(!failedRecord.error.resetRequested);assert.equal(failedRecord.calls.length,ok.calls.length-1);
+ const failedRecord=await run({failIdentityRecord:true});assert(failedRecord.error);assert(!failedRecord.error.resetRequested);assert(!failedRecord.stages.includes('D-recovery-entry'));
  const salt=new Uint8Array(16).fill(7),identity={family:34,unit:0,serial:Uint8Array.of(9,8,7,6,5,4)};
  const proof=await ok.ctx.fingerprintDBootloaderIdentity(identity,salt);
  assert.equal(proof.identity,ok.result.bootloaderIdentity.identity);

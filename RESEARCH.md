@@ -2214,3 +2214,22 @@ automatic reset; it does not undo the preceding M transfer.
 No UI caller enables transfers or recovery. This closes the D same-motor
 guard gap; it does not implement a fresh baseline reader in the coordinator,
 a durable transaction journal, or recovery of a partly written M image.
+
+### Build .50: bounded recovery handshake in the guided bike test
+
+The existing normal entry/read/reset probe now includes the source-derived
+D recovery-entry sequence after first reading and fingerprinting D identity.
+It then repeats the five identity reads and requires the same fingerprint
+before its reset request. Fixed recovery substeps have request/accepted/stop
+diagnostics without credential or serial payloads. The probe command
+allowlist is unchanged: erase, serial programming, image data and region
+writes remain blocked. The physical sequence grows from38 to52 writes.
+
+Tests cover failure-before/after and abort at every write, phase timeouts,
+different recovery serial on the same family/unit, reset gating, identity
+reference capture and UI result logging. The new handshake is not yet live
+validated. Request one guided bike test on .50 followed by off/on and the
+existing Verify after restart action. A successful result would establish
+re-entry from the intact D bootloader plus original native readback, not
+recovery of erased firmware or an interrupted M image. No image transfer
+is enabled by this test or by a successful result.
