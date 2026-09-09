@@ -1006,3 +1006,31 @@ delay between failed attempts, re-reads both native components and compares
 their four-field versions against target metadata. However `v3` has a distinct
 post-D branch that bypasses this ordinary `Q2` call. That branch and its reset/
 reconnect behavior remain to be reconstructed before defining completion.
+
+## Build .18: native D/M reads in the existing information batch
+
+The batch now ends with `00 01 84 00` and `00 01 84 01` on 2AFE,
+matching the ordinary motor route derived from `Th.y3` / `Hn.n0`. It recognizes
+`00 01 86` success and `00 01 87` error prefixes on 2AFD and requires six
+bytes for a successful transport-prefixed reply. All three version bytes are
+retained, yielding major.minor.patch.build. D/M versions are logged separately
+from the original drive-unit firmware result.
+
+The reads are serialized without retries. Because the reply lacks an IC echo,
+any error, short reply or timeout ends this pair before the next selector is
+sent. A thrown write error or disconnect stops the batch as usual. A batch
+cannot be repeated on the same connection. This prevents a late timed-out D
+reply satisfying the M query. The protocol still assumes one response to each
+successful request; arbitrary duplicate successful responses lack enough
+information to disambiguate by IC. These requests and decodes require live
+validation. No firmware transfer or region write is enabled.
+
+The post-D finalization branch is now partly resolved: `Th.v3` calls `Lh.c`,
+which constructs `(verified=false, failed=false, deferred=true)` and labels
+verification "diferida". This is explicitly deferred verification, not a
+successful version check. `C0041b7.g1` passes reset=true through `x1` to `w1`;
+after transfer/finish, `w1` invokes `n1`, which sends command 40 (28 hex) via
+its D transport wrapper and throws on transport failure. A fresh connection
+and native D/M version readback are therefore required by our completion
+criterion even when this source worker returns true. Reset acknowledgement
+alone cannot prove application startup, version persistence or region change.

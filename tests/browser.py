@@ -48,6 +48,19 @@ class Characteristic extends EventTarget {
       return;
     }
     if (this.short === '2afe') {
+      if (packet[1] === 1 && packet[2] === 132) {
+        const rx = characteristics['2afd'];
+        if (options.nativeWriteFailure === packet[3]) throw new DOMException('Native write failed', 'NetworkError');
+        if (options.nativeDisconnect === packet[3]) { bike.gatt.disconnect(); return; }
+        const send = () => {
+          rx.value = value(options.nativeError === packet[3] ? [0,1,135,58,0,0] :
+            options.nativeShort === packet[3] ? [0,1,134,69,0] : [0,1,134,packet[3] ? 66 : 69,packet[3] ? 1 : 0,7,0,0,0,0]);
+          rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        };
+        if (options.nativeTimeout === packet[3]) { setTimeout(send, 8500); return; }
+        send(); return;
+      }
+
       if (packet[1] === 22 && packet[2] === 124) {
         const rx = characteristics['2afd'];
         if (options.descriptorTimeout) return;
@@ -290,7 +303,7 @@ class BrowserTests(unittest.TestCase):
                 self.ready_for_identify(motorDelayed=delayed)
                 self.wait_batch()
                 self.assertEqual(self.page.locator('#drive').inner_text(), 'DU-E7000; firmware 4.7.1')
-                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afa', [0, 12, 1]], ['write', '2afa', [0, 3, 75]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 31]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]], ['write', '2afe', [0, 22, 172, 0]], ['write', '2afe', [0, 22, 172, 1]]])
+                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afa', [0, 12, 1]], ['write', '2afa', [0, 3, 75]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 31]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]], ['write', '2afe', [0, 22, 172, 0]], ['write', '2afe', [0, 22, 172, 1]], ['write', '2afe', [0, 22, 124, 0]], ['write', '2afe', [0, 1, 132, 0]], ['write', '2afe', [0, 1, 132, 1]]])
                 ops = self.page.evaluate('operations')
                 self.assertLess(ops.index(['subscribe', '2afd']), ops.index(self.writes()[3]))
                 self.assertFalse(self.errors)
@@ -313,7 +326,7 @@ class BrowserTests(unittest.TestCase):
     def test_batch_continues_after_completed_writes_without_replies(self):
         self.ready_for_identify(batchTimeout=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 19)
+        self.assertEqual(len(self.writes()), 22)
         self.assertEqual(self.page.locator('#status').inner_text(), 'Connected')
         self.assertTrue(self.page.locator('#identify').is_disabled())
         self.assertIn('Drive-unit firmware: no matching reply', self.page.locator('#log').inner_text())
@@ -338,7 +351,7 @@ class BrowserTests(unittest.TestCase):
     def test_short_replies_do_not_decode_but_batch_continues(self):
         self.ready_for_identify(motorMalformed=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 19)
+        self.assertEqual(len(self.writes()), 22)
         self.assertIn('Drive-unit model: short reply', self.page.locator('#log').inner_text())
         self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
         self.assertFalse(self.errors)

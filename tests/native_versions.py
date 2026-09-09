@@ -3,7 +3,7 @@ import unittest
 from playwright.sync_api import sync_playwright
 import browser
 
-class DescriptorTests(unittest.TestCase):
+class NativeVersionTests(unittest.TestCase):
     open = browser.BrowserTests.open
     auth = browser.BrowserTests.auth
     ready_for_identify = browser.BrowserTests.ready_for_identify
@@ -19,21 +19,23 @@ class DescriptorTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.browser.close(); cls.playwright.stop()
 
-    def test_full_descriptor_and_unavailable_cases(self):
-        for opts, expected in [({}, 'Motor model descriptor ASCII:'),
-                               ({'descriptorError': True}, 'device error: 00 16 7F 3A 00'),
-                               ({'descriptorShort': True}, 'RESULT Motor model descriptor: short reply'),
-                               ({'descriptorTimeout': True}, 'RESULT Motor model descriptor: no matching reply')]:
+    def test_native_versions_and_failure_boundary(self):
+        for opts in ({}, {'nativeError': 0}, {'nativeShort': 0}, {'nativeTimeout': 0},
+                     {'nativeWriteFailure': 0}, {'nativeDisconnect': 0}, {'nativeError': 1}):
             with self.subTest(opts=opts):
                 self.ready_for_identify(motorModel=34, motorFirmware=69, motorPatch=0, **opts)
                 self.wait_batch()
+                if 'nativeTimeout' in opts: self.page.wait_for_timeout(700)
                 log = self.page.locator('#log').inner_text()
-                self.assertIn(expected, log)
-                self.assertEqual(self.page.locator('#region').inner_text(), 'EU')
-                packets = [w[2] for w in self.writes() if w[1] == '2afe']
-                self.assertEqual(packets, [[0,1,28,0],[0,1,44,0],[0,22,172,0],[0,22,172,1],[0,22,124,0],[0,1,132,0],[0,1,132,1]])
-                if opts: self.assertIn('no variant inferred', log)
-                else: self.assertIn('00 16 7E 00 00 00 00 00 00 00 (10 bytes total)', log)
+                packets = [w[2] for w in self.writes() if w[1] == '2afe' and w[2][2] == 132]
+                expected = [[0,1,132,0]] if opts and 0 in opts.values() else [[0,1,132,0],[0,1,132,1]]
+                self.assertEqual(packets, expected)
+                if not opts:
+                    self.assertIn('Native D firmware: 4.5.0.7', log)
+                    self.assertIn('Native M firmware: 4.2.1.7', log)
+                elif 0 in opts.values():
+                    self.assertNotIn('Native M firmware: 4.', log)
+                self.assertTrue(self.page.locator('#setUS').is_disabled())
                 self.assertFalse(self.errors)
                 self.context.close()
 

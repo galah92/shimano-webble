@@ -181,3 +181,8 @@ compares each component separately and leaves the order unresolved if either
 installed version is unknown. Tests: `python3 tests/component_selection.py`.
 The bike still needs separate native D/M version reads; the existing drive-unit
 version display does not supply both.
+
+Build .18 adds native D and M version reads to **Read region and compatibility**.
+They run automatically at the end of that batch; no extra button is needed.
+Copy the log after the batch ends. An incomplete native D read stops the pair
+before M, requiring a reconnect. Firmware preparation remains unavailable.

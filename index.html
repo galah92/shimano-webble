@@ -320,7 +320,7 @@ END HANDOFF NOTES
 <body>
 <h1>Shimano BLE Diagnostic</h1>
 <div class="muted" id="build"></div>
-<p>Connect, read the bike configuration, and authenticate. The separate US-region button attempts a stored destination change; firmware updates are not implemented.</p>
+<p>Connect, read the bike configuration, and authenticate. Region changes are unavailable while the required preparation workflow is under investigation.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -354,7 +354,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.17';
+const BUILD = '2026-09-09.18';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -650,7 +650,7 @@ async function authenticate() {
   }
 }
 // Fixed connection-setup and information commands from both APKs and capture.
-// Distinct response prefixes prevent a late reply satisfying the next query.
+// Native D/M reads share a prefix: stop the batch on any incomplete native read.
 const INFO_QUERIES = [
   {name: 'Display model', tx: '2afa', rx: '2af9', packet: [0, 0x13, 1, 0x1c, 0], prefix: [0x33, 1, 0x1e]},
   {name: 'Display firmware', tx: '2afa', rx: '2af9', packet: [0, 0x13, 1, 0x2c, 0], prefix: [0x33, 1, 0x2e]},
@@ -674,6 +674,10 @@ const INFO_QUERIES = [
   // Q5 connection state 43; Shimano names this PU_MD_MODEL_GET.
   // Keep the raw descriptor separate from the independently decoded family code.
   {name: 'Motor model descriptor', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0x7c, 0], prefix: [0, 0x16, 0x7e], errorPrefix: [0, 0x16, 0x7f], fieldBytes: 10, minLength: 10},
+  // Th.y3 / Q2: IC 0 = D, IC 1 = M; replies have no IC echo.
+  ...[0, 1].map(ic => ({name: `Native ${ic ? 'M' : 'D'} firmware`, tx: '2afe', rx: '2afd',
+    packet: [0, 1, 0x84, ic], prefix: [0, 1, 0x86], errorPrefix: [0, 1, 0x87],
+    fieldBytes: 6, minLength: 6, native: true})),
 ];
 function queryInfo(s, query) {
   assertCurrent(s);
@@ -780,7 +784,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; seven reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
+  log(`--- information batch start; build ${BUILD}; nine reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -808,6 +812,14 @@ async function identifyDrive() {
       assertCurrent(s);
       results.push(result);
       log(`RESULT ${result.name}: ${result.status}`);
+      if (query.native) {
+        if (result.status !== 'reply received') {
+          log('Native component reads stopped; reconnect before retrying. No IC echo is available to distinguish late replies.');
+          break;
+        }
+        const f = result.fields;
+        log(`${query.name}: ${f[3] >> 4}.${f[3] & 15}.${f[4]}.${f[5]} (native component read; update compatibility unverified)`);
+      }
       if (result.alternate) {
         // No slot identifier: avoid attributing a delayed AF/3A to the next read.
         log('Destination checks stopped after AF/3A. Current region remains unknown; reconnect before another batch.');
