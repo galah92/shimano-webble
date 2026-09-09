@@ -2096,3 +2096,52 @@ acceptance remains unverified. Rejection/missing-value diagnostics now retain
 the parser's explicit reason. Tests cover the envelope on both routes and
 all selectors/modes, rejection/truncation, and the full bounded probe using
 ten-byte zero-prefixed PCA replies. Commands and write allowlist unchanged.
+
+### Build .45 live entry/exit and reconnect milestone
+
+The user report at 17:28 confirms both PCA exchanges were accepted, the M
+loader version was read as 2.0.7.1, D bootloader identity was family34/unit0,
+and the reset write completed. The probe allowlist excludes firmware erase,
+image data and region writes. At 17:30:01.662, a subsequent connection verified
+the same application motor fingerprint, native D4.5.0.0/M4.4.8.0 and EU0.
+This establishes the bounded entry/exit plus reconnect-readback milestone.
+The log does not independently establish a physical power cycle or prove that
+the reset command caused recovery. No repeat of this probe is needed for the
+same milestone. Region change and firmware transfer remain unverified.
+
+The next preparation prerequisite is interrupted-transfer recovery. The current
+transferFirmwarePair baseline accepts only complete original or preparation
+pairs; it rejects mixed component versions. Its D identity check also occurs
+after the M transfer. Those properties do not support recovery after a lost
+connection during a paired update. A firmware version readback alone is not
+a byte-for-byte firmware integrity check.
+
+Source review: Th.W2 returns an in-memory cached Sh after checking the stored
+model, rather than reconstructing a recovery session after process loss.
+Th.p3 has a conditional PCA bypass when h is true, mode bit32 is set and the
+selector is zero. The flag is passed through C0012ab.b and Th.n4; its meaning
+is not established here, so this branch is not a justified recovery recipe.
+
+Before exposing preparation in the page, establish same-motor identification
+without relying on a running application, persist intended image hashes and
+transaction state before mutation, and define source-supported behavior for
+disconnects during M, between components and during D. Test these failure
+paths offline. Do not treat cached session state or a successful entry-only
+probe as evidence that an interrupted image transfer can be recovered.
+
+### Build .46: source recovery entry condition
+
+Resolved the previously unknown flag: f64d9.onCreate reads the intent boolean
+recovery_install into Q; RunnableC0753wu passes Q to V; V constructs
+C0012ab with that flag; f9c41 passes its b field to Th.n4, setting h.
+Thus the Th.p3 mode32/selector0 PCA bypass is explicitly a recovery-install
+branch, not a generic alternate entry sequence.
+
+enterFirmwareUpdateSession now accepts a strictly boolean recoveryInstall
+option, default false. Only true plus mode32 plus selector0 bypasses PCA;
+status negotiation and the two-second settling delay remain. No page caller
+enables this option. Tests exercise both modes and selectors0/13/31, exact
+physical writes and timing, and reject nonboolean flags before any write.
+The existing full entry/exit probe tests still pass. This implements one
+source-supported recovery primitive, not an interrupted-transfer recovery
+workflow or permission to flash.

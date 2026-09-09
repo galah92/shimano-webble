@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.45';
+const BUILD = '2026-09-09.46';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -802,7 +802,8 @@ function firmwareEntryExchange({write, subscribe, signal, characteristic, packet
   return runFirmwareExchange({write: p => write(characteristic, p), subscribe, signal,
     packet, evidence, replyTimeoutMs: timeout});
 }
-async function enterFirmwareUpdateSession({write, subscribe, signal, onDiagnostic}) {
+async function enterFirmwareUpdateSession({write, subscribe, signal, onDiagnostic, recoveryInstall=false}) {
+  if (typeof recoveryInstall !== 'boolean') throw new Error('Recovery install flag must be boolean');
   const step = async (name, characteristic, packet, match, timeout=3000) => {
     const seen = new Set();
     const emit = event => onDiagnostic?.({step:name,...event});
@@ -835,10 +836,15 @@ async function enterFirmwareUpdateSession({write, subscribe, signal, onDiagnosti
     return value !== null && (value & 128) && !(value & 64) && (value & 32) === mode ? {value} : null;
   });
   const targetSelector=configured.value & 31;
-  const route=mFirmwareRoute([0,0x32,0x20,1],targetSelector);
-  await step('pca-request',route.characteristic,route.packet,firmwareUpdateReply,6000);
+  // Th.p3: recovery_install bypasses PCA only in mode32 with selector0.
+  const pcaSkipped = recoveryInstall && mode === 32 && targetSelector === 0;
+  if (!pcaSkipped) {
+    const route=mFirmwareRoute([0,0x32,0x20,1],targetSelector);
+    await step('pca-request',route.characteristic,route.packet,firmwareUpdateReply,6000);
+  }
+
   await firmwareDelay(2000,signal);
-  return {state:'update-entry-acknowledged',mode,targetSelector,bootloaderVerified:false,installable:false};
+  return {state:'update-entry-acknowledged',mode,targetSelector,pcaSkipped,bootloaderVerified:false,installable:false};
 }
 function selectMFirmwareSlot({write, subscribe, signal}) {
   // C0776xk.G0 -> Hn.s0(0), required before the M version query.
