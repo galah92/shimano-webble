@@ -157,8 +157,11 @@ to the bike or approve an image for installation. Wrapped/encrypted assets
 are unsupported. Tests: `python3 tests/firmware_header.py`.
 
 Archived E5000 4.1.0 files were used only as parser reference samples. They
-are not preparation candidates. Exact physical motor identification, the
-4.3.0 candidate contents, transfer completion and recovery remain open.
+are not preparation candidates. An archived E-TUBE 4.0.2 installer supplied
+E5000 D 4.3.0 and M 4.2.1 files with matching binary headers. Their hashes and
+offline analysis are recorded in RESEARCH.md; vendor binaries stay outside
+this repository. This establishes a bundled pair, not that eTuning uses that
+pair for preparation. Compatibility, transfer completion and recovery remain open.
 
 Offline D-transfer analysis: `python3 tools/plan_d_transfer.py path/to/D.dat`
 reports block counts, padding, checksums and bank boundaries. It cannot connect
@@ -166,3 +169,8 @@ to or update a bike. `python3 tests/d_transfer.py` checks synthetic vectors from
 the supplied app's Java routines and boundary cases. M transfer and the correct
 D/M preparation pair remain under investigation; equal version numbers must
 not be assumed. No new motor test is needed for these offline changes.
+
+Offline M-transfer analysis: `python3 tools/plan_m_transfer.py path/to/M.dat`
+reports the separate M payload sizes and checksum windows. Tests:
+`python3 tests/m_transfer.py`. The tool does not schedule retries or implement
+recovery; its window calculations are for further protocol validation.

@@ -883,3 +883,86 @@ instruction-level analysis because normal JADX output omits them. The debug
 dump is retained privately for that next step. No complete M transfer, paired
 finalization, recoverable update procedure or validated preparation asset is
 available yet. The phone-only US configuration goal remains open.
+
+## Offline M payload and checksum-window model
+
+The 3.0.7 `C0776xk` constructor sets its EP-specific flag only for `Ih.k`;
+E5000 is `Ih.n`. Its `E0` instruction dump selects a 1024-byte checksum window
+for the non-EP path. `j1` allocates a zero-initialized 64-byte block and copies
+only the remaining file bytes. At a window boundary or image end it computes
+the byte sum from the window start through the last real byte.
+
+`M0` emits sequence / 11 / 00 / 64 data bytes for ordinary E5000 blocks.
+At a checkpoint it uses type 12 and appends checksum / 00 / 00, including when
+the checksum itself equals zero. With the outer Hn command 0B, those are 68-byte
+and 71-byte data writes. The final checksum is the original image byte sum
+modulo 256. It is not the D codec and must not reuse its FF padding or footer.
+
+`Q9.d` computes recovery-window geometry, including partial final windows.
+`T0` clamps a reported failure offset within that window, sets the write address
+relative to FC0000 hex, and invokes block handling from that point. The checksum
+start remains the window start. This is partial evidence for window recovery,
+not a validated rule to resume after disconnect or power loss. Retry selection,
+reply classification, progress semantics and paired finalization remain open.
+
+Sequence handling also needs its own implementation: `j1` calls the sequence
+counter while constructing a diagnostic payload, and `f1` consumes another
+counter value for the actual write, followed by the query. The offline M codec
+therefore takes an explicit sequence byte and does not invent a complete
+transfer schedule. `f1` has a 400-ms delay before a data attempt and a 15-ms delay
+before querying; a live updater cannot assume maximum-throughput streaming.
+
+`tools/plan_m_transfer.py` now reports checksum windows, payload lengths,
+zero padding and image checksum without sending commands or scheduling retries.
+It accepts only M-classified input and bounds addresses to the modeled 24-bit
+space above FC0000; this limit is not a certified flash-capacity statement.
+All outputs retain `installable: false`.
+
+Seven additional synthetic vectors were generated with the extracted Java
+`M0` and `Q9.d` routines, with the surrounding block/checksum calculation
+reconstructed from `j1`. Tests cover those vectors, zero-valued checkpoints,
+window boundaries, reassembly and invalid inputs. Combined header/D/M tests:
+ten tests pass. The archived M 4.1.0 reference has 1,815 blocks, 32 zero padding
+bytes, 114 checksum windows and finish checksum AA. It is not an update candidate.
+
+Neither supplied APK contains firmware under assets or res/raw: 1.0.32 has no
+such entries; 3.0.7 has only two dex optimization profile assets. The downloaded
+preparation package remains a separate artifact; `Jh.d` checks the presence of
+both components and does not establish that their version numbers must match.
+
+## Archived E5000 D 4.3.0 / M 4.2.1 pair found
+
+The [Shimano firmware history](https://bike.shimano.com/products/apps/firmware-update.html)
+places E5000 4.2.1 on November 18, 2019, 4.3.0 on May 18, 2020, and 4.4.2 on
+November 4, 2020. The [desktop release history](https://bike.shimano.com/products/apps/e-tube-project-professional.html)
+dates E-TUBE 4.0.2 to October 13, 2020. That timeline suggested inspecting its
+bundled files. The installer was retrieved from the
+[E-TUBE archive mirror](https://bettershifting.com/e-tube-project-archive/)
+and unpacked statically; no installer or vendor code was executed.
+
+Archive `E-tube_Proj_V_4_0_2.zip`: 180,864,996 bytes, SHA-256
+`903a343e2fde116b36846045267c9953d64535a9ed49a9adde864f18c9b56960`.
+The embedded MSI's Data1.cab contains both files below, each with a June 5,
+2020 archive timestamp. Header classification agrees with their filenames:
+
+| Component | File | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| D | due5000_d.4.3.0.dat | 132072 | `3d3df4dfe3de333062f445b6719fa5033f93dc9d384448134ee6041d216c6af0` |
+| M | due5000_m.4.2.1.dat | 116320 | `10190fd78e6527908c0e43405184c414b612bc4becce9ca5483612665ced6b56` |
+
+The offline D planner yields 2,064 blocks, 24 FF padding bytes, three banks,
+finish checksum A1 and padded checksum 89. Its no-retry data-frame fingerprint
+is `80a9c5a498cba7ac25acf5ab150311b29f03af17352fbbc0ba870bf3adbfabf3`.
+The M planner yields 1,818 blocks, 32 zero padding bytes, 114 checksum windows
+and finish checksum 06. Both tools continue to report `installable: false`.
+
+This is evidence that the desktop distribution bundled D 4.3.0 with M 4.2.1.
+It does not establish publisher authenticity, the contents of eTuning's remote
+preparation package, compatibility with this bike, or a working downgrade and
+recovery procedure. The 4.0.4 archive was also inspected and instead contains
+D/M 4.4.3. All extracted binaries remain private and outside this repository.
+
+Next implementation gates are the M reply/sequence state machine, conditional
+D/M selection and finalization in `Th.v3`, and recovery behavior. The existing
+AB/3A rejection remains the live result; no new region or firmware write was
+introduced by this offline work and no additional motor test is needed yet.
