@@ -5,7 +5,7 @@
 SHIMANO WEBBLE REVERSE-ENGINEERING HANDOFF NOTES
 
 Historical import. For current verified findings, see RESEARCH.md.
-Build 2026-09-09.6 adds a bounded batch of display and drive-unit information queries.
+Build 2026-09-09.7 adds three captured connection-setup commands to the information batch.
 The original read-only behavior and pending milestones below are historical.
 ===============================================================================
 
@@ -343,13 +343,13 @@ END HANDOFF NOTES
 <div class="row"><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged. If identification stays blocked after authentication, the app sends the captured session setup command once and checks again.</div>
 </div>
-<div class="card"><button id="identify" disabled>Run information batch</button>
-<div class="muted">Run four information queries in one connection (up to about 35 seconds). Keep this page open until the batch summary appears, then copy the log.</div></div>
+<div class="card"><button id="identify" disabled>Run transport setup batch</button>
+<div class="muted">Read display information, send three captured connection-setup commands, then query the drive unit. Allow up to one minute and keep this page open until the summary appears.</div></div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clear">Clear log</button></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.6';
+const BUILD = '2026-09-09.7';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -639,11 +639,15 @@ async function authenticate() {
     if (session === s) { busy = false; controls(); }
   }
 }
-// Fixed information queries, corroborated by both APKs and the capture.
+// Fixed connection-setup and information commands from both APKs and capture.
 // Distinct response prefixes prevent a late reply satisfying the next query.
 const INFO_QUERIES = [
   {name: 'Display model', tx: '2afa', rx: '2af9', packet: [0, 0x13, 1, 0x1c, 0], prefix: [0x33, 1, 0x1e]},
   {name: 'Display firmware', tx: '2afa', rx: '2af9', packet: [0, 0x13, 1, 0x2c, 0], prefix: [0x33, 1, 0x2e]},
+  // Full internal semantics are unresolved. Require a reply, not just ATT completion.
+  {name: 'Captured setup 03', tx: '2afa', rx: '2af9', packet: [0, 3, 0], prefix: [0x23], setup: true, echo: 0, pause: 1000},
+  {name: 'Captured setup 04', tx: '2afa', rx: '2af9', packet: [0, 4], prefix: [0x24], setup: true, pause: 1000},
+  {name: 'Captured setup 06', tx: '2afa', rx: '2af9', packet: [0, 6, 0], prefix: [0x26], setup: true, echo: 0, pause: 200},
   {name: 'Drive-unit model', tx: '2afe', rx: '2afd', packet: [0, 1, 0x1c, 0], prefix: [0, 1, 0x1e]},
   {name: 'Drive-unit firmware', tx: '2afe', rx: '2afd', packet: [0, 1, 0x2c, 0], prefix: [0, 1, 0x2e]},
 ];
@@ -662,7 +666,7 @@ function queryInfo(s, query) {
       rx.removeEventListener('characteristicvaluechanged', onValue);
       s.controller.signal.removeEventListener('abort', onAbort);
       if (error) reject(error);
-      else resolve({name: query.name, status: timedOut ? 'no matching reply' : response.length < 5 ? 'short reply' : 'reply received', fields: response});
+      else resolve({name: query.name, status: timedOut ? 'no matching reply' : response.length < (query.setup ? 2 : 5) ? 'short reply' : 'reply received', fields: response});
     };
     const onAbort = () => finish(new Error('Disconnected during information batch'));
     const onValue = ev => {
@@ -707,7 +711,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; four queries ---`);
+  log(`--- information batch start; build ${BUILD}; four queries plus three captured setup commands ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -735,9 +739,18 @@ async function identifyDrive() {
       assertCurrent(s);
       results.push(result);
       log(`RESULT ${result.name}: ${result.status}`);
+      if (query.setup) {
+        if (result.status !== 'reply received') throw new Error(`${query.name}: required setup reply not received`);
+        if (query.echo !== undefined && result.fields[1] !== query.echo) {
+          throw new Error(`${query.name}: response byte 1 differs from captured value; stopping`);
+        }
+        log(`${query.name}: reply observed; waiting ${query.pause} ms. Internal status semantics remain unverified.`);
+        await new Promise(resolve => setTimeout(resolve, query.pause));
+        assertCurrent(s);
+      }
     }
-    const model = results[2].fields;
-    const firmware = results[3].fields;
+    const model = results.find(item => item.name === 'Drive-unit model')?.fields;
+    const firmware = results.find(item => item.name === 'Drive-unit firmware')?.fields;
     if (model?.length >= 5 && firmware?.length >= 5) {
       const result = decodeDriveInfo(model, firmware);
       $('drive').textContent = result;
@@ -785,7 +798,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · information batch experiment`;
+$('build').textContent = `Build ${BUILD} · transport setup batch experiment`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

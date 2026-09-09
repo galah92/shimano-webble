@@ -3,7 +3,8 @@
 Updated 2026-09-09. Target: SC-E7000 + DU-E7000 firmware 4.7.1,
 using Android Web Bluetooth. Build `2026-09-09.4` verified session access on
 the real bike. Build `2026-09-09.5` received no matching drive-unit model reply in two live
-tests. Build `2026-09-09.6` batches four information queries with transport diagnostics.
+tests. Build .6 verified display commands but recorded a silent motor-response
+channel. Build `2026-09-09.7` tests three captured connection-setup steps.
 
 ## Confirmed from the supplied artifacts
 
@@ -258,3 +259,44 @@ Browser tests cover continuing after completed writes with no replies,
 rejecting a late model reply as a firmware response, stopping on a stalled
 write even if a reply arrives, short replies, both notification/write orders,
 and the existing authentication and capture-response checks.
+
+## Build .6 live result and .7 connection-setup batch
+
+The September 9 .6 run returned display model fields `33 01 1E 21 02`
+and display firmware fields `33 01 2E 41 00` (SC-E7000 / 4.1.0 using the
+APK decoder). Both motor-query ATT writes completed. Neither motor query
+received a matching response, and 2AFD and 2AFB recorded zero notifications.
+This establishes a working display-command path and a silent downstream
+response channel for that batch; it does not establish why that path is silent.
+
+Build .7 inserts these captured connection steps between the display and
+motor queries, with all three notification subscriptions already enabled:
+
+| Step | 2AFA write | 2AF9 reply in capture | Capture frames |
+| --- | --- | --- | --- |
+| Setup 03 | `00 03 00` | starts `23 00` | 698 / 702 |
+| Setup 04 | `00 04` | starts `24 8D` | 733 / 735 |
+| Setup 06 | `00 06 00` | starts `26 00` | 744 / 747 |
+
+The first captured 2AFD burst begins at frame 703, after setup 03. The first
+successful direct motor model query is at frames 748/751, after setup 06.
+Both APK connection state machines contain these commands in cases 5, 6,
+and 8: old `d/a/a/a/c.java`, new `Q5.java`. The new `Q5.S0` reconnect path
+also sends these same steps. They are connection-initialization commands;
+their exact internal semantics and status-byte meanings remain unresolved.
+Do not label them as proven scan/start/stop/select operations yet.
+
+The experiment waits for both the ATT completion and a matching control
+reply. It stops on a missing or short setup reply, or a setup 03/06 second
+byte differing from the captured zero. Setup 04's second byte is logged but
+not interpreted. A matching reply is evidence of receipt, not proof that
+initialization succeeded. The page waits 1000 ms after setup 03 and 04 and
+200 ms after 06 before proceeding. No automatic retries occur. The final
+summary includes setup results and all observed notification traffic.
+
+This is a subset of the captured setup, not a claim of a fully reconstructed
+initialization protocol. In particular `00 13 32 50 07`, `00 0D 00`, and
+2AF5/2AF6 operations are still omitted. No destination setter, firmware
+transfer or arbitrary command interface is added. A successful batch would
+validate the combined sequence on this bike, not isolate each step's effect.
+A stopped or silent batch narrows which additional initialization to trace.

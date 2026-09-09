@@ -25,6 +25,17 @@ class Characteristic extends EventTarget {
     operations.push(['write', this.short, packet]);
     if (this.short === '2afa') {
       const rx = characteristics['2af9'];
+      if ([3, 4, 6].includes(packet[1])) {
+        if (options.initDisconnect === packet[1]) { bike.gatt.disconnect(); return; }
+        if (options.initTimeout === packet[1]) return;
+        rx.value = value([packet[1] + 32, options.initReject === packet[1] ? 1 : packet[1] === 4 ? 141 : 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        if (packet[1] === 3) {
+          characteristics['2afd'].value = value([0, 22, 128, 0, 0, 0, 0, 0, 0, 0]);
+          characteristics['2afd'].dispatchEvent(new Event('characteristicvaluechanged'));
+        }
+        return;
+      }
       const send = () => {
         rx.value = value([51, 1, packet[3] + 2, packet[3] === 28 ? 33 : 65, packet[3] === 28 ? 2 : 0, 255, 255, 255, 255, 255]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
@@ -251,7 +262,7 @@ class BrowserTests(unittest.TestCase):
             with self.subTest(delayed=delayed):
                 self.ready_for_identify(motorDelayed=delayed)
                 self.page.wait_for_function("document.getElementById('drive').textContent === 'DU-E7000; firmware 4.7.1'")
-                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]]])
+                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]]])
                 ops = self.page.evaluate('operations')
                 self.assertLess(ops.index(['subscribe', '2afd']), ops.index(self.writes()[3]))
                 self.assertFalse(self.errors)
@@ -262,7 +273,7 @@ class BrowserTests(unittest.TestCase):
             with self.subTest(option=option):
                 self.ready_for_identify(**{option: True})
                 self.page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'", timeout=12000)
-                self.assertEqual(self.writes()[5:], [['write', '2afe', [0, 1, 28, 0]]])
+                self.assertEqual(self.writes()[8:], [['write', '2afe', [0, 1, 28, 0]]])
                 self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
                 self.assertTrue(self.page.locator('#identify').is_disabled())
                 self.assertFalse(self.errors)
@@ -274,7 +285,7 @@ class BrowserTests(unittest.TestCase):
     def test_batch_continues_after_completed_writes_without_replies(self):
         self.ready_for_identify(batchTimeout=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 7)
+        self.assertEqual(len(self.writes()), 10)
         self.assertEqual(self.page.locator('#status').inner_text(), 'Connected')
         self.assertTrue(self.page.locator('#identify').is_disabled())
         self.assertIn('Drive-unit firmware: no matching reply', self.page.locator('#log').inner_text())
@@ -287,7 +298,7 @@ class BrowserTests(unittest.TestCase):
         self.assertIn('Display model: no matching reply', log)
         self.assertIn('Display firmware: no matching reply', log)
         self.assertIn('DU-E7000; firmware 4.7.1', log)
-        self.assertIn('2AF9 traffic: 1 notifications', log)
+        self.assertIn('2AF9 traffic: 4 notifications', log)
 
     def test_stalled_write_stops_even_with_matching_notification(self):
         self.ready_for_identify(stalledWrite=True)
@@ -299,10 +310,21 @@ class BrowserTests(unittest.TestCase):
     def test_short_replies_do_not_decode_but_batch_continues(self):
         self.ready_for_identify(motorMalformed=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 7)
+        self.assertEqual(len(self.writes()), 10)
         self.assertIn('Drive-unit model: short reply', self.page.locator('#log').inner_text())
         self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
         self.assertFalse(self.errors)
+
+    def test_setup_reply_required_before_later_commands(self):
+        for options in ({'initTimeout': 3}, {'initReject': 6}, {'initDisconnect': 4}):
+            with self.subTest(options=options):
+                self.ready_for_identify(**options)
+                self.wait_batch()
+                self.assertFalse(any(x[1] == '2afe' for x in self.writes()))
+                self.assertEqual(self.page.locator('#status').inner_text(), 'Disconnected')
+                self.assertIn('Drive-unit model: not completed', self.page.locator('#log').inner_text())
+                self.assertFalse(self.errors)
+                self.context.close()
 
     def test_captured_drive_fields_decode_without_assuming_target(self):
         self.open()

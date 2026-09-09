@@ -22,18 +22,18 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .6, tap **Run information batch** after session verification. It
-queries display model, display firmware, drive-unit model and drive-unit firmware
-in one run. Keep Chrome foregrounded and wait for **information batch end**
-(up to about 35 seconds), then copy the log. The summary includes reply outcomes
-and notification traffic; each query logs whether its ATT write completed.
+In build .7, tap **Run transport setup batch** after session verification.
+It reads display information, sends three captured connection-setup commands,
+then queries motor model and firmware. Keep Chrome foregrounded until
+**information batch end** appears (allow up to one minute), then copy the log.
+The summary includes ATT completion, replies, and notification traffic.
 
-The batch continues after an unanswered query only when its write completed.
-Failed or stalled writes stop the run. Reconnect for another batch. No
-configuration changes are sent. Build .5's direct motor query timed out in two
-live tests; the added display queries and subscriptions still need live testing.
-The capture's motor fields also differ from the handoff, so returned information
-is reported without assuming E7000 / 4.7.1.
+Missing or unexpected setup replies stop the run. Motor queries may continue
+past unanswered completed writes. Reconnect for another batch. The setup
+commands occur in both APK connection paths, but their internal semantics are
+not fully decoded. No destination setter or firmware transfer is implemented.
+Build .6 verified the display command path while the motor response channel
+remained silent; this new sequence still needs a live test.
 
 ## Develop
 
