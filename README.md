@@ -232,3 +232,8 @@ Build .22 implements the timed M query exchange with immediate-reply handling,
 separate write/reply deadlines, abort and listener cleanup. Fake-clock tests
 cover failure and race cases. It remains disconnected from the bike controls;
 firmware data transfer and automatic retries are not enabled.
+
+Build .23 adds an unwired M data-block worker: an initial attempt and up to two
+protocol-directed retries, with fresh sequences and source-derived delays.
+Uncertain ATT outcomes stop without automatic rewriting. The worker is tested
+offline; whole-image transfer, D handling and paired recovery remain incomplete.

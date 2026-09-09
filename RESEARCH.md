@@ -1463,3 +1463,33 @@ late completion, ACK/checkpoint ordering, checksum rejection, buffered query
 error precedence, wrong sequences/status traffic, abort and synchronous failure.
 Existing envelope, file-check and Chromium startup tests pass. Next work is
 the M data/retry worker and D protocol handling, then paired handover/recovery.
+
+## Build .23: M normal data attempt plus bounded protocol retry
+
+Re-reading j1's caller corrected an important scope issue: f1's two attempts
+are retries after j1's initial attempt, not a two-attempt total. j1 invokes f1
+only when R0 accepts the failed query diagnostic. Debug source j1 around
+13520-13560 shows the initial k0 write, 15ms sleep, fresh query sequence, H0,
+R0 filter and f1 call. f1 around 8800-8840 bounds retry counters 1..2;
+9085 delays 400ms before allocating a fresh data sequence; 10695 allocates
+another query sequence after 15ms; 11342 applies R0 before another retry.
+
+Added an unwired browser M block worker: snapshot image bytes before awaits,
+initial data write/query, then at most two delayed rewrites on query status 01.
+The transport and sequence allocator must be exclusive for the paired update.
+The worker does not allocate bootloader state, stream an image, reset a unit,
+or authorize installation. It returns accumulated reply evidence only.
+
+Intentional boundary: source f1 may continue after its k0 reports failure;
+we do not equate an arbitrary WebBLE rejection with a definitely unprocessed
+write. Browser data-write rejection, abort, eight-second stalled ATT bound,
+and reply timeout stop this worker without a rewrite. Recovery or repeat
+permission after an uncertain ATT result remains unimplemented. No UI calls
+this worker, and the app's live region/firmware gates are unchanged.
+
+Fake-clock tests verify all three attempts, exact 15/400ms timing, fresh
+sequence allocation through FF->00, unchanged retry bytes after caller
+mutation, retry exhaustion, query status 02, missing reply, rejected/hung
+ATT and abort before a retry. All passed, alongside query/envelope/file
+checks and Chromium startup. Next implementation gaps: D response/transfer,
+M image/window recovery, paired bootloader handover and final verification.
