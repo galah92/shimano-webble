@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.51';
+const BUILD = '2026-09-09.52';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -929,7 +929,7 @@ function dFirmupReply(raw, stage) {
   if (raw[offset] === 0x12) return {error: 'FIRMUP rejected'};
   if (raw[offset] !== 0x11) return null;
   return raw.length > offset + 1 && raw[offset + 1] === stage ?
-    {accepted: true} : {error: 'FIRMUP reply has wrong or missing stage'};
+    {accepted: true} : {error: `FIRMUP stage mismatch: expected ${stage}, received ${raw[offset + 1] ?? 'missing'}`};
 }
 async function enterDBootloader({write, subscribe, signal, mode, targetSelector, credentials, recoveryInstall=false, onDiagnostic}) {
   if (typeof recoveryInstall !== 'boolean' || recoveryInstall && (mode !== 32 || targetSelector !== 0))
@@ -968,7 +968,17 @@ async function enterDBootloader({write, subscribe, signal, mode, targetSelector,
       const step='D-recovery-'+name;
       onDiagnostic?.({step,event:'request'});
       try {await run();onDiagnostic?.({step,event:'accepted'});}
-      catch(error){onDiagnostic?.({step,event:'stopped',reason:signal?.aborted?'disconnected':'rejected-or-timeout'});throw error;}
+      catch(error){
+        // Only expose our bounded protocol errors, never arbitrary transport
+        // messages which may contain private payloads from a caller.
+        const message=error?.message || '';
+        const reason=signal?.aborted?'disconnected':
+          message==='FIRMUP rejected'?'device-rejected (FIRMUP 12)':
+          /^FIRMUP stage mismatch: expected [1-5], received (\d{1,3}|missing)$/.test(message)?message:
+          message==='Firmware query reply timed out'?'reply-timeout':
+          message.includes('ATT write timed out')?'ATT-timeout':'transport-or-local-error';
+        onDiagnostic?.({step,event:'stopped',reason});throw error;
+      }
     };
     if (recoveryInstall) {
       await recoveryStep('mode',()=>setMode(mode,targetSelector));

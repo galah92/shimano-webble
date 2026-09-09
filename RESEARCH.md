@@ -2250,3 +2250,23 @@ Full-size preparation/restoration simulations and all-write failure/abort
 checks pass. Authentication and recovery readiness remain external
 preconditions; the page still does not call the transfer coordinator.
 The guided52-write .50 recovery probe and requested bike test are unchanged.
+
+### Build .52: distinguish the live recovery-stage failure
+
+The .51 bike run accepted recovery mode and slot, then stopped stage 1 in
+66 ms. This is shorter than the two-second reply deadline and therefore
+is not evidence of a reply timeout. The compact diagnostic previously
+collapsed rejection, wrong-stage reply and transport failure together.
+Source AbstractC0567r9.f/g and C0665u8 case 11 agree with our normalized
+FIRMUP 11 + stage / 12 rejection matcher; no acceptance rule is relaxed.
+
+The next build reports device rejection, expected/received stage mismatch,
+reply timeout, ATT timeout, disconnection or transport/local failure
+separately. Arbitrary native error messages and credentials stay private.
+Local tests cover rejection, mismatch, silence, native failure and abort;
+all stop at stage 1 with no follow-up writes. The probe sequence is unchanged.
+
+At 18:21:26.914 the subsequent .51 readback matched the same motor,
+D 4.5.0.0, M 4.4.8.0 and EU. Recovery re-entry from the intact loader has
+not passed; recovery after erased/interrupted firmware is still unproven.
+No firmware transfer or US configuration was achieved by this run.
