@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.23';
+const BUILD = '2026-09-09.24';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -405,7 +405,7 @@ function firmwareTransferGeometry(data, component) {
 // BEGIN M FIRMWARE REPLIES
 // Hn.K/C/J returns candidate interpretations, not a unique validated frame.
 // Keep framing provenance: a raw candidate has no checksum guarantee.
-function mFirmwareEnvelopes(raw) {
+function firmwareEnvelopes(raw) {
   const candidates = [];
   const add = (data, framing) => {
     if (!data.length) return;
@@ -467,7 +467,7 @@ function mFirmwareReplyWindow(querySequence, dataSequence, checkpoint = false) {
     receive(raw) {
       if (closed) return status();
       // Aggregate the whole notification before judging success: errors dominate.
-      for (const candidate of mFirmwareEnvelopes(raw)) {
+      for (const candidate of firmwareEnvelopes(raw)) {
         for (const [kind, value] of mFirmwareEvents(candidate.protocol, candidate.payload, querySequence, dataSequence, checkpoint)) {
           if (kind === 'query_status' && value > 0) error = `query-status-${value}`;
           if (kind === 'data_ack') ack = true;
@@ -604,6 +604,43 @@ async function sendMFirmwareBlock({data, offset, nextSequence, write, subscribe,
   }
 }
 // END M FIRMWARE BLOCK WORKER
+
+// BEGIN D FIRMWARE REPLIES
+// C0041b7.m1/Y6, E5000 branch (d=true). Shared Hn envelope candidates.
+function dFirmwareReplyWindow(dataSequence, blockIndex) {
+  if (!Number.isInteger(dataSequence) || dataSequence < 0 || dataSequence > 255 ||
+      !Number.isInteger(blockIndex) || blockIndex < 0 || blockIndex >= 3072)
+    throw new Error('Invalid D data sequence or modeled block index');
+  let ack = false, result = -1, errorCode = -1, otherBlockErrors = 0, errorsAfterSuccess = 0, closed = false;
+  const status = () => ({ack, result, errorCode, otherBlockErrors, errorsAfterSuccess,
+    state: !ack || result < 0 ? 'waiting' : result === 49 ? 'evidence-complete' : 'failed',
+    replyTimeoutMs: blockIndex < 3 ? 25000 : 3000, installable: false});
+  return {
+    receive(raw) {
+      if (closed) return status();
+      for (const {protocol, payload} of firmwareEnvelopes(raw)) {
+        if ((protocol & 11) === 11 && payload.length > 2 && payload[1] === 192 && payload[2] === dataSequence) ack = true;
+        if ((protocol & 136) !== 136 || !payload.length) continue;
+        const code = payload[0];
+        if (code !== 49 && code !== 50 || code === 49 && payload.length < 3) continue;
+        // Source treats zero/absent result index as uncorrelated, not as block zero.
+        const encodedIndex = payload.length >= 3 ? payload[1] | (payload[2] << 8) : 0;
+        const index = encodedIndex > 0 ? encodedIndex - 1 : -1;
+        if (index >= 0 && index !== blockIndex) {
+          if (code === 50) otherBlockErrors++;
+          continue;
+        }
+        if (code === 49) { result = 49; errorCode = -1; }
+        else if (result === 49) errorsAfterSuccess++;
+        else { result = 50; errorCode = payload.length >= 2 ? payload[1] : -1; }
+      }
+      return status();
+    },
+    close() { closed = true; return status(); },
+    status,
+  };
+}
+// END D FIRMWARE REPLIES
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.

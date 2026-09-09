@@ -237,3 +237,8 @@ Build .23 adds an unwired M data-block worker: an initial attempt and up to two
 protocol-directed retries, with fresh sequences and source-derived delays.
 Uncertain ATT outcomes stop without automatic rewriting. The worker is tested
 offline; whole-image transfer, D handling and paired recovery remain incomplete.
+
+Build .24 adds D reply handling, checked against 72 cases executed through the
+original Java listener. D requires both a data acknowledgement and a block
+result, with longer deadlines for its first three blocks. This remains offline
+updater infrastructure; no firmware controls or new bike test are enabled.

@@ -7,7 +7,7 @@ const raw=s=>Uint8Array.from(Buffer.from(s,'hex'));
 const plain=v=>JSON.parse(JSON.stringify(v));
 const vectors=JSON.parse(fs.readFileSync(__dirname+'/m_envelope_vectors.json','utf8'));
 for(const v of vectors) {
- const actual=ctx.mFirmwareEnvelopes(raw(v.raw)).map(c=>[c.protocol,Buffer.from(c.payload).toString('hex')]);
+ const actual=ctx.firmwareEnvelopes(raw(v.raw)).map(c=>[c.protocol,Buffer.from(c.payload).toString('hex')]);
  assert.deepEqual(plain(actual),v.envelopes,v.raw);
 }
 for(const encoded of ['0b00c007','000b00c007','bb0b00c007d3bb']) {
