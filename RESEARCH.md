@@ -640,3 +640,23 @@ the app or used to predict the bike's assistance cutoff.
 Next evidence needed: the build .14 motor-authentication result. EU readback is
 established by the user's build .13 test. US configuration, persistence and
 speed behavior remain unverified; no firmware or destination write is enabled.
+
+### Desktop caller policy for authentication locks
+
+Static inspection of `e_tube_project.exe` from the same installer confirms
+how the authentication results are used. SHA-256:
+`e0f16523dcaef90aedd8f271161f7f8747bb7109414ce55950ce7bffdb3979fb`.
+`DriveUnitLoadPanel.loadWorker_DoWork` (RVA C6AA4, IL 016F–0221)
+calls `ProcessRegulationSetAuth`: Success (0) and Unnecessary (3) continue;
+Fail (1) stops; the remaining defined result, Locked (2), calls
+`UnlockRegulationSetAuth`. An unlock failure stops and marks both authentication
+and unlock failure. An unlock success loops back to authentication.
+`UnitWriteCheckPanel.RightButtonClickedHandler` has the corresponding flow.
+
+This narrows the future BLE fallback: an explicit DB error 46 is evidence for
+trying E8 and then a fresh D8 exchange after a verified unlock acknowledgement.
+A generic DB, timeout or malformed challenge is not equivalent to that lock
+result. The desktop loop itself is not a reason to add unbounded WebBLE retries.
+The live EA response shape remains unverified; build .14 deliberately retains
+its single-attempt behavior while awaiting the first motor-authentication log.
+This finding does not resolve the separate eTuning firmware-preparation gate.
