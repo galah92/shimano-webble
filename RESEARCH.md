@@ -1,8 +1,9 @@
 # Session authentication investigation
 
 Updated 2026-09-09. Target: SC-E7000 + DU-E7000 firmware 4.7.1,
-using Android Web Bluetooth. Build `2026-09-09.3` implements an experimental
-session handshake; live validation is the next gate.
+using Android Web Bluetooth. Build `2026-09-09.4` verified session access on
+the real bike. Build `2026-09-09.5` adds explicit drive-unit information queries;
+that transport experiment still needs a live test.
 
 ## Confirmed from the supplied artifacts
 
@@ -115,8 +116,8 @@ firmware and internally handled preparation (checked 2026-09-09).
 
 These sources do not identify what preparation this specific bike needs. The
 alleged 4.7.7 cutoff remains unverified. No destination command or firmware
-preparation is implemented. Next: test session access on the actual bike,
-then trace motor identification, configuration authorization, and the modern
+preparation is implemented. Next: verify the drive-unit identity and firmware
+on the actual bike, then trace configuration authorization and the modern
 app's preparation decision separately.
 
 ## Private analysis location
@@ -150,4 +151,63 @@ response, waits another 500 ms and reads 2AF7 again. Successful identification
 before setup avoids the write. Failed setup or timeout stops and disconnects;
 failed identification after setup stops without additional commands. Browser
 simulation covers setup success, failure, timeout, disconnect and continued
-blocked access. Live validation of this additional step remains pending.
+blocked access. The subsequent live test succeeded, as recorded below.
+
+## Build .4 live session milestone
+
+At 06:07 UTC on September 9, both authentication stages were acknowledged.
+2AF7 remained blocked after the 500 ms wait. A single `2AFF ← FF 00` received
+an ATT write response, and the subsequent read after another 500 ms returned
+`53 43 45 37 30 30 30 00` (`SCE7000\0`). No other application writes or
+notification subscriptions were needed in that test. The minimum required
+delay has not been measured; the observation supports the setup command's
+role but does not isolate it from all elapsed-time effects.
+
+## Build .5: drive-unit information experiment
+
+The capture and both APKs agree on these requests and response prefixes:
+
+| Query | Write characteristic | Request | Notification characteristic | Matching prefix |
+| --- | --- | --- | --- | --- |
+| Drive-unit model | 2AFE | `00 01 1C 00` | 2AFD | `00 01 1E` |
+| Drive-unit firmware | 2AFE | `00 01 2C 00` | 2AFD | `00 01 2E` |
+
+Old `d/a/a/a/c.java` cases 20 and 22 send these requests via `g.j`.
+New `Q5.java` cases 20 and 22 send them via `C0549qn.f0`, which writes
+`C0483on.W`. The capture maps the write handle 0x002f to 2AFE and notification
+handle 0x002c to 2AFD. Frames 748/751 contain the model query/reply;
+frames 777/779 contain the firmware query/reply.
+
+Old `d/a/a/a/h.java` cases 30 and 46 and new `In.java` cases 30 and 46
+handle these replies. `In.x7` maps model byte 0x21 to DUE7000 and 0x22 to
+DUE50X0. Firmware is decoded from the high/low nibbles of response byte 3
+and response byte 4 as major.minor.patch (zero-based offsets).
+
+**Artifact discrepancy:** frame 751's model fields are `00 01 1E 22 00`,
+and frame 779's firmware fields are `00 01 2E 45 00`. With the APK decoder,
+these mean DU-E50X0 family / 4.5.0, not the handoff's DU-E7000 / 4.7.1.
+The display identity is still SC-E7000. This discrepancy is unresolved;
+do not treat captured motor-dependent operations or firmware decisions as
+validated for the target bike. Live information reads will establish the
+current unit. No assumption is made about why the capture differs.
+
+Build .5 keeps the verified authentication sequence and enables **Identify
+drive unit** only after SC-E7000 session verification. On that explicit action
+it subscribes to 2AFD and sends the model query, then the firmware query after
+a matching ten-byte reply. Each request waits for both ATT write completion
+and the matching notification, with an eight-second timeout. Other response
+prefixes are ignored. Failure stops and disconnects, without retry or fallback
+commands. Only the five information fields are logged; trailing bytes and
+unrelated notifications are omitted.
+
+This is deliberately a minimal transport experiment. The capture performed
+additional 2AFA commands, subscriptions, and 2AF5/2AF6 operations before these
+queries. Their necessity has not been established, so they are not replayed.
+A timeout would leave transport initialization unresolved, not establish that
+the motor is inaccessible through Bluetooth. No destination, configuration
+write, or firmware preparation command is added.
+
+Browser simulation covers both notification/write completion orders, unrelated
+notifications, write failure, malformed reply, disconnect, timeout, no automatic
+query after authentication, and decoding the captured fields separately from
+a synthetic DU-E7000 / 4.7.1 fixture.

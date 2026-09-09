@@ -5,7 +5,7 @@
 SHIMANO WEBBLE REVERSE-ENGINEERING HANDOFF NOTES
 
 Historical import. For current verified findings, see RESEARCH.md.
-Build 2026-09-09.4 adds a conditional, captured 2AFF session setup attempt.
+Build 2026-09-09.5 adds explicit drive-unit identification queries.
 The original read-only behavior and pending milestones below are historical.
 ===============================================================================
 
@@ -329,6 +329,7 @@ END HANDOFF NOTES
 <div>18FF service</div><div id="svc">—</div>
 <div>2AF3 indications</div><div id="notify">—</div>
 <div>2AF4 challenge</div><div><code id="challenge">—</code></div>
+<div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div></div>
 <div class="row">
@@ -342,11 +343,13 @@ END HANDOFF NOTES
 <div class="row"><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged. If identification stays blocked after authentication, the app sends the captured session setup command once and checks again.</div>
 </div>
+<div class="card"><button id="identify" disabled>Identify drive unit</button>
+<div class="muted">After session verification, query the drive-unit model and firmware. This experiment reads information through the command transport.</div></div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clear">Clear log</button></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.4';
+const BUILD = '2026-09-09.5';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -378,6 +381,7 @@ function controls() {
   $('disconnect').disabled = !connected;
   $('probe').disabled = busy || !connected;
   $('authenticate').disabled = busy || !connected || session?.authenticated || !crypto.subtle;
+  $('identify').disabled = busy || !connected || !session?.verified;
   $('passkey').disabled = busy || !connected || session?.authenticated;
 }
 function protectedStatus(message, css = '') {
@@ -399,6 +403,7 @@ function resetSession(s) {
   $('svc').textContent = '—';
   $('notify').textContent = '—';
   $('challenge').textContent = '—';
+  $('drive').textContent = 'Not tested';
   protectedStatus('Not tested');
   controls();
   log('Disconnected');
@@ -615,6 +620,7 @@ async function authenticate() {
       identity = await readCharacteristic(s, '2af7');
     }
     if (identity && /^SCE7000\0*$/.test(new TextDecoder().decode(bytes(identity)))) {
+      s.verified = true;
       protectedStatus('Session verified: SC-E7000 identification readable', 'ok');
       log('MILESTONE: both auth acknowledgements and SC-E7000 identification verified.');
     } else {
@@ -633,6 +639,87 @@ async function authenticate() {
     if (session === s) { busy = false; controls(); }
   }
 }
+// Only these two information requests are implemented. Subscribe before sending;
+// match the full response prefix and await both ATT completion and the reply.
+function queryDriveInfo(s, opcode) {
+  assertCurrent(s);
+  if (![0x1c, 0x2c].includes(opcode)) throw new Error('Unsupported information query');
+  const rx = s.chars['2afd'];
+  const packet = new Uint8Array([0, 1, opcode, 0]);
+  log(`TX 2AFE drive-unit ${opcode === 0x1c ? 'model' : 'firmware'} query: ${hex(packet)}`);
+  return new Promise((resolve, reject) => {
+    let written = false;
+    let response;
+    let settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rx.removeEventListener('characteristicvaluechanged', onValue);
+      s.controller.signal.removeEventListener('abort', onAbort);
+      if (error) reject(error); else resolve(response);
+    };
+    const onAbort = () => finish(new Error('Disconnected during drive-unit query'));
+    const onValue = ev => {
+      const data = bytes(ev.target.value);
+      if (data[0] !== 0 || data[1] !== 1 || data[2] !== opcode + 2) return;
+      if (data.length !== 10) return finish(new Error('Unexpected drive-unit response length'));
+      response = data.slice(0, 5);
+      if (written) finish();
+    };
+    const timer = setTimeout(() => finish(new Error('Drive-unit query timed out; additional transport setup may be required')), 8000);
+    rx.addEventListener('characteristicvaluechanged', onValue);
+    s.controller.signal.addEventListener('abort', onAbort, {once: true});
+    try {
+      s.chars['2afe'].writeValueWithResponse(packet).then(() => {
+        written = true;
+        if (response) finish();
+      }, finish);
+    } catch (e) { finish(e); }
+  });
+}
+function decodeDriveInfo(model, firmware) {
+  const modelName = ({0x21: 'DU-E7000', 0x22: 'DU-E50X0 family'})[model[3]]
+    || `Unknown model code 0x${model[3].toString(16).padStart(2, '0')}`;
+  const major = firmware[3] >> 4;
+  const minor = firmware[3] & 15;
+  if (major > 9 || minor > 9) throw new Error('Unexpected firmware version encoding');
+  return `${modelName}; firmware ${major}.${minor}.${firmware[4]}`;
+}
+async function identifyDrive() {
+  if (busy || !session?.verified) return;
+  const s = session;
+  busy = true;
+  controls();
+  $('drive').textContent = 'Querying…';
+  try {
+    for (const short of ['2afd', '2afe']) {
+      if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
+      assertCurrent(s);
+    }
+    await s.chars['2afd'].startNotifications();
+    assertCurrent(s);
+    log('2AFD notifications enabled for drive-unit information replies.');
+    const model = await queryDriveInfo(s, 0x1c);
+    assertCurrent(s);
+    log(`RX 2AFD model fields: ${hex(model)} (trailing bytes omitted)`);
+    const firmware = await queryDriveInfo(s, 0x2c);
+    assertCurrent(s);
+    log(`RX 2AFD firmware fields: ${hex(firmware)} (trailing bytes omitted)`);
+    const result = decodeDriveInfo(model, firmware);
+    $('drive').textContent = result;
+    log(`Drive-unit information: ${result}`);
+    log('Information queries complete. No configuration changes sent.');
+  } catch (e) {
+    if (session === s) {
+      log(`Drive-unit identification stopped: ${e.message}. Reconnect before retrying.`);
+      disconnect();
+    }
+  } finally {
+    if (session === s) { busy = false; controls(); }
+  }
+}
+$('identify').onclick = identifyDrive;
 $('connect').onclick = connect;
 $('probe').onclick = runProbe;
 $('disconnect').onclick = disconnect;
@@ -653,7 +740,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · session setup experiment`;
+$('build').textContent = `Build ${BUILD} · drive-unit identification experiment`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

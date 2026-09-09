@@ -18,11 +18,15 @@ messages, waits for their acknowledgements, then waits 500 ms and checks whether
 setup command to 2AFF once, waits another 500 ms, and checks again. The passkey is used locally, cleared after the attempt, and never
 saved or logged. **Copy log** exports the diagnostic results for analysis.
 
-Both authentication stages were acknowledged by the real bike in build .3,
-but an immediate identification read stayed blocked. Build .4 tests the delay
-and captured setup step; their effect still needs live validation. If authentication fails, reconnect
-before retrying. If both acknowledgements succeed but identification is not
-verified, share the log; further session setup may be needed.
+Build .4 verified both authentication stages and SC-E7000 identification on the
+real bike after the captured setup command. If authentication fails, reconnect
+before retrying.
+
+In build .5, tap **Identify drive unit** after session verification. It queries
+the model and firmware through 2AFE/2AFD, with no configuration changes. This
+minimal transport sequence still needs live validation; share the log even if
+it times out. The supplied capture's motor fields decode differently from the
+handoff, so the app reports the returned values rather than assuming E7000 / 4.7.1.
 
 ## Develop
 

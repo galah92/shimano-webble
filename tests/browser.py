@@ -7,6 +7,7 @@ HTML = (Path(__file__).resolve().parents[1] / 'index.html').read_text()
 MOCK = r"""
 window.options = OPTIONS;
 window.operations = [];
+window.characteristics = {};
 const value = array => new DataView(Uint8Array.from(array).buffer);
 class Characteristic extends EventTarget {
   constructor(short) { super(); this.short = short; }
@@ -22,6 +23,22 @@ class Characteristic extends EventTarget {
   async writeValueWithResponse(packet) {
     packet = [...packet];
     operations.push(['write', this.short, packet]);
+    if (this.short === '2afe') {
+      if (options.motorFailure) throw new DOMException('Information write failed', 'NetworkError');
+      if (options.motorDisconnect) { bike.gatt.disconnect(); return; }
+      const rx = characteristics['2afd'];
+      const send = () => {
+        // Unrelated notification must not satisfy this request.
+        rx.value = value([0, 22, 30, 33, 0, 0, 0, 0, 0, 0]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        if (options.motorTimeout) return;
+        rx.value = value(options.motorMalformed ? [0, 1, packet[2] + 2] :
+          [0, 1, packet[2] + 2, packet[2] === 28 ? 33 : 71, packet[2] === 28 ? 0 : 1, 0, 0, 0, 0, 0]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+      };
+      if (options.motorDelayed) setTimeout(send, 20); else send();
+      return;
+    }
     if (this.short === '2aff') {
       if (options.setupFailure) throw new DOMException('Setup write failed', 'NetworkError');
       if (options.setupDisconnect) { window.bike.gatt.disconnect(); return; }
@@ -49,7 +66,10 @@ bike.gatt = {
   async connect() { this.connected = true; return this; },
   disconnect() { this.connected = false; bike.dispatchEvent(new Event('gattserverdisconnected')); },
   async getPrimaryService() {
-    return {getCharacteristic: async uuid => new Characteristic(uuid.slice(4, 8))};
+    return {getCharacteristic: async uuid => {
+      const short = uuid.slice(4, 8);
+      return characteristics[short] ||= new Characteristic(short);
+    }};
   }
 };
 Object.defineProperty(navigator, 'bluetooth', {value: {requestDevice: async () => bike}});
@@ -204,6 +224,43 @@ class BrowserTests(unittest.TestCase):
         self.page.wait_for_timeout(600)
         self.assertEqual(len(self.writes()), 2)
         self.assertFalse(self.errors)
+
+    def ready_for_identify(self, **options):
+        self.open(requireSetup=True, **options)
+        self.assertTrue(self.page.locator('#identify').is_disabled())
+        self.auth()
+        self.page.wait_for_function("!document.getElementById('identify').disabled")
+        self.assertEqual(len(self.writes()), 3)  # No automatic information queries.
+        self.page.locator('#identify').click()
+
+    def test_drive_identity_both_response_orders(self):
+        for delayed in (False, True):
+            with self.subTest(delayed=delayed):
+                self.ready_for_identify(motorDelayed=delayed)
+                self.page.wait_for_function("document.getElementById('drive').textContent === 'DU-E7000; firmware 4.7.1'")
+                self.assertEqual(self.writes()[3:], [['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]]])
+                ops = self.page.evaluate('operations')
+                self.assertLess(ops.index(['subscribe', '2afd']), ops.index(self.writes()[3]))
+                self.assertFalse(self.errors)
+                self.context.close()
+
+    def test_drive_query_failure_stops_sequence(self):
+        for option in ('motorFailure', 'motorDisconnect', 'motorMalformed', 'motorTimeout'):
+            with self.subTest(option=option):
+                self.ready_for_identify(**{option: True})
+                self.page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'", timeout=12000)
+                self.assertEqual(self.writes()[3:], [['write', '2afe', [0, 1, 28, 0]]])
+                self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
+                self.assertTrue(self.page.locator('#identify').is_disabled())
+                self.assertFalse(self.errors)
+                self.context.close()
+
+    def test_captured_drive_fields_decode_without_assuming_target(self):
+        self.open()
+        result = self.page.evaluate('decodeDriveInfo([0,1,30,34,0], [0,1,46,69,0])')
+        self.assertEqual(result, 'DU-E50X0 family; firmware 4.5.0')
+        unknown = self.page.evaluate('decodeDriveInfo([0,1,30,255,0], [0,1,46,71,1])')
+        self.assertEqual(unknown, 'Unknown model code 0xff; firmware 4.7.1')
 
     def test_aes_known_answer(self):
         self.open()
