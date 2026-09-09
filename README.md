@@ -187,6 +187,7 @@ They run automatically at the end of that batch; no extra button is needed.
 Copy the log after the batch ends. An incomplete native D read stops the pair
 before M, requiring a reconnect. Firmware preparation remains unavailable.
 
-`tools/m_reply.py` classifies normalized M-transfer reply envelopes offline;
-`python3 tests/m_reply.py` checks sequence and checksum distinctions. It does
-not parse raw BLE framing or authorize progress to another firmware block.
+`tools/m_reply.py` models candidate notification envelopes and classifies
+M-transfer replies offline; `python3 tests/m_reply.py` checks Java reference
+vectors, sequence matching and checksum distinctions. It does not reassemble
+notifications or authorize progress to another firmware block.
