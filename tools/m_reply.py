@@ -74,3 +74,15 @@ def classify(protocol, payload, query_sequence, data_sequence, checkpoint=False)
                     events.append(('uncorrelated_checksum_status', status))
                 break
     return events
+
+
+def source_query_retryable(message):
+    """C0776xk.R0 diagnostic-string predicate, checked against fallback bytecode.
+
+    Offline source analysis only. A true result is not evidence that a write is
+    safe to repeat; the enclosing worker bounds attempts and handles recovery.
+    """
+    if not message:
+        return False
+    return ('TRANSFER_START 83 error status=0x01' in message or
+            ('TRANSFER_START_83_ERROR' in message and 'status=0x01' in message))

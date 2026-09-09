@@ -1095,3 +1095,35 @@ These are synthetic parser checks, not captured firmware-transfer acceptance
 or proof that each notification is a complete frame. A future live updater
 must establish characteristic routing, fragmentation behavior and stale-message
 boundaries before using these candidate interpretations to advance or retry.
+
+## Preparation selection and M retry policy clarified
+
+`Jh.f` selects E5000 generation zero, using `Ka.g` independently for each
+component base name. `Ka.g` chooses the highest version among matching names
+and generation values in the provided file list (`Ka.l` enumerates the local
+FW directory). The preparation UI's 4.3.0 label does not itself constrain both
+installed files to that version. Therefore the archived D 4.3.0 / M 4.2.1 pair
+remains a candidate, not proven contents of the downloaded preparation archive.
+
+`C0776xk.f1` has at most two local data attempts. Each attempt waits 400 ms,
+consumes a fresh data sequence, constructs/sends the data block, then on ATT
+success waits 15 ms and consumes a separate query sequence for `H0`. A failed
+ATT data write proceeds to the second attempt. A successful `H0` returns the
+data sequence. A failed `H0` is retried only when `R0(errorMessage)` matches;
+otherwise it throws `C0743wk`, leaving handling to the surrounding window logic.
+This is data retransmission, not merely polling an earlier packet again.
+
+The normal JADX output incorrectly represents part of `R0` with empty branches.
+A separate fallback instruction dump resolves its actual boolean expression:
+contains `TRANSFER_START 83 error status=0x01`, OR contains both
+`TRANSFER_START_83_ERROR` and `status=0x01`. The strings were independently
+decoded from the local class. Timeouts and generic checksum failures do not
+satisfy this predicate. `tools/m_reply.py:source_query_retryable` records this
+source behavior for offline analysis, with positive and negative tests. It
+must not be used as standalone authorization to replay a firmware block.
+
+The enclosing window recovery path, stale checksum observations, sequence wrap
+and disconnect recovery still need validation. There is no evidence here that
+arbitrary failed writes are idempotent or that a browser may resume after power
+loss. The live application continues to perform diagnostic reads only for
+firmware; its US setter remains disabled after the observed AB/3A rejections.

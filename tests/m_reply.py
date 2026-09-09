@@ -3,11 +3,20 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from m_reply import classify, envelopes
+from m_reply import classify, envelopes, source_query_retryable
 import json
 
 
 class MReplyTests(unittest.TestCase):
+    def test_source_retry_filter_is_narrow(self):
+        for message in ('TRANSFER_START 83 error status=0x01',
+                        'prefix TRANSFER_START_83_ERROR target=07 status=0x01 suffix'):
+            self.assertTrue(source_query_retryable(message))
+        for message in (None, '', 'timeout', 'checksum failed',
+                        'TRANSFER_START_83_ERROR status=0x02',
+                        'status=0x01', 'TRANSFER_START_83_ERROR'):
+            self.assertFalse(source_query_retryable(message))
+
     def test_java_envelope_vectors(self):
         vectors = json.loads(Path(__file__).with_name('m_envelope_vectors.json').read_text())
         for vector in vectors:
