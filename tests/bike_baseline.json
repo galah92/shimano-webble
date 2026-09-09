@@ -1,0 +1,8 @@
+{
+  "source": "User-supplied build 2026-09-09.18 log, 2026-09-09T10:46:20Z",
+  "family_code": [34, 0],
+  "destination_slot_1": 0,
+  "D": {"reply_prefix": [0, 1, 134, 69, 0, 0], "version": "4.5.0.0"},
+  "M": {"reply_prefix": [0, 1, 134, 68, 8, 0], "version": "4.4.8.0"},
+  "limitations": "Native replies were 10 bytes; only the first six were exported. No firmware compatibility or US write success established."
+}

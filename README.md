@@ -179,8 +179,14 @@ Offline component selection: `python3 tools/compare_components.py D.dat M.dat`
 accepts optional `--installed-d` and `--installed-m` four-field versions. It
 compares each component separately and leaves the order unresolved if either
 installed version is unknown. Tests: `python3 tests/component_selection.py`.
-The bike still needs separate native D/M version reads; the existing drive-unit
-version display does not supply both.
+The build .18 live batch independently read D **4.5.0.0** and M **4.4.8.0**;
+destination remained EU (0). The sanitized baseline is in
+`tests/bike_baseline.json`. Use `--installed-d 4.5.0.0 --installed-m 4.4.8.0`
+to compare candidate files with this observation. The archived D 4.3.0 / M 4.2.1
+pair selects two downgrades, M then D. This does not establish that both are
+required, that the pair matches eTuning's preparation package, or that it is
+installable. Exact restoration images for the observed versions are not yet
+available locally.
 
 Build .18 adds native D and M version reads to **Read region and compatibility**.
 They run automatically at the end of that batch; no extra button is needed.

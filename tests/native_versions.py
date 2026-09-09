@@ -1,4 +1,6 @@
 """Read-only identity descriptor experiment, including unsupported responses."""
+import json
+from pathlib import Path
 import unittest
 from playwright.sync_api import sync_playwright
 import browser
@@ -18,6 +20,19 @@ class NativeVersionTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.browser.close(); cls.playwright.stop()
+
+    def test_build18_live_prefixes(self):
+        baseline = json.loads(Path(__file__).with_name('bike_baseline.json').read_text())
+        # Only the six exported bytes are known; do not invent the omitted tail.
+        self.ready_for_identify(motorModel=34, motorFirmware=69, motorPatch=0,
+                               nativeReplies=[baseline[c]['reply_prefix'] for c in ('D', 'M')])
+        self.wait_batch()
+        log = self.page.locator('#log').inner_text()
+        for component in ('D', 'M'):
+            self.assertIn(f"Native {component} firmware: {baseline[component]['version']}", log)
+        self.assertTrue(self.page.locator('#setUS').is_disabled())
+        self.assertFalse(self.errors)
+        self.context.close()
 
     def test_native_versions_and_failure_boundary(self):
         for opts in ({}, {'nativeError': 0}, {'nativeShort': 0}, {'nativeTimeout': 0},

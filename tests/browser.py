@@ -54,7 +54,8 @@ class Characteristic extends EventTarget {
         if (options.nativeDisconnect === packet[3]) { bike.gatt.disconnect(); return; }
         const send = () => {
           rx.value = value(options.nativeError === packet[3] ? [0,1,135,58,0,0] :
-            options.nativeShort === packet[3] ? [0,1,134,69,0] : [0,1,134,packet[3] ? 66 : 69,packet[3] ? 1 : 0,7,0,0,0,0]);
+            options.nativeShort === packet[3] ? [0,1,134,69,0] :
+            options.nativeReplies ? options.nativeReplies[packet[3]] : [0,1,134,packet[3] ? 66 : 69,packet[3] ? 1 : 0,7,0,0,0,0]);
           rx.dispatchEvent(new Event('characteristicvaluechanged'));
         };
         if (options.nativeTimeout === packet[3]) { setTimeout(send, 8500); return; }

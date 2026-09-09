@@ -21,6 +21,7 @@ class ComponentSelectionTests(unittest.TestCase):
         for d, m, order in [('4.5.0.0', '4.2.1.0', ['D']),
                             ('4.3.0.0', '4.1.0.0', ['M']),
                             ('4.5.0.0', '4.4.3.0', ['M', 'D']),
+                            ('4.5.0.0', '4.4.8.0', ['M', 'D']),
                             ('4.3.0.0', '4.2.1.0', [])]:
             result = plan(*images(), d, m)
             self.assertEqual(result['normal_mode_order'], order)

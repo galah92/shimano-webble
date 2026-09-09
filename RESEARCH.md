@@ -1145,8 +1145,8 @@ The goal remains incomplete against the actual acceptance criteria:
 
 | Requirement | Current evidence |
 | --- | --- |
-| HTTPS phone connection and session authentication | Repeated successful Pixel logs through .16; .18 deployment verified |
-| Motor identification | Repeated electronic family code 22/00; descriptor all zero; native D/M readback from .18 still missing |
+| HTTPS phone connection and session authentication | Repeated successful Pixel logs including .18 |
+| Motor identification | Repeated electronic family code 22/00; descriptor all zero; .18 native D 4.5.0.0 and M 4.4.8.0 |
 | Motor authentication | E2 FF FF observed repeatedly; does not establish region-write permission |
 | US destination change | Two direct writes rejected AB/3A; later read remained EU |
 | Preparation assets | Archived E5000 D 4.3.0 / M 4.2.1 present and classified; actual eTuning preparation pair and bike compatibility unverified |
@@ -1154,8 +1154,37 @@ The goal remains incomplete against the actual acceptance criteria:
 | Fresh US readback and power-cycle persistence | Not achieved |
 | Assistance-speed behavior | Not measured; no claim made |
 
-The next bike input is the existing .18 information batch, which includes
-separate native D/M reads. Another direct US write would repeat a known failure
-and would not fill any of these gaps. Source analysis can continue, but more
-synthetic codec tests cannot substitute for those native results or evidence
-from a supported firmware update/recovery path. No flash operation is ready.
+The .18 information batch has now supplied both native versions. Another direct
+US write would repeat a known failure and would not fill the remaining gaps.
+Source analysis can continue, but synthetic codec tests cannot substitute for
+evidence from a supported firmware update/recovery path. No flash operation is ready.
+
+## Build .18 live native baseline: 2026-09-09 10:46 UTC
+
+The user's complete 18,045-character export contains independent selector
+reads: D `00 01 84 00` returned prefix `00 01 86 45 00 00`, and M
+`00 01 84 01` returned prefix `00 01 86 44 08 00`. Each arrived in 65 ms.
+These decode to D 4.5.0.0 and M 4.4.8.0. The actual notifications were ten
+bytes; the remaining four bytes were omitted by the logger and are unknown.
+Both destination slots read EU (0); motor authentication again completed with
+E2 FF FF. This session contains no destination setter or firmware transfer.
+
+The sanitized fixture `tests/bike_baseline.json` retains only the observed
+identity/version/region fields. A browser replay checks these exact six-byte
+prefixes and retains the disabled US setter. It verifies application decoding,
+not physical compatibility or update behavior.
+
+Running `compare_components.py` against the private archived 4.0.2 images with
+this baseline yields M 4.4.8.0 -> 4.2.1.0, then D 4.5.0.0 -> 4.3.0.0;
+`installable` remains false. This is conditional on choosing that candidate
+pair. `Jh.f`/`Ka.g` select files from the application's local FW inventory;
+the preparation UI label alone still does not prove which M image accompanies
+D 4.3.0. No conclusion that M must be downgraded follows from this comparison.
+
+The local raw-file inventory contains the reference 4.1.0 pair and archived
+D 4.3.0 / M 4.2.1 candidate, but no exact D 4.5.0 / M 4.4.8 restoration pair.
+The remaining concrete preparation work is to establish the actual selected
+package and obtain/validate restoration assets, followed by transfer,
+finalization and recovery validation. Repeating this information batch is not
+needed to resolve package contents. US readback, power-cycle persistence and
+assistance-speed behavior remain unachieved.
