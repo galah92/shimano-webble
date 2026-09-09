@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.48';
+const BUILD = '2026-09-09.49';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1230,17 +1230,30 @@ async function setupDFirmwareIdentity({identity, write, subscribe, signal}) {
 // Bootloader entry and paired hash/compatibility validation must precede this
 // operation. It owns a snapshot and verifies identity before setup/data writes.
 // No UI caller; no automatic reset, resume or rollback.
-async function transferDComponent({data, write, subscribe, signal}) {
+function validBootloaderFingerprint(value) {
+  return value?.version===1 && value.family===34 && value.unit===0 &&
+    typeof value.identity==='string' && /^[a-f0-9]{64}$/.test(value.identity);
+}
+async function transferDComponent({data, write, subscribe, signal, expectedBootloaderIdentity, identitySalt}) {
+  if (!validBootloaderFingerprint(expectedBootloaderIdentity) ||
+      !(identitySalt instanceof Uint8Array) || identitySalt.length!==16)
+    throw new Error('Verified bootloader identity reference required before D transfer');
   firmwareBlock(data, 'D', 0, 0);
   if (firmwareHeader(data).component !== 'D') throw new Error('Expected a D image');
+  const expectedIdentity=expectedBootloaderIdentity.identity,salt=identitySalt.slice();
   const image = Uint8Array.from(data);
   const transport = {write, subscribe, signal};
-  const identity = await queryDBootloaderIdentity(transport);
-  const check = checkDBootloaderImage(image, identity);
-  await setupDFirmwareIdentity({...transport, identity});
-  const result = await transferDFirmware({...transport, data: image});
-  // Do not expose serial in a result intended for logging.
-  return {...result, family: check.family, unit: check.unit, imageVersion: check.imageVersion};
+  let identity;
+  try {
+    identity = await queryDBootloaderIdentity(transport);
+    const check = checkDBootloaderImage(image, identity);
+    const actual=await fingerprintDBootloaderIdentity(identity,salt);
+    if(actual.identity!==expectedIdentity) throw new Error('D bootloader identity does not match the recorded motor');
+    await setupDFirmwareIdentity({...transport, identity});
+    const result = await transferDFirmware({...transport, data: image});
+    // Do not expose serial in a result intended for logging.
+    return {...result, family: check.family, unit: check.unit, imageVersion: check.imageVersion};
+  } finally {salt.fill(0);identity?.serial.fill(0);}
 }
 // END D COMPONENT WORKFLOW
 
@@ -1302,11 +1315,17 @@ async function checkFirmwarePair(files) {
 // No UI caller. A fresh authenticated baseline, ordinary E5000 transport,
 // private credentials and a recovery plan are external preconditions.
 const firmwarePairTransports = new WeakSet();
-async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage}) {
+async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage, identityReference}) {
   const knownVersions = ['4.5.0.0/4.4.8.0', '4.3.0.0/4.2.1.0'];
   if (!baseline || baseline.family !== 34 || baseline.unit !== 0 ||
       !knownVersions.includes(`${baseline.dVersion}/${baseline.mVersion}`))
     throw new Error('Paired transfer requires a fresh reviewed E5000 component baseline');
+  if (!identityReference || identityReference.version!==1 || identityReference.verified!==true ||
+      typeof baseline.identity!=='string' || !/^[a-f0-9]{64}$/.test(baseline.identity) ||
+      identityReference.expected?.identity!==baseline.identity ||
+      typeof identityReference.salt!=='string' || !/^[a-f0-9]{32}$/.test(identityReference.salt) ||
+      !validBootloaderFingerprint(identityReference.bootloaderIdentity))
+    throw new Error('Paired transfer requires a verified bootloader reference for the baseline motor');
   if (!(credentials instanceof Uint8Array) || credentials.length !== 15 || typeof subscribe !== 'function' ||
       onStage !== undefined && typeof onStage !== 'function') throw new Error('Incomplete paired transport inputs');
   for (const [name, method] of [['2afa', 'writeValueWithResponse'], ['2afa', 'writeValueWithoutResponse'], ['2afe', 'writeValueWithResponse']])
@@ -1314,7 +1333,8 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
   const owner = characteristics['2afa'];
   if (firmwarePairTransports.has(owner)) throw new Error('Paired firmware workflow already active on this transport');
   firmwarePairTransports.add(owner);
-  const keys = credentials.slice();
+  const keys = credentials.slice(),expectedBootloaderIdentity={...identityReference.bootloaderIdentity};
+  const identitySalt=Uint8Array.from(identityReference.salt.match(/../g),b=>parseInt(b,16));
   let writer, stage = 'file-validation', mFinished = false, dFinished = false;
   const advance = name => { stage = name; if (signal?.aborted) throw new Error('Aborted'); onStage?.(name); };
   try {
@@ -1339,7 +1359,7 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
     advance('D-bootloader-entry');
     await enterDBootloader({...transport, ...dEntry, credentials: keys});
     advance('D-identity-and-transfer');
-    await transferDComponent({...transport, data: d.data, write: packet => writer.write('2afa', packet)});
+    await transferDComponent({...transport, data: d.data, expectedBootloaderIdentity,identitySalt,write: packet => writer.write('2afa', packet)});
     dFinished = true;
     return {state: 'paired-transfer-finished', source, dVersion: d.version.join('.'), mVersion: m.version.join('.'),
       mFinished, dFinished, reset: false, firmwareVerified: false, regionVerified: false, recoveryVerified: false, installable: false};
@@ -1351,7 +1371,7 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
     Object.assign(error, {stage, mFinished, dFinished, deviceStateUnknown: stage !== 'file-validation',
       reset: false, recoveryVerified: false});
     throw error;
-  } finally { writer?.close(); keys.fill(0); firmwarePairTransports.delete(owner); }
+  } finally { writer?.close(); keys.fill(0); identitySalt.fill(0); firmwarePairTransports.delete(owner); }
 }
 
 // Read-only application-protocol verification. Requires a freshly connected,

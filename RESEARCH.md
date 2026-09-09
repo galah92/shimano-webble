@@ -2191,3 +2191,26 @@ treated as having a verified bootloader reference. Session storage is not a
 durable cross-tab or browser-loss recovery journal. No additional live probe
 is requested merely to populate this field; a future preparation preflight
 will need a fresh identity reference once the full procedure is established.
+
+### Build .49: enforce the recorded motor before D programming
+
+The unwired paired coordinator now requires a version1 probe identity
+reference with completed reconnect verification, a bootloader fingerprint,
+a valid salt, and an application identity equal to the supplied fresh
+baseline. Missing/old/unverified references fail before any BLE writes.
+The caller must obtain that fresh authenticated baseline using the reference
+salt; the record itself does not prove current connection identity.
+
+The D component worker snapshots the expected fingerprint and salt, queries
+the live bootloader identity, and compares the salted fingerprint before
+serial setup, erase or image writes. Family/unit checks still apply. The
+coordinator snapshots the reference before awaiting file loading, so later
+changes cannot redirect the comparison. Tests include a different serial
+with the same family/unit, invalid references before any paired writes,
+reference mutation, all worker failures, and both full-size paired wire
+simulations. A mismatch during D stops with M completion retained and no
+automatic reset; it does not undo the preceding M transfer.
+
+No UI caller enables transfers or recovery. This closes the D same-motor
+guard gap; it does not implement a fresh baseline reader in the coordinator,
+a durable transaction journal, or recovery of a partly written M image.

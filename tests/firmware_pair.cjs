@@ -9,21 +9,22 @@ m.set([255,255,34,0],12);m.set([0x42,1,0],8);m.set([0x42,0,0],16);
 const hash=b=>createHash('sha256').update(b).digest('hex');
 // Only the test VM trusts synthetic images; deployed allowlist is unchanged.
 const code=rawCode.replace('const FIRMWARE_IMAGES = Object.freeze({',`const FIRMWARE_IMAGES = Object.freeze({'${hash(d)}':'preparation','${hash(m)}':'preparation',`);
+const identityReference=()=>({version:1,verified:true,expected:{identity:'a'.repeat(64)},salt:'07'.repeat(16),bootloaderIdentity:{version:1,family:34,unit:0,identity:createHash('sha256').update(Uint8Array.of(68,66,76,49,...new Uint8Array(16).fill(7),34,0,9,8,7,6,5,4)).digest('hex')}});
 const file=b=>({size:b.length,arrayBuffer:async()=>b.buffer});
 function fixture(fail){
  const ctx=vm.createContext({Uint8Array,Error,WeakSet,AbortController,crypto:webcrypto,setTimeout,clearTimeout});vm.runInContext(code,ctx);
  const calls=[],stages=[],writes=[],di=d.slice(),mi=m.slice(),keys=new Uint8Array(15).fill(7),controller=new AbortController();
  const native={async writeValueWithResponse(p){writes.push([...p]);},async writeValueWithoutResponse(p){writes.push([...p]);}};
- const options={files:[file(mi),file(di)],baseline:{family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0'},credentials:keys,
+ const options={files:[file(mi),file(di)],identityReference:identityReference(),baseline:{identity:'a'.repeat(64),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0'},credentials:keys,
   characteristics:{'2afa':native,'2afe':native},subscribe(){throw Error('Controlled workers do not subscribe');},signal:controller.signal,
-  onStage(stage){stages.push(stage);if(stage==='M-update-entry'){di.fill(0);mi.fill(0);keys.fill(0);}}};
+  onStage(stage){stages.push(stage);if(stage==='M-update-entry'){di.fill(0);mi.fill(0);keys.fill(0);options.identityReference.bootloaderIdentity.identity='c'.repeat(64);options.identityReference.salt='09'.repeat(16);}}};
  let entries=0;
  const record=name=>{calls.push(name);if(name===fail)throw new Error('private payload must not appear');};
  ctx.enterFirmwareUpdateSession=async t=>{const n=++entries;record('entry'+n);await t.write('2afa',Uint8Array.of(4));return {mode:0,targetSelector:n===1?13:0};};
  ctx.selectMFirmwareSlot=async()=>record('slot');
  ctx.transferMFirmware=async o=>{record('M');assert.deepEqual([...o.data],[...m]);assert.equal(o.targetSelector,13);assert.equal(o.nextSequence(),0);assert.equal(o.nextSequence(),1);};
  ctx.enterDBootloader=async o=>{record('Dentry');assert.equal(o.targetSelector,0);assert.deepEqual([...o.credentials],new Array(15).fill(7));};
- ctx.transferDComponent=async o=>{record('D');assert.deepEqual([...o.data],[...d]);await o.write(Uint8Array.of(136,46,0,0,0));};
+ ctx.transferDComponent=async o=>{record('D');assert.equal(o.expectedBootloaderIdentity.identity,identityReference().bootloaderIdentity.identity);assert.deepEqual([...o.identitySalt],new Array(16).fill(7));assert.deepEqual([...o.data],[...d]);await o.write(Uint8Array.of(136,46,0,0,0));};
  return {ctx,options,calls,stages,writes,controller};
 }
 (async()=>{
@@ -37,7 +38,7 @@ function fixture(fail){
    assert(!e.message.includes('private payload'));return true;
   });assert.equal(f.calls.at(-1),fail);
  }
- for(const change of [o=>o.files=[file(d),file(d)],o=>o.files=[file(d),file(new Uint8Array(256))],o=>o.baseline.family=35,o=>o.credentials=new Uint8Array(14),o=>delete o.characteristics['2afe']]){
+ for(const change of [o=>o.files=[file(d),file(d)],o=>o.files=[file(d),file(new Uint8Array(256))],o=>o.baseline.family=35,o=>delete o.identityReference,o=>o.identityReference.verified=false,o=>delete o.identityReference.bootloaderIdentity,o=>o.identityReference.expected.identity='c'.repeat(64),o=>o.identityReference.salt='bad',o=>o.credentials=new Uint8Array(14),o=>delete o.characteristics['2afe']]){
   f=fixture();change(f.options);await assert.rejects(f.ctx.transferFirmwarePair(f.options));assert.equal(f.calls.length,0);assert.equal(f.writes.length,0);
  }
  f=fixture();f.controller.abort();await assert.rejects(f.ctx.transferFirmwarePair(f.options));assert.equal(f.calls.length,0);
