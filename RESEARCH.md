@@ -372,3 +372,18 @@ region values, absence of destination setters, and the known firmware policy.
 Next live result needed: current destination from this bike. Remaining offline
 work: validate the preparation selection and transfer protocol, then implement
 an appropriately verified region write and fresh-session readback.
+
+## Build .8 live destination result and .9 export fix
+
+The completed September 9 .8 run again verified E50X0 / 4.5.0 and both
+motor information replies. Both destination ATT writes completed, but neither
+received a matching slot reply within eight seconds. 2AFD delivered 77
+notifications overall. Its first-eight-prefix summary does not establish which
+other response types arrived during the destination queries. Destination remains
+unverified; this is not evidence of EU or of a required downgrade by itself.
+
+Build .9 changes log export only. The old copy handler passed the complete
+visible text to the clipboard without slicing; the point of earlier truncation
+is unknown. New exports have an explicit end marker/count, optional latest-
+connection scope, and a full UTF-8 text download. Browser tests compare large
+copied and downloaded snapshots exactly, plus scope selection and copy failure.

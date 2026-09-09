@@ -22,7 +22,7 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .8, tap **Read region and compatibility** after session verification.
+In build .9, tap **Read region and compatibility** after session verification.
 It runs the verified connection setup, reads display/motor information and both
 destination slots, and reports the current region against the US target (value 1).
 Keep Chrome foregrounded until **information batch end**, then copy the log.
@@ -67,3 +67,13 @@ the explicit authentication experiment in build `2026-09-09.3`.
 Keep passkeys, device identifiers, bugreports, and raw captures outside this
 public repository. Earlier diagnostic builds logged the passkey via 2AF8;
 keep those old exported logs private.
+
+## Export logs
+
+**Copy latest session** exports from the most recent successful connection.
+**Copy full log** includes all visible history. Both add a character count and
+`END SHIMANO LOG` footer so a truncated paste can be recognized. **Download full
+log** saves the complete snapshot as a UTF-8 text file. Copy completion messages
+and notifications arriving after the snapshot are not part of that export.
+
+Export regression checks: `python tests/log_export.py`.
