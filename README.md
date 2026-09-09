@@ -22,11 +22,18 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .5, tap **Identify drive unit** after session verification. It queries
-the model and firmware through 2AFE/2AFD, with no configuration changes. This
-minimal transport sequence still needs live validation; share the log even if
-it times out. The supplied capture's motor fields decode differently from the
-handoff, so the app reports the returned values rather than assuming E7000 / 4.7.1.
+In build .6, tap **Run information batch** after session verification. It
+queries display model, display firmware, drive-unit model and drive-unit firmware
+in one run. Keep Chrome foregrounded and wait for **information batch end**
+(up to about 35 seconds), then copy the log. The summary includes reply outcomes
+and notification traffic; each query logs whether its ATT write completed.
+
+The batch continues after an unanswered query only when its write completed.
+Failed or stalled writes stop the run. Reconnect for another batch. No
+configuration changes are sent. Build .5's direct motor query timed out in two
+live tests; the added display queries and subscriptions still need live testing.
+The capture's motor fields also differ from the handoff, so returned information
+is reported without assuming E7000 / 4.7.1.
 
 ## Develop
 

@@ -2,8 +2,8 @@
 
 Updated 2026-09-09. Target: SC-E7000 + DU-E7000 firmware 4.7.1,
 using Android Web Bluetooth. Build `2026-09-09.4` verified session access on
-the real bike. Build `2026-09-09.5` adds explicit drive-unit information queries;
-that transport experiment still needs a live test.
+the real bike. Build `2026-09-09.5` received no matching drive-unit model reply in two live
+tests. Build `2026-09-09.6` batches four information queries with transport diagnostics.
 
 ## Confirmed from the supplied artifacts
 
@@ -211,3 +211,50 @@ Browser simulation covers both notification/write completion orders, unrelated
 notifications, write failure, malformed reply, disconnect, timeout, no automatic
 query after authentication, and decoding the captured fields separately from
 a synthetic DU-E7000 / 4.7.1 fixture.
+
+## Build .5 live result and .6 batch
+
+Two September 9 live runs verified the SC-E7000 session, subscribed to 2AFD,
+and sent `00 01 1C 00` to 2AFE. Both timed out without a matching reply.
+Build .5 did not log ATT write completion or unrelated notification traffic,
+so those logs cannot distinguish an incomplete write from a completed write
+with no matching reply. They do not prove that 2AFD was entirely silent.
+
+At the user's request to reduce phone-testing iterations, build .6 runs one
+bounded batch after session verification. It enables 2AF9, 2AFB and 2AFD
+notifications, matching the capture's subscriptions, and then sends:
+
+| Order | Information query | Write | Matching notification prefix |
+| --- | --- | --- | --- |
+| 1 | Display model | 2AFA `00 13 01 1C 00` | 2AF9 `33 01 1E` |
+| 2 | Display firmware | 2AFA `00 13 01 2C 00` | 2AF9 `33 01 2E` |
+| 3 | Drive-unit model | 2AFE `00 01 1C 00` | 2AFD `00 01 1E` |
+| 4 | Drive-unit firmware | 2AFE `00 01 2C 00` | 2AFD `00 01 2E` |
+
+The display queries appear in old `c.java` and new `Q5.java` cases -5 and 2;
+capture frames 669/672 and 694/697 show each write/reply. Old `h.java` and
+new `In.java` cases 30 and 46 distinguish display replies (`33 01 ...`)
+from drive-unit replies (`00 01 ...`). These are information queries, not
+configuration setters. The captured initialization also includes other 2AFA
+commands; their necessity and full semantics remain unresolved and they are
+not added to this batch.
+
+Each query has an eight-second deadline, logs ATT completion independently,
+and accepts the first matching reply's five information bytes. A short
+matching reply is reported without decoding. Extra bytes are omitted. If
+ATT completes but no matching reply arrives, the batch continues to the next
+distinct prefix. A failed or uncompleted write stops and disconnects; there
+are no retries. Batch execution is limited to once per connection to avoid
+ambiguous late replies from an earlier run.
+
+The final summary lists all four outcomes and notification counts plus up to
+eight distinct three-byte prefixes/lengths per channel. Unrelated payloads
+are omitted. A successful run may be quick; four unanswered queries take
+about 32 seconds plus discovery/subscription time. Keep Chrome foregrounded.
+The added subscriptions and query ordering change the experiment: success
+would establish this batch works, not isolate which added step is necessary.
+
+Browser tests cover continuing after completed writes with no replies,
+rejecting a late model reply as a firmware response, stopping on a stalled
+write even if a reply arrives, short replies, both notification/write orders,
+and the existing authentication and capture-response checks.

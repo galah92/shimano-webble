@@ -23,6 +23,19 @@ class Characteristic extends EventTarget {
   async writeValueWithResponse(packet) {
     packet = [...packet];
     operations.push(['write', this.short, packet]);
+    if (this.short === '2afa') {
+      const rx = characteristics['2af9'];
+      const send = () => {
+        rx.value = value([51, 1, packet[3] + 2, packet[3] === 28 ? 33 : 65, packet[3] === 28 ? 2 : 0, 255, 255, 255, 255, 255]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+      };
+      if (options.batchTimeout) return;
+      if (options.lateDisplay && packet[3] === 28) { setTimeout(send, 8500); return; }
+      if (options.lateDisplay && packet[3] === 44) return;
+      if (options.motorDelayed) setTimeout(send, 20); else send();
+      if (options.stalledWrite) return new Promise(() => {});
+      return;
+    }
     if (this.short === '2afe') {
       if (options.motorFailure) throw new DOMException('Information write failed', 'NetworkError');
       if (options.motorDisconnect) { bike.gatt.disconnect(); return; }
@@ -31,7 +44,7 @@ class Characteristic extends EventTarget {
         // Unrelated notification must not satisfy this request.
         rx.value = value([0, 22, 30, 33, 0, 0, 0, 0, 0, 0]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
-        if (options.motorTimeout) return;
+        if (options.motorTimeout || options.batchTimeout) return;
         rx.value = value(options.motorMalformed ? [0, 1, packet[2] + 2] :
           [0, 1, packet[2] + 2, packet[2] === 28 ? 33 : 71, packet[2] === 28 ? 0 : 1, 0, 0, 0, 0, 0]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
@@ -238,22 +251,58 @@ class BrowserTests(unittest.TestCase):
             with self.subTest(delayed=delayed):
                 self.ready_for_identify(motorDelayed=delayed)
                 self.page.wait_for_function("document.getElementById('drive').textContent === 'DU-E7000; firmware 4.7.1'")
-                self.assertEqual(self.writes()[3:], [['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]]])
+                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]]])
                 ops = self.page.evaluate('operations')
                 self.assertLess(ops.index(['subscribe', '2afd']), ops.index(self.writes()[3]))
                 self.assertFalse(self.errors)
                 self.context.close()
 
     def test_drive_query_failure_stops_sequence(self):
-        for option in ('motorFailure', 'motorDisconnect', 'motorMalformed', 'motorTimeout'):
+        for option in ('motorFailure', 'motorDisconnect'):
             with self.subTest(option=option):
                 self.ready_for_identify(**{option: True})
                 self.page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'", timeout=12000)
-                self.assertEqual(self.writes()[3:], [['write', '2afe', [0, 1, 28, 0]]])
+                self.assertEqual(self.writes()[5:], [['write', '2afe', [0, 1, 28, 0]]])
                 self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
                 self.assertTrue(self.page.locator('#identify').is_disabled())
                 self.assertFalse(self.errors)
                 self.context.close()
+
+    def wait_batch(self, timeout=40000):
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('information batch end')", timeout=timeout)
+
+    def test_batch_continues_after_completed_writes_without_replies(self):
+        self.ready_for_identify(batchTimeout=True)
+        self.wait_batch()
+        self.assertEqual(len(self.writes()), 7)
+        self.assertEqual(self.page.locator('#status').inner_text(), 'Connected')
+        self.assertTrue(self.page.locator('#identify').is_disabled())
+        self.assertIn('Drive-unit firmware: no matching reply', self.page.locator('#log').inner_text())
+        self.assertFalse(self.errors)
+
+    def test_late_display_reply_cannot_satisfy_firmware_query(self):
+        self.ready_for_identify(lateDisplay=True)
+        self.wait_batch()
+        log = self.page.locator('#log').inner_text()
+        self.assertIn('Display model: no matching reply', log)
+        self.assertIn('Display firmware: no matching reply', log)
+        self.assertIn('DU-E7000; firmware 4.7.1', log)
+        self.assertIn('2AF9 traffic: 1 notifications', log)
+
+    def test_stalled_write_stops_even_with_matching_notification(self):
+        self.ready_for_identify(stalledWrite=True)
+        self.wait_batch()
+        self.assertEqual(len(self.writes()), 4)
+        self.assertIn('ATT write did not complete', self.page.locator('#log').inner_text())
+        self.assertEqual(self.page.locator('#status').inner_text(), 'Disconnected')
+
+    def test_short_replies_do_not_decode_but_batch_continues(self):
+        self.ready_for_identify(motorMalformed=True)
+        self.wait_batch()
+        self.assertEqual(len(self.writes()), 7)
+        self.assertIn('Drive-unit model: short reply', self.page.locator('#log').inner_text())
+        self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
+        self.assertFalse(self.errors)
 
     def test_captured_drive_fields_decode_without_assuming_target(self):
         self.open()
