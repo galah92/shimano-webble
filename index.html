@@ -347,12 +347,12 @@ END HANDOFF NOTES
 </div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
-<div class="row"><button id="copyRecent">Copy latest session</button><button id="copyLog">Copy full log</button><button id="downloadLog">Download full log</button><button id="clear">Clear log</button></div>
+<div class="row"><button id="copyLog">Copy log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.9';
+const BUILD = '2026-09-09.10';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -666,11 +666,36 @@ function queryInfo(s, query) {
     let written = false;
     let response;
     let settled = false;
+    const started = performance.now();
+    const traffic = {};
+    const observers = [];
+    for (const short of ['2af9', '2afb', '2afd']) {
+      const stats = traffic[short] = {count: 0, groups: new Map(), overflow: 0, lastOverflow: ''};
+      const ch = s.chars[short];
+      const observe = ev => {
+        const data = bytes(ev.target.value);
+        // Header only: opcode + subcommand/slot, never arbitrary full payloads.
+        const key = `${hex(data.slice(0, 4))} / ${data.length}B`;
+        const elapsed = Math.round(performance.now() - started);
+        stats.count++;
+        const existing = stats.groups.get(key);
+        if (existing) { existing.count++; existing.last = elapsed; }
+        else if (stats.groups.size < 64) stats.groups.set(key, {count: 1, first: elapsed, last: elapsed});
+        else { stats.overflow++; stats.lastOverflow = key; }
+      };
+      ch.addEventListener('characteristicvaluechanged', observe);
+      observers.push([ch, observe]);
+    }
     const finish = (error, timedOut = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       rx.removeEventListener('characteristicvaluechanged', onValue);
+      for (const [ch, observe] of observers) ch.removeEventListener('characteristicvaluechanged', observe);
+      for (const [short, stats] of Object.entries(traffic)) {
+        const groups = [...stats.groups].map(([key, n]) => `${key} x${n.count} @${n.first}..${n.last}ms`);
+        log(`QUERY TRAFFIC ${query.name} / ${short.toUpperCase()}: ${stats.count} notifications; ${groups.join('; ') || 'none'}${stats.overflow ? `; ${stats.overflow} overflow events, last ${stats.lastOverflow}` : ''}`);
+      }
       s.controller.signal.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve({name: query.name, status: timedOut ? 'no matching reply' : response.length < (query.setup ? 2 : 5) ? 'short reply' : 'reply received', fields: response});
@@ -811,47 +836,22 @@ $('connect').onclick = connect;
 $('probe').onclick = runProbe;
 $('disconnect').onclick = disconnect;
 $('authenticate').onclick = authenticate;
-function exportLog(latest = false) {
+function exportLog() {
   let snapshot = logEl.textContent;
-  if (latest) {
-    const starts = [...snapshot.matchAll(/^\[[^\]\n]+\] Connected;.*$/gm)];
-    if (starts.length) snapshot = snapshot.slice(starts[starts.length - 1].index);
-  }
-  const scope = latest ? 'latest session' : 'full log';
-  // Snapshot once: incoming notifications must not alter an export in progress.
-  return `SHIMANO LOG — ${scope} — exporting build ${BUILD}\n` +
+  const starts = [...snapshot.matchAll(/^\[[^\]\n]+\] Connected;.*$/gm)];
+  if (starts.length) snapshot = snapshot.slice(starts[starts.length - 1].index);
+  return `SHIMANO LOG — latest session — exporting build ${BUILD}\n` +
     `BEGIN LOG (${snapshot.length} JavaScript characters)\n` + snapshot +
     `\nEND SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
 }
-async function copyLog(latest) {
-  const snapshot = exportLog(latest);
+$('copyLog').onclick = async () => {
+  const snapshot = exportLog();
   try {
     await navigator.clipboard.writeText(snapshot);
-    $('exportStatus').textContent = `Copied ${snapshot.length.toLocaleString()} characters. Check that your paste ends with END SHIMANO LOG; use Download full log if it is cut off.`;
-    log(`Copied ${latest ? 'latest session' : 'full log'}: ${snapshot.length} characters`);
+    $('exportStatus').textContent = `Copied latest session (${snapshot.length.toLocaleString()} characters).`;
   } catch (e) {
-    $('exportStatus').textContent = 'Copy failed. Use Download full log.';
-    log(`Copy failed: ${e.message}`);
+    $('exportStatus').textContent = 'Copy failed. Select and copy the log text below.';
   }
-}
-$('copyLog').onclick = () => copyLog(false);
-$('copyRecent').onclick = () => copyLog(true);
-$('downloadLog').onclick = () => {
-  const snapshot = exportLog();
-  const blob = new Blob([snapshot], {type: 'text/plain;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `shimano-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
-  $('exportStatus').textContent = `Download requested: ${blob.size.toLocaleString()} bytes, including the full log.`;
-};
-$('clear').onclick = () => {
-  logEl.textContent = '';
-  try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
 };
 $('secure').textContent = window.isSecureContext ? 'Yes' : 'No — HTTPS required';
 $('webbt').textContent = navigator.bluetooth ? 'Available' : 'Unavailable';

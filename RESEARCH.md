@@ -387,3 +387,32 @@ visible text to the clipboard without slicing; the point of earlier truncation
 is unknown. New exports have an explicit end marker/count, optional latest-
 connection scope, and a full UTF-8 text download. Browser tests compare large
 copied and downloaded snapshots exactly, plus scope selection and copy failure.
+
+## Build .9 live result and .10 per-query diagnostics
+
+The user's latest-session export contained its end marker and matching counts.
+The .9 bike run again returned motor model/firmware while both destination
+queries timed out after completed ATT writes. 2AFD delivered 84 notifications,
+but the batch's first-eight-prefix summary could not characterize traffic
+within each destination request window.
+
+Build .10 adds query-local observers on 2AF9, 2AFB and 2AFD before each write.
+Each summary reports notification counts, four-byte headers (including slot or
+subcommand), total packet lengths, and first/last arrival time relative to the
+query. Up to 64 distinct header/length pairs are retained per channel per query;
+any excess is explicitly counted with its last header. Observers are removed
+on completion, timeout, failure or disconnect. These windows show temporal
+association, not proof that every notification is a response to the request.
+Unrelated full payloads remain omitted.
+
+A capture review found additional controller steps before the first destination
+reads: frames 801–839 include control operations, several repeated 2AFA writes
+at frames 818–828, and a return through the 03/04/06 sequence. Other intervening
+unit queries follow before frames 1033/1037. These operations are not yet fully
+mapped to the APK path or shown necessary, and are not added to build .10.
+The observed destination timeout does not itself establish a firmware restriction.
+
+At the user's request, log export is simplified to one Copy log button using
+the latest connection. Full-log download, export mode selection, and Clear log
+buttons are removed. The end marker/count remain; clipboard failure tells the
+user to select and copy the visible text. Bluetooth commands are unchanged.

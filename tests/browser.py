@@ -360,6 +360,36 @@ class BrowserTests(unittest.TestCase):
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
 
+    def test_query_traffic_is_scoped_and_tracks_other_channels(self):
+        self.ready_for_identify()
+        self.wait_batch()
+        log = self.page.locator('#log').inner_text()
+        motor = next(line for line in log.splitlines() if 'QUERY TRAFFIC Drive-unit model / 2AFD:' in line)
+        self.assertIn('2 notifications', motor)
+        self.assertIn('00 16 1E 21', motor)
+        self.assertIn('00 01 1E 21', motor)
+        self.assertNotIn('00 16 80', motor)  # Startup burst cannot consume this query's samples.
+        region = next(line for line in log.splitlines() if 'QUERY TRAFFIC Current destination / 2AFD:' in line)
+        self.assertIn('00 16 AE 00', region)  # Wrong-slot reply is still visible diagnostically.
+        self.assertIn('00 16 AE 01', region)
+        self.assertIn('QUERY TRAFFIC Current destination / 2AF9: 0 notifications', log)
+        self.assertFalse(self.errors)
+
+    def test_destination_timeout_reports_alternate_channel_traffic(self):
+        self.ready_for_identify(regionTimeout=True)
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('TX 2AFE Destination slot 0:')")
+        self.page.evaluate("""() => {
+          const ch = characteristics['2af9'];
+          ch.value = new DataView(Uint8Array.from([127, 22, 172, 0]).buffer);
+          ch.dispatchEvent(new Event('characteristicvaluechanged'));
+        }""")
+        self.wait_batch()
+        log = self.page.locator('#log').inner_text()
+        self.assertIn('QUERY TRAFFIC Destination slot 0 / 2AF9: 1 notifications; 7F 16 AC 00 / 4B', log)
+        self.assertIn('QUERY TRAFFIC Current destination / 2AF9: 0 notifications', log)
+        self.assertIn('Current destination: no matching reply', log)
+        self.assertFalse(self.errors)
+
     def test_captured_drive_fields_decode_without_assuming_target(self):
         self.open()
         result = self.page.evaluate('decodeDriveInfo([0,1,30,34,0], [0,1,46,69,0])')
