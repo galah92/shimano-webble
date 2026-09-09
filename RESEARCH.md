@@ -2050,3 +2050,15 @@ missing PCA reply and checks exact diagnostic attribution.
 Copy log now retains the latest probe's connection and subsequent reconnects
 when a probe start marker is present; previously latest-session slicing lost
 the first half of an entry/exit test. The browser test covers both halves.
+
+
+### Build .43: compact clipboard report
+
+The user reports truncation when copying/pasting a 36,131-character test log.
+The exact clipboard-versus-paste boundary is unconfirmed. Copy log now exports
+a report below 8,000 characters: routine packet/setup lines are omitted,
+entry diagnostics and failures are retained, and the newest whole lines take
+priority if necessary. Omitted-line counts and the END marker make this
+explicit. Full displayed/stored logs are not modified. Tests cover a large
+log, entry failure plus restart separated by thousands of routine lines,
+latest-session outcomes, and clipboard failure. No bike protocol changes.

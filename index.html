@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.42';
+const BUILD = '2026-09-09.43';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2227,9 +2227,30 @@ function exportLog() {
   const probeStart = snapshot.lastIndexOf('Bootloader entry/exit probe started.');
   const testStart = probeStart < 0 ? null : starts.filter(item => item.index <= probeStart).at(-1);
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
-  return `SHIMANO LOG — ${testStart ? 'latest bike test' : 'latest session'} — exporting build ${BUILD}\n` +
+  const lines = snapshot.split('\n').filter(Boolean);
+  // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.
+  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|^Entry |^Bootloader |^Post-probe )/i;
+  const routine = /^(?:TX |RX |ATT |READ |RESULT |QUERY TRAFFIC |--- |(?:Captured setup|eTuning setup|Restore setup) |2AF[9BD] traffic:|2AF[9BD] notifications enabled|Motor serial received|Log copied)/;
+  const useful = lines.filter(line => {
+    const message = line.replace(/^\[[^\]]+\] /,'');
+    if (/^READ 2AF[67] failed:.*GATT operation not permitted/.test(message)) return false;
+    return important.test(message) || !routine.test(message);
+  });
+  // Bound the clipboard report, never the displayed/stored log. Prefer newest
+  // whole lines so a failure or restart result is not lost behind setup history.
+  const selected=[];let size=0, oversized=0;
+  for(let i=useful.length-1;i>=0;i--) {
+    let line=useful[i];
+    if(line.length>6800){line='[Oversized line: ending shown] '+line.slice(-6700);oversized++;}
+    if(size+line.length+1>7000)break;
+    selected.unshift(line);size+=line.length+1;
+  }
+  const omitted=lines.length-selected.length;
+  snapshot=selected.join('\n')+'\n';
+  return `SHIMANO LOG — compact test report — build ${BUILD}\n` +
+    `${omitted} earlier or routine lines omitted${oversized?'; oversized line shortened':''}. Full log remains on the page.\n` +
     `BEGIN LOG (${snapshot.length} JavaScript characters)\n` + snapshot +
-    `\nEND SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
+    `END SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
 }
 $('clearLog').onclick = () => {
   logEl.textContent = '';
@@ -2359,7 +2380,7 @@ $('copyLog').onclick = async () => {
   const snapshot = exportLog();
   try {
     await navigator.clipboard.writeText(snapshot);
-    $('exportStatus').textContent = `Copied log (${snapshot.length.toLocaleString()} characters).`;
+    $('exportStatus').textContent = `Copied compact report (${snapshot.length.toLocaleString()} characters). Full log remains below.`;
   } catch (e) {
     $('exportStatus').textContent = 'Copy failed. Select and copy the log text below.';
   }
