@@ -297,57 +297,46 @@ END HANDOFF NOTES
 <style>
   :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; }
   body { margin: 0; padding: 16px; max-width: 760px; margin-inline: auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 8px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .muted { opacity:.72; }
   p { line-height: 1.4; }
   .row { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
   button { padding:12px 14px; border-radius:10px; border:1px solid #8886; font-size:1rem; }
   button:disabled { opacity:.45; }
   .card { border:1px solid #8885; border-radius:12px; padding:12px; margin:12px 0; }
-  .kv { display:grid; grid-template-columns: 120px 1fr; gap:6px 10px; font-size:.95rem; }
+  .kv { display:grid; grid-template-columns: 150px 1fr; gap:7px 10px; font-size:.95rem; }
   code { overflow-wrap:anywhere; }
-  #log { white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-         font-size:.82rem; max-height:46vh; overflow:auto; background:#0001; padding:10px;
-         border-radius:10px; }
+  #log { white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:46vh; overflow:auto; background:#0001; padding:10px; border-radius:10px; min-height:180px; }
   .ok { color: #2f9e44; }
   .bad { color: #d9480f; }
+  .warn { color: #e67700; }
 </style>
 </head>
 <body>
 <h1>Shimano BLE Diagnostic</h1>
-<p>
-Read-only diagnostic console for Shimano's proprietary BLE service.
-No configuration writes are performed.
-</p>
-
+<div class="muted">Build 2026-09-09.2 · read-only</div>
+<p>Web Bluetooth diagnostic console for Shimano's proprietary BLE service. This build performs no configuration writes.</p>
+<div class="card"><div class="kv">
+<div>Secure context</div><div id="secure">—</div>
+<div>Web Bluetooth</div><div id="webbt">—</div>
+<div>Status</div><div id="status">Disconnected</div>
+<div>Device</div><div id="device">—</div>
+<div>18FF service</div><div id="svc">—</div>
+<div>2AF3 indications</div><div id="notify">—</div>
+<div>2AF4 challenge</div><div><code id="challenge">—</code></div>
+<div>Protected access</div><div id="protected">Not tested</div>
+</div></div>
 <div class="row">
-  <button id="connect">Connect Shimano</button>
-  <button id="disconnect" disabled>Disconnect</button>
-  <button id="clear">Clear log</button>
+<button id="connect">Connect Shimano</button>
+<button id="probe" disabled>Run read-only probe</button>
+<button id="disconnect" disabled>Disconnect</button>
 </div>
-
-<div class="card">
-  <div class="kv">
-    <div>Status</div><div id="status">Disconnected</div>
-    <div>Device</div><div id="device">—</div>
-    <div>18FF service</div><div id="svc">—</div>
-    <div>2AF3 indications</div><div id="notify">—</div>
-    <div>2AF4 challenge</div><div><code id="challenge">—</code></div>
-  </div>
-</div>
-
-<div class="row">
-  <button id="readChallenge" disabled>Read 2AF4 challenge</button>
-  <button id="readSafe" disabled>Try protected reads</button>
-</div>
-
-<div class="card">
-  <strong>Log</strong>
-  <div id="log"></div>
-</div>
-
+<div class="row"><button id="copyLog">Copy log</button><button id="clear">Clear log</button></div>
+<div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-
+const BUILD = '2026-09-09.2';
+const STORAGE_KEY = 'shimano-webble-log-v1';
 const BASE = '-5348-494d-414e-4f5f424c4500';
 const UUID = n => `0000${n.toLowerCase()}${BASE}`;
 const SERVICE_18FF = UUID('18ff');
@@ -356,151 +345,29 @@ const C2AF4 = UUID('2af4');
 const C2AF6 = UUID('2af6');
 const C2AF7 = UUID('2af7');
 const C2AF8 = UUID('2af8');
-
 let device, server, service;
 let ch2af3, ch2af4, ch2af6, ch2af7, ch2af8;
-
 const $ = id => document.getElementById(id);
 const logEl = $('log');
-
-function ts() {
-  return new Date().toLocaleTimeString([], {hour12:false});
-}
-function log(msg) {
-  logEl.textContent += `[${ts()}] ${msg}\n`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
-function hex(view) {
-  const u8 = view instanceof DataView
-    ? new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-    : new Uint8Array(view.buffer ?? view);
-  return [...u8].map(b => b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
-}
-function ascii(view) {
-  const u8 = view instanceof DataView
-    ? new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-    : new Uint8Array(view.buffer ?? view);
-  return [...u8].map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('');
-}
-function setConnected(on) {
-  $('connect').disabled = on;
-  $('disconnect').disabled = !on;
-  $('readChallenge').disabled = !on;
-  $('readSafe').disabled = !on;
-}
-
-async function getChar(uuid, required=true) {
-  try {
-    return await service.getCharacteristic(uuid);
-  } catch (e) {
-    if (required) throw e;
-    log(`Characteristic ${uuid.slice(4,8).toUpperCase()} not available: ${e.message}`);
-    return null;
-  }
-}
-
-async function connect() {
-  try {
-    $('status').textContent = 'Choosing device…';
-    log('Opening Bluetooth device chooser');
-
-    device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { namePrefix: 'SCE' },
-        { services: [SERVICE_18FF] }
-      ],
-      optionalServices: [SERVICE_18FF]
-    });
-
-    $('device').textContent = `${device.name || '(unnamed)'} / ${device.id}`;
-    device.addEventListener('gattserverdisconnected', onDisconnected);
-
-    $('status').textContent = 'Connecting…';
-    server = await device.gatt.connect();
-    log(`Connected to ${device.name || device.id}`);
-
-    service = await server.getPrimaryService(SERVICE_18FF);
-    $('svc').textContent = 'Found';
-    log(`Found service ${SERVICE_18FF}`);
-
-    ch2af3 = await getChar(C2AF3);
-    ch2af4 = await getChar(C2AF4);
-    ch2af6 = await getChar(C2AF6, false);
-    ch2af7 = await getChar(C2AF7, false);
-    ch2af8 = await getChar(C2AF8, false);
-
-    ch2af3.addEventListener('characteristicvaluechanged', ev => {
-      const v = ev.target.value;
-      log(`RX 2AF3: ${hex(v)}   ASCII: ${ascii(v)}`);
-    });
-
-    await ch2af3.startNotifications();
-    $('notify').textContent = 'Enabled';
-    log('Enabled 2AF3 indications/notifications');
-
-    $('status').textContent = 'Connected';
-    setConnected(true);
-
-    await readChallenge();
-  } catch (e) {
-    $('status').textContent = 'Error';
-    log(`ERROR: ${e.name}: ${e.message}`);
-    console.error(e);
-    setConnected(false);
-  }
-}
-
-async function readCharacteristic(label, ch) {
-  if (!ch) {
-    log(`${label}: characteristic unavailable`);
-    return;
-  }
-  try {
-    const v = await ch.readValue();
-    log(`READ ${label}: ${hex(v)}   ASCII: ${ascii(v)}`);
-    return v;
-  } catch (e) {
-    log(`READ ${label} failed: ${e.name}: ${e.message}`);
-  }
-}
-
-async function readChallenge() {
-  const v = await readCharacteristic('2AF4', ch2af4);
-  if (v) $('challenge').textContent = hex(v);
-}
-
-async function tryProtectedReads() {
-  log('Trying read-only access to 2AF6 / 2AF7 / 2AF8');
-  await readCharacteristic('2AF6', ch2af6);
-  await readCharacteristic('2AF7', ch2af7);
-  await readCharacteristic('2AF8', ch2af8);
-}
-
-function disconnect() {
-  if (device?.gatt?.connected) device.gatt.disconnect();
-  onDisconnected();
-}
-function onDisconnected() {
-  $('status').textContent = 'Disconnected';
-  $('svc').textContent = '—';
-  $('notify').textContent = '—';
-  setConnected(false);
-  log('Disconnected');
-}
-
-$('connect').onclick = connect;
-$('disconnect').onclick = disconnect;
-$('clear').onclick = () => logEl.textContent = '';
-$('readChallenge').onclick = readChallenge;
-$('readSafe').onclick = tryProtectedReads;
-
-if (!navigator.bluetooth) {
-  $('status').innerHTML = '<span class="bad">Web Bluetooth unavailable in this browser</span>';
-  $('connect').disabled = true;
-  log('Web Bluetooth API not available. Use Chrome/Chromium on Android over HTTPS.');
-} else {
-  log('Ready. Use Chrome/Chromium on Android and serve this page over HTTPS.');
-}
+function ts(){return new Date().toLocaleTimeString([], {hour12:false});}
+function persistLog(){try{sessionStorage.setItem(STORAGE_KEY, logEl.textContent);}catch{}}
+function log(msg){logEl.textContent += `[${ts()}] ${msg}\n`;logEl.scrollTop=logEl.scrollHeight;persistLog();}
+function hex(view){const u8=view instanceof DataView?new Uint8Array(view.buffer,view.byteOffset,view.byteLength):new Uint8Array(view.buffer??view);return [...u8].map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ');}
+function ascii(view){const u8=view instanceof DataView?new Uint8Array(view.buffer,view.byteOffset,view.byteLength):new Uint8Array(view.buffer??view);return [...u8].map(b=>(b>=32&&b<=126)?String.fromCharCode(b):'.').join('');}
+function setConnected(on){$('connect').disabled=on;$('disconnect').disabled=!on;$('probe').disabled=!on;}
+function setProtected(status,css=''){$('protected').className=css;$('protected').textContent=status;}
+async function getChar(uuid,required=true){try{const ch=await service.getCharacteristic(uuid);log(`Found characteristic ${uuid.slice(4,8).toUpperCase()}`);return ch;}catch(e){if(required)throw e;log(`Characteristic ${uuid.slice(4,8).toUpperCase()} unavailable: ${e.name}: ${e.message}`);return null;}}
+async function connect(){try{$('status').textContent='Choosing device…';setProtected('Not tested');log('Opening Bluetooth device chooser');device=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'SCE'},{services:[SERVICE_18FF]}],optionalServices:[SERVICE_18FF]});$('device').textContent=`${device.name||'(unnamed)'} / ${device.id}`;device.addEventListener('gattserverdisconnected',onDisconnected);$('status').textContent='Connecting…';server=await device.gatt.connect();log(`Connected to ${device.name||device.id}`);service=await server.getPrimaryService(SERVICE_18FF);$('svc').textContent='Found';log(`Found service ${SERVICE_18FF}`);ch2af3=await getChar(C2AF3);ch2af4=await getChar(C2AF4);ch2af6=await getChar(C2AF6,false);ch2af7=await getChar(C2AF7,false);ch2af8=await getChar(C2AF8,false);ch2af3.addEventListener('characteristicvaluechanged',ev=>{const v=ev.target.value;log(`RX 2AF3: ${hex(v)}   ASCII: ${ascii(v)}`);});await ch2af3.startNotifications();$('notify').textContent='Enabled';log('Enabled 2AF3 indications/notifications');$('status').textContent='Connected';setConnected(true);await runProbe();}catch(e){$('status').textContent='Error';log(`ERROR: ${e.name}: ${e.message}`);console.error(e);setConnected(false);}}
+async function readCharacteristic(label,ch){if(!ch){log(`${label}: characteristic unavailable`);return {ok:false,reason:'unavailable'};}try{const v=await ch.readValue();log(`READ ${label}: ${hex(v)}   ASCII: ${ascii(v)}`);return {ok:true,value:v};}catch(e){log(`READ ${label} failed: ${e.name}: ${e.message}`);return {ok:false,reason:e.message,name:e.name};}}
+async function runProbe(){log('--- read-only probe start ---');const challenge=await readCharacteristic('2AF4',ch2af4);if(challenge.ok)$('challenge').textContent=hex(challenge.value);const r6=await readCharacteristic('2AF6',ch2af6);const r7=await readCharacteristic('2AF7',ch2af7);const r8=await readCharacteristic('2AF8',ch2af8);if(r6.ok||r7.ok||r8.ok){setProtected('At least one protected read succeeded','ok');log('PROTECTED ACCESS: at least one 2AF6/7/8 read succeeded');}else{setProtected('Protected reads blocked / session not established','warn');log('PROTECTED ACCESS: 2AF6/7/8 remain blocked');}log('--- read-only probe end ---');}
+function disconnect(){if(device?.gatt?.connected)device.gatt.disconnect();else onDisconnected();}
+function onDisconnected(){$('status').textContent='Disconnected';$('svc').textContent='—';$('notify').textContent='—';setConnected(false);log('Disconnected');}
+async function copyLog(){try{await navigator.clipboard.writeText(logEl.textContent);log('Log copied to clipboard');}catch(e){log(`Copy failed: ${e.name}: ${e.message}`);}}
+$('connect').onclick=connect;$('probe').onclick=runProbe;$('disconnect').onclick=disconnect;$('copyLog').onclick=copyLog;$('clear').onclick=()=>{logEl.textContent='';try{sessionStorage.removeItem(STORAGE_KEY);}catch{}};
+$('secure').innerHTML=window.isSecureContext?'<span class="ok">Yes</span>':'<span class="bad">No — HTTPS required</span>';
+if(!navigator.bluetooth){$('webbt').innerHTML='<span class="bad">Unavailable</span>';$('status').innerHTML='<span class="bad">Web Bluetooth unavailable</span>';$('connect').disabled=true;}else{$('webbt').innerHTML='<span class="ok">Available</span>';}
+try{const oldLog=sessionStorage.getItem(STORAGE_KEY);if(oldLog)logEl.textContent=oldLog;}catch{}
+log(`Ready. Build ${BUILD}.`);
 </script>
 </body>
 </html>
