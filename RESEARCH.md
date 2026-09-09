@@ -1297,3 +1297,35 @@ This is a check of the intended final pair, not an assertion that a transient
 state between M and D writes is bootable. The original worker's ordering,
 reset suppression and recovery still require validation as a complete
 operation. No live commands were added or firmware files published.
+
+## Paired transfer reset and bootloader checks
+
+Rechecked the worker chain against the instruction dump after discovering
+the incompatible intermediate pairs:
+
+- `Th.v3` invokes M `A0`; `C0776xk.A0` unwraps the file and calls
+  `x0(..., false)`, suppressing that worker's final reset.
+- If M returns false, the caller reports the failure and returns before the
+  D-worker branch (dump immediately before L1849). That branch does not restore
+  the original M image. This is bounded to the examined branch, not a claim
+  that no other recovery screen exists.
+- After M success, the caller performs the D handover path and invokes
+  `C0041b7.g1`. That method passes reset=true through `x1` into `w1`.
+- D `w1` obtains bootloader information with `j1`, checks the file against
+  that information with `k1`, performs `A1` and `C1`, transfers data, sends
+  finish, and finally calls `n1` when reset=true.
+
+The D bootloader `j1` exchange is a separate protocol from the live application
+version reads. Through its `K1`/`I1` wrappers it queries command/response pairs
+2E/3A, 2F/3B, 30/3C, 29/35 and 2A/36 (hex). `k1` checks parsed image series
+against the intended family and bootloader identity, and requires matching
+unit fields. `A1` requires a six-byte field for its subsequent setup. These
+operations have not been observed against this bike's bootloader; the existing
+application-mode 22/00 reply does not validate them.
+
+This means the final-pair minimum-version test must not be used as an
+intermediate reboot test. Neither restarting between M and D nor treating
+M failure as a completed rollback is justified. A browser implementation
+needs a validated handover, bootloader identity/setup, and failure-recovery
+path in addition to the existing offline block codecs. Those gaps remain;
+no bootloader entry or firmware command was added to the live page.
