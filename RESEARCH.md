@@ -1638,3 +1638,28 @@ only start/address/checksum commands would omit setup. C0 constructs
 [00,F0,00,command,arg0,arg1,arg2] and sends through Hn.g0 using its
 constructor-supplied transport selector. The selector, B0 input boolean and
 reply predicates still need validation before that setup is wired.
+
+## M command transport and arguments resolved
+
+C0776xk.C0 constructs [00,F0,00,command,arg0,arg1,arg2]. Hn.g0 relays
+through i0(13 hex) on C0483on.U only when the leading 00 equals the
+constructor selector; otherwise it sends the original packet through W.
+Executing C0483on's private UUID decoder confirmed W is 2AFE; U was
+previously confirmed as 2AFA. A private Java source oracle executed the
+original f()/d() argument decoders: START arguments are [00,0E,00],
+CLEAR_CHECKSUM [00,00,00]. J0 addresses are three-byte little-endian.
+
+C0 deadlines: START 6000 ms, address 10000 ms (constructor d), clear 2000 ms
+(constructor e), finish 21000 ms. Wi(7) delegates to e1, which returns the
+status following the first F2/00 marker. A first unknown status is not skipped
+in favor of a later success marker. Status 31 completes, 32 rejects; X0
+extracts the optional following error byte. These markers have no command ID.
+
+The browser command exchange is bounded and does not automatically perform
+the APK's five attempts: uncorrelated late replies and uncertain browser writes
+are not sufficient grounds for replay. It requires an explicit target selector
+and an adapter accepting characteristic plus packet. No current UI caller uses
+it. B0 remains to be integrated: its boolean comes from y0's C0677uk version
+comparison (strictly greater than packed 2.0.2.0), not the application-mode
+native M firmware version. B0 uses i0(0B) and Wi(6), which tests reply bytes
+1/2 for 84/00. Bootloader version/identity and handover remain unverified live.

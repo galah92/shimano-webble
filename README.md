@@ -274,3 +274,9 @@ synthetic images at both reviewed M lengths and the maximum modeled range,
 sequence wrap, zero padding, checkpoint loss/rejection and uncertain writes.
 M setup, finish, paired handover and recovery remain separate unfinished work;
 no firmware operation is available from the bike controls.
+
+Build .29 implements the unwired M start/address/clear-checksum/finish command
+exchange, with explicit routing, argument bounds and source-specific deadlines.
+Tests cover relay/direct routes, early replies, rejection, timeout and abort.
+Run `node tests/m_firmware_command.cjs`. It does not enter update mode, reset
+the motor, or connect these commands to the data worker or user controls.
