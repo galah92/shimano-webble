@@ -321,3 +321,10 @@ checks now pass through the physical GATT framing adapter, including routes,
 mode checks, acknowledgement values, delays and failure at each exchange:
 `node tests/firmware_entry.cjs`. These helpers have no UI caller. Entry on the
 real bike, paired handover and recovery still need validation before flashing.
+
+Build .36 models the missing D bootloader-entry FIRMUP sequence. Its17 physical
+writes and source delays are tested across routes, reply errors, cancellation
+and failure at every step: `node tests/d_bootloader_entry.cjs`. It takes private
+stage credentials as input and contains none in the repository. This is still
+unwired: paired orchestration, actual entry/identity checks and recovery must
+be validated before a bike firmware test.

@@ -1829,3 +1829,52 @@ completion alone does not establish the D entry state. e3 branches through
 Sh.f (e && !d); its applicability and transport cleanup still need tracing
 before assembling paired handover. No automatic M reset or mixed-pair boot
 is assumed.
+
+## D entry prerequisite and ordinary handover — build .36
+
+Rechecking C0041b7.g1 -> x1 -> w1 uncovered an additional entry layer before
+j1's identity reads. A newly constructed worker has b=false. For E5000,
+d2 is false (it only selects an EP/N9 path), so w1 calls t1(true,mode,selector)
+and o1 before reading identity. t1 calls Hn.r0(40,mode,selector): set03,
+wait1000ms, read04 with ready/40/mode bits checked. With mode0 the selector
+occupies the low five request bits; with mode20 it is omitted.
+
+The ordinary o1 sequence is now modeled by enterDBootloader:
+- Select target31 using06, accepting Wi12's26 status rule.
+- Send FIRMUP stage1 four times using i1's write-only path, waiting1000ms
+  after each. These four sends are the source's fixed priming sequence.
+- Select target0, then send stages1..4 through B1, requiring each stage ACK.
+- Send stage5 through i1's write-only path, wait150ms for E5000/Hh.a.
+- c2 sets mode60 through r0(40,20,0), including the1000ms delay and04 check.
+- Select target31 and send acknowledged stage5 through B1.
+
+l1 supplies four inner bytes: one-based stage and three credential bytes.
+i1/B1 prepend protocol88 through Hn, then the GATT adapter adds framing.
+The five private credential rows must be supplied as a15-byte Uint8Array;
+no vendor credential constants are embedded in the repository or logs. The
+helper snapshots them before writing and clears its private key copy on exit.
+JavaScript does not guarantee erasure of all engine-created copies.
+
+AbstractC0567r9.g/f and C0665u8 case11 identify ACK11 and NAK12 after an
+optional00 and optional88 prefix. ACK must contain the expected stage byte;
+a missing/wrong stage is not success. The browser stops on any rejection,
+uncertain write, timeout or abort, without source B1/o1 retries. Stage reply
+deadlines are2000ms; bridge exchanges3000ms. Source retry/recovery behavior
+has not been established as safe on this bike.
+
+Tests cover the complete17-write physical ATT sequence for both modes and
+selectors0/13/31,6150ms of source delays, credential snapshot, all17 native
+failure and abort positions, each acknowledged-stage timeout, and reply
+prefix/stage validation. No real credentials are in fixtures. Successful
+simulation yields D-entry-acknowledged with bootloaderVerified=false; identity
+queries still must validate the actual bootloader before data transfer.
+
+Th.p3's ordinary E5000 result constructs Sh with d=false/e=false and no N9/C9
+resources; only its EP branch replaces it through Sh.g. For that ordinary
+result, e3's sole sh.f() block is skipped because f=e&&!d. Sh.d also has no
+resources to dispose. Thus the ordinary M->D path's material transition is
+another p3 negotiation followed by the D t1/o1 sequence above. This conclusion
+is scoped to the ordinary p3 path, not special recovery/W2/EP branches.
+The paired coordinator must select that path explicitly and cannot treat
+M completion or motor authentication as D bootloader entry. No entry or
+firmware transfer is exposed in the UI yet.
