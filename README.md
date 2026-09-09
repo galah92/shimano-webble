@@ -136,3 +136,15 @@ authentication work. Region-write compatibility, persistence and actual speed
 behavior remain unverified. Firmware preparation is a separate open task.
 
 Synthetic write/readback tests: `python tests/region_write.py`.
+
+## Firmware preparation research
+
+The source distinguishes D and M motor firmware components. The offline tool
+`python3 tools/inspect_firmware.py path/to/file.dat` classifies the known raw
+E5000 header layouts and prints version, size and SHA-256. It does not write
+to the bike or approve an image for installation. Wrapped/encrypted assets
+are unsupported. Tests: `python3 tests/firmware_header.py`.
+
+Archived E5000 4.1.0 files were used only as parser reference samples. They
+are not preparation candidates. Exact physical motor identification, the
+4.3.0 candidate contents, transfer completion and recovery remain open.

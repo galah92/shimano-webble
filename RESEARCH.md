@@ -724,3 +724,52 @@ to `Oa.s`. This is a downloaded asset workflow, not evidence of one additional
 BLE unlock command. The downloaded contents, whether stock or modified, exact
 hardware compatibility, transfer protocol and recovery path remain unverified.
 No request using extracted app credentials, asset download or flash was made.
+
+## Preparation research: component headers and update entry
+
+`Oa.B` first calls `Ha.d` (an optional asset-unwrapping path), then recognizes
+two relevant raw motor component layouts. For E5000-family code 22:
+
+| Component | Version offset | Family bytes | Additional classifier |
+| --- | --- | --- | --- |
+| D / DCAS_X | 16 | 40–41 = 22 00 | byte 42 = 04 |
+| M / RENESAS | 8 | 14–15 = 22 00 | separate raw layout |
+
+`Ja.a` decodes three bytes as major/minor nibbles in the first byte, patch
+in the second, build in the third. A matching version string alone does not
+identify the component. `tools/inspect_firmware.py` implements only these raw
+4.x header classifiers, with additional reference-sample header checks. It
+does not implement `Ha.d`, trust a filename, or certify completeness, publisher
+authenticity or bike compatibility. SHA-256 is an identifier, not a signature.
+
+Validation used two actual files statically extracted from the already
+identified E-TUBE 3.4.5 installer archive; binaries remain outside the repo:
+
+- `due5000_d.4.1.0.dat`: 135052 bytes, decoded 4.1.0.0, SHA-256
+  `fdb0f40b94d55ce9d098f803fe0f2f4038a3ce3343fe539bf151a9511dda14ec`.
+- `due5000_m.4.1.0.dat`: 116128 bytes, decoded 4.1.0.0, SHA-256
+  `ed5593f61b58509ab5f1b7c7bcd82415abb3d1dbf57283dfc5ffb90219be6224`.
+
+These are parser samples, not selected firmware. Synthetic tests cover the
+different offsets, wrong-family rejection, short input, invalid version
+fields and the distinction between metadata recognition and content integrity.
+
+The generic updater is `Th.u3 -> v3`; `v3` required a debug instruction dump
+because JADX failed type inference. It selects a `Jh` plan with component
+references and reaches `Th.p3` before the `C0041b7` transfer worker. The
+separate `Th.q4` entry contains an Ih.k-specific check and must not be mistaken
+for the generic E5000 path. `C0041b7.x1` loads/unpacks the file and forwards
+it to `w1`; the complete E5000 transfer/finalization path is not yet mapped.
+
+`Th.p3` reads setup state through `Hn.r0`, then the non-Ih.k path can call
+`Hn.p0`. The latter explicitly names `PCA_UPDATE_SET`: command group 32,
+opcode 20, payload 01 (hex), requiring reply opcode 22 with value 01 and
+handling opcode 23 as rejection. `Hn.r0` composes the familiar setup 03/04
+exchange; `Hn.s0` sends 06. This establishes a distinct update-entry step,
+not permission to invoke it without a verified image and recovery workflow.
+None of these update commands was added to WebBLE or sent to the bike.
+
+Before image selection, the physical motor model needs reconciliation with
+the original E7000 handoff and the repeated E50X0 / 4.5.0 BLE replies. The
+user was asked for the casing model. No stock/modified 4.3.0 image has been
+selected, and the US-region goal remains incomplete.
