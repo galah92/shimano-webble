@@ -48,6 +48,17 @@ class Characteristic extends EventTarget {
       return;
     }
     if (this.short === '2afe') {
+      if (packet[1] === 22 && packet[2] === 172) {
+        const rx = characteristics['2afd'];
+        const slot = packet[3];
+        if (options.batchTimeout || options.regionTimeout) return;
+        // The other slot must not satisfy this query.
+        rx.value = value([0, 22, 174, 1 - slot, 1, 0, 0, 0, 0, 0]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        rx.value = value(options.regionShort ? [0, 22, 174, slot] : [0, 22, 174, slot, options.regionValue ?? 0, 0, 0, 0, 0, 0]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        return;
+      }
       if (options.motorFailure) throw new DOMException('Information write failed', 'NetworkError');
       if (options.motorDisconnect) { bike.gatt.disconnect(); return; }
       const rx = characteristics['2afd'];
@@ -261,8 +272,9 @@ class BrowserTests(unittest.TestCase):
         for delayed in (False, True):
             with self.subTest(delayed=delayed):
                 self.ready_for_identify(motorDelayed=delayed)
-                self.page.wait_for_function("document.getElementById('drive').textContent === 'DU-E7000; firmware 4.7.1'")
-                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]]])
+                self.wait_batch()
+                self.assertEqual(self.page.locator('#drive').inner_text(), 'DU-E7000; firmware 4.7.1')
+                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]], ['write', '2afe', [0, 22, 172, 0]], ['write', '2afe', [0, 22, 172, 1]]])
                 ops = self.page.evaluate('operations')
                 self.assertLess(ops.index(['subscribe', '2afd']), ops.index(self.writes()[3]))
                 self.assertFalse(self.errors)
@@ -279,13 +291,13 @@ class BrowserTests(unittest.TestCase):
                 self.assertFalse(self.errors)
                 self.context.close()
 
-    def wait_batch(self, timeout=40000):
+    def wait_batch(self, timeout=65000):
         self.page.wait_for_function("document.getElementById('log').textContent.includes('information batch end')", timeout=timeout)
 
     def test_batch_continues_after_completed_writes_without_replies(self):
         self.ready_for_identify(batchTimeout=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 10)
+        self.assertEqual(len(self.writes()), 12)
         self.assertEqual(self.page.locator('#status').inner_text(), 'Connected')
         self.assertTrue(self.page.locator('#identify').is_disabled())
         self.assertIn('Drive-unit firmware: no matching reply', self.page.locator('#log').inner_text())
@@ -310,7 +322,7 @@ class BrowserTests(unittest.TestCase):
     def test_short_replies_do_not_decode_but_batch_continues(self):
         self.ready_for_identify(motorMalformed=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 10)
+        self.assertEqual(len(self.writes()), 12)
         self.assertIn('Drive-unit model: short reply', self.page.locator('#log').inner_text())
         self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
         self.assertFalse(self.errors)
@@ -325,6 +337,28 @@ class BrowserTests(unittest.TestCase):
                 self.assertIn('Drive-unit model: not completed', self.page.locator('#log').inner_text())
                 self.assertFalse(self.errors)
                 self.context.close()
+
+    def test_region_reads_match_slot_and_never_write_destination(self):
+        self.ready_for_identify()
+        self.wait_batch()
+        self.assertEqual(self.page.locator('#region').inner_text(), 'EU')
+        self.assertFalse(any(x[1] == '2afe' and x[2][2] == 168 for x in self.writes()))
+        self.assertIn('target US = 1', self.page.locator('#log').inner_text())
+
+    def test_unknown_and_short_region_are_not_eu_or_ready(self):
+        for options in ({'regionValue': 255}, {'regionShort': True}):
+            self.ready_for_identify(**options)
+            self.wait_batch()
+            self.assertNotEqual(self.page.locator('#region').inner_text(), 'EU')
+            self.assertIn('not verified', self.page.locator('#regionStatus').inner_text())
+            self.context.close()
+
+    def test_reported_motor_firmware_requires_preparation_in_app_policy(self):
+        self.open()
+        result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
+        self.assertIn('through preparation', result)
+        already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
+        self.assertIn('US already reported', already)
 
     def test_captured_drive_fields_decode_without_assuming_target(self):
         self.open()

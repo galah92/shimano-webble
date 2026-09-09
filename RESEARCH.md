@@ -4,7 +4,8 @@ Updated 2026-09-09. Target: SC-E7000 + DU-E7000 firmware 4.7.1,
 using Android Web Bluetooth. Build `2026-09-09.4` verified session access on
 the real bike. Build `2026-09-09.5` received no matching drive-unit model reply in two live
 tests. Build .6 verified display commands but recorded a silent motor-response
-channel. Build `2026-09-09.7` tests three captured connection-setup steps.
+channel. Build .7 verified motor communication and reported E50X0 / 4.5.0.
+Build `2026-09-09.8` adds destination reads and a US-region readiness summary.
 
 ## Confirmed from the supplied artifacts
 
@@ -300,3 +301,74 @@ initialization protocol. In particular `00 13 32 50 07`, `00 0D 00`, and
 transfer or arbitrary command interface is added. A successful batch would
 validate the combined sequence on this bike, not isolate each step's effect.
 A stopped or silent batch narrows which additional initialization to trace.
+
+## Build .7 live result
+
+The September 9 .7 test received all three captured setup replies, then both
+motor replies. 2AFD delivered 27 notifications. Live motor fields were
+`00 01 1E 22 00` and `00 01 2E 45 00`, matching the original capture and the
+APK decoder's E50X0 family / 4.5.0. The initial E7000 / 4.7.1 handoff is not
+supported by these live responses. The combined connection sequence is now
+verified; individual setup-step necessity remains unisolated.
+
+## Destination reads and US write path
+
+Both APK connection paths query destination slots through 2AFE:
+
+| Query | Request | Matching 2AFD response prefix | Value offset |
+| --- | --- | --- | --- |
+| Destination slot 0 | `00 16 AC 00` | `00 16 AE 00` | 4 |
+| Current destination (slot 1) | `00 16 AC 01` | `00 16 AE 01` | 4 |
+
+These requests/replies occur at capture frames 1033/1036 and 1037/1040,
+and repeatedly later. Both captured values are zero. New `Q5.java` sends
+them via `f0` (locate the `-84, 0` and `-84, 1` byte literals); old `h.java` case -82
+and new `In.java` case -82 decode them. The region screen consumes the
+slot-1 value. Slot 0's exact factory/default/persistent semantics remain
+unresolved and are not assumed by the WebBLE UI.
+
+New region activity `eTuning/shimano/steps/ui/ea/w.java::H` maps 0 to EU,
+1 to US, 2 to Japan, 3 to Taiwan, 4 to Korea and 5 to US Class 3. The user's
+target is **US value 1**, not value 5. Unknown/255 values are displayed as
+unavailable rather than silently treated as EU.
+
+The old `RegionActivity.writeClick` and new `w.z` direct BLE path both send
+`00 16 A8 01 <destination>` through 2AFE. Thus the reconstructed direct US
+setter is `00 16 A8 01 01`. Old/new response handlers recognize `00 16 AA`.
+**This setter is documented, not implemented or live-validated.** The capture
+contains destination reads but no instance of this setter, and firmware gates
+must be resolved before relying on it. A result indication alone would not
+prove persistence; a fresh-session destination read would be required.
+
+## Firmware gate: concrete preparation lead
+
+In eTuning 3.0.7, `w.z` checks `Gh.w` before taking its direct BLE region-write
+path; failing this check routes to firmware/preparation activity `f91a2`.
+`Gh.a` maps DUE50X0 into `Fh.k` (E5000 family, ordinal 10). `Gh.D` allows
+that family's direct path only at firmware integer 430. `Gh.x`, `Gh.g` and
+`Gh.k` contribute the other conditions. A private standalone Java harness
+executing the extracted methods (`~/shimano-analysis/VerifyPolicy.java`)
+confirmed: DUE50X0/430 -> direct gate true; DUE50X0/450 -> false.
+
+This is the app's policy, not proof that the bike would reject an unsupported
+write or that a downgrade is safe. The policy establishes 4.3.0 as a concrete
+preparation candidate for the live-reported model. A second decompilation of
+`f91a2` with debug/bad-code output exposes a 4.3.0 preparation option, but
+JADX still flags that selection method as inconsistent. Its complete decision
+path and the firmware transfer/recovery procedure are not yet verified.
+No firmware transfer or downgrade is implemented.
+
+## Build .8 validation and next live batch
+
+Build .8 preserves the verified connection/setup sequence, reads display and
+motor model/firmware, then reads both destination slots. Matching includes the
+slot byte, so a slot-0 reply cannot satisfy slot 1. Missing, short and unknown
+values do not produce a ready-to-change state. The summary names current
+region, US target value 1, and the known preparation gate for E50X0/4.5.0.
+It reports an already-US value without claiming persistence or speed behavior.
+
+Browser tests cover the full sequence, wrong-slot notifications, unknown/short
+region values, absence of destination setters, and the known firmware policy.
+Next live result needed: current destination from this bike. Remaining offline
+work: validate the preparation selection and transfer protocol, then implement
+an appropriately verified region write and fresh-session readback.

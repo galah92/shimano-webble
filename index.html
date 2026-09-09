@@ -5,7 +5,7 @@
 SHIMANO WEBBLE REVERSE-ENGINEERING HANDOFF NOTES
 
 Historical import. For current verified findings, see RESEARCH.md.
-Build 2026-09-09.7 adds three captured connection-setup commands to the information batch.
+Build 2026-09-09.8 adds both destination reads and a US-region readiness summary.
 The original read-only behavior and pending milestones below are historical.
 ===============================================================================
 
@@ -329,6 +329,8 @@ END HANDOFF NOTES
 <div>18FF service</div><div id="svc">—</div>
 <div>2AF3 indications</div><div id="notify">—</div>
 <div>2AF4 challenge</div><div><code id="challenge">—</code></div>
+<div>Current region</div><div id="region">Not read</div>
+<div>US-region workflow</div><div id="regionStatus">Read bike information first</div>
 <div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div></div>
@@ -343,13 +345,13 @@ END HANDOFF NOTES
 <div class="row"><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="muted">Use the passkey configured in E-TUBE. It is used locally for this attempt and is not saved or logged. If identification stays blocked after authentication, the app sends the captured session setup command once and checks again.</div>
 </div>
-<div class="card"><button id="identify" disabled>Run transport setup batch</button>
-<div class="muted">Read display information, send three captured connection-setup commands, then query the drive unit. Allow up to one minute and keep this page open until the summary appears.</div></div>
+<div class="card"><button id="identify" disabled>Read region and compatibility</button>
+<div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clear">Clear log</button></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.7';
+const BUILD = '2026-09-09.8';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -404,6 +406,8 @@ function resetSession(s) {
   $('notify').textContent = '—';
   $('challenge').textContent = '—';
   $('drive').textContent = 'Not tested';
+  $('region').textContent = 'Not read';
+  $('regionStatus').textContent = 'Read bike information first';
   protectedStatus('Not tested');
   controls();
   log('Disconnected');
@@ -650,6 +654,8 @@ const INFO_QUERIES = [
   {name: 'Captured setup 06', tx: '2afa', rx: '2af9', packet: [0, 6, 0], prefix: [0x26], setup: true, echo: 0, pause: 200},
   {name: 'Drive-unit model', tx: '2afe', rx: '2afd', packet: [0, 1, 0x1c, 0], prefix: [0, 1, 0x1e]},
   {name: 'Drive-unit firmware', tx: '2afe', rx: '2afd', packet: [0, 1, 0x2c, 0], prefix: [0, 1, 0x2e]},
+  {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0]},
+  {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1]},
 ];
 function queryInfo(s, query) {
   assertCurrent(s);
@@ -701,6 +707,18 @@ function decodeDriveInfo(model, firmware) {
   if (major > 9 || minor > 9) throw new Error('Unexpected firmware version encoding');
   return `${modelName}; firmware ${major}.${minor}.${firmware[4]}`;
 }
+function regionName(value) {
+  return ({0: 'EU', 1: 'US', 2: 'Japan', 3: 'Taiwan', 4: 'Korea', 5: 'US Class 3'})[value]
+    || `Unknown/unavailable (0x${value.toString(16).padStart(2, '0')})`;
+}
+function regionReadiness(model, firmware, destination) {
+  if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
+  if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
+  if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
+    return 'US target: eTuning 3.0.7 routes this model/firmware through preparation; direct change not ready';
+  }
+  return 'US target: model/firmware preparation requirements still need verification';
+}
 async function identifyDrive() {
   if (busy || !session?.verified || session.batchDone) return;
   const s = session;
@@ -711,7 +729,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; four queries plus three captured setup commands ---`);
+  log(`--- information batch start; build ${BUILD}; six reads plus three captured setup commands; US target = 1 ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -758,6 +776,16 @@ async function identifyDrive() {
     } else {
       $('drive').textContent = 'Batch complete; drive-unit identity not verified. See log.';
     }
+    const slot0 = results.find(item => item.name === 'Destination slot 0')?.fields;
+    const destination = results.find(item => item.name === 'Current destination')?.fields;
+    if (slot0?.length >= 5) log(`Destination slot 0: ${regionName(slot0[4])}; slot semantics not yet fully established`);
+    if (destination?.length >= 5) {
+      $('region').textContent = regionName(destination[4]);
+      log(`Current destination: ${regionName(destination[4])} (value ${destination[4]}); target US = 1`);
+    }
+    const readiness = regionReadiness(model, firmware, destination);
+    $('regionStatus').textContent = readiness;
+    log(readiness);
   } catch (e) {
     if (session === s) {
       log(`Information batch stopped: ${e.message}. Reconnect before retrying.`);
@@ -798,7 +826,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · transport setup batch experiment`;
+$('build').textContent = `Build ${BUILD} · US-region readiness batch`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

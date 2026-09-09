@@ -22,18 +22,17 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .7, tap **Run transport setup batch** after session verification.
-It reads display information, sends three captured connection-setup commands,
-then queries motor model and firmware. Keep Chrome foregrounded until
-**information batch end** appears (allow up to one minute), then copy the log.
-The summary includes ATT completion, replies, and notification traffic.
+In build .8, tap **Read region and compatibility** after session verification.
+It runs the verified connection setup, reads display/motor information and both
+destination slots, and reports the current region against the US target (value 1).
+Keep Chrome foregrounded until **information batch end**, then copy the log.
+Allow up to 80 seconds if queries go unanswered.
 
-Missing or unexpected setup replies stop the run. Motor queries may continue
-past unanswered completed writes. Reconnect for another batch. The setup
-commands occur in both APK connection paths, but their internal semantics are
-not fully decoded. No destination setter or firmware transfer is implemented.
-Build .6 verified the display command path while the motor response channel
-remained silent; this new sequence still needs a live test.
+Build .7 confirmed motor communication and reported E50X0 / 4.5.0. The newer
+APK's direct-region gate routes that combination through preparation; 4.3.0
+is the concrete preparation lead under investigation. No destination setter or
+firmware transfer is implemented yet. Missing or unknown destination values
+are not treated as EU or permission to write. Reconnect for another batch.
 
 ## Develop
 
