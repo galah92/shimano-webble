@@ -34,6 +34,9 @@ to deploy; check the repository's Actions tab for the Pages build result.
 
 ## Source and handoff
 
+See [RESEARCH.md](RESEARCH.md) for the current evidence, firmware findings,
+and next session-authentication analysis steps.
+
 `index.html` was imported from `shimano_webble_with_handoff.html` on
 2026-09-09, preserving its embedded research and engineering handoff notes.
 Those historical observations and provisional protocol models are source
