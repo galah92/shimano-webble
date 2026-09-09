@@ -800,3 +800,25 @@ variant. The 7F error prefix is reported promptly; short replies, errors and
 timeouts do not replace the numeric identity or enable a firmware operation.
 Tests cover those four outcomes and verify the exact read-only 2AFE sequence.
 The descriptor's utility on this motor remains a live-test question.
+
+## Build .16 live result and .17 write gate
+
+The 2026-09-09 09:34 session returned `00 16 7E 00 00 00 00 00 00 00`.
+Seven zero descriptor bytes, together with series 22 and unit 00, match the
+older desktop DuE5000Unit master entry (its seven-byte array is zero initialized).
+This strengthens the electronic E5000 identification despite the original E7000
+handoff; it does not establish compatibility of any preparation image.
+
+Motor authentication again completed with E2 FF FF. The US setter again
+returned `00 16 AB 3A 00`, repeating the .15 rejection. The fresh pre-write
+read reported EU. This session did not include a post-rejection readback;
+the previous .15 reconnect had independently confirmed EU after its rejection.
+No successful US write or speed change has been established.
+
+Build .17 requires explicit direct-write eligibility independently of motor
+authentication. No current production path grants it. The retained setter is
+covered by synthetic eligible-session tests; the real information-batch path
+is tested to remain disabled even when motor authentication is marked complete.
+UI instructions no longer invite the rejected experiment. Next research remains
+the exact E5000 preparation asset, transfer/finalization sequence and recovery
+requirements. No firmware candidate has been selected or transferred.

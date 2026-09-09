@@ -1,7 +1,7 @@
 # Shimano WebBLE
 
 A single-file Web Bluetooth diagnostic and experimental session-authentication
-console for Shimano STEPS, with an experimental US-destination setter.
+console for Shimano STEPS. The experimental US-destination setter is currently disabled.
 No firmware changes are implemented.
 
 **Live site:** https://galah92.github.io/shimano-webble/
@@ -33,11 +33,15 @@ Allow up to 80 seconds if queries go unanswered.
 
 Build .7 confirmed motor communication and reported E50X0 / 4.5.0. The newer
 APK's direct-region gate routes that combination through preparation; 4.3.0
-is the concrete preparation lead under investigation. Build .15 tests whether
-the documented setter works after verified motor authentication on 4.5.0;
-it does not establish that preparation can be skipped. No firmware transfer
-is implemented. Missing or unknown destination values
-are not treated as EU or permission to write. Reconnect for another batch.
+is the concrete preparation lead under investigation. Builds .15 and .16 both
+received AB/3A rejection after motor authentication. The .15 reconnect confirmed EU;
+the .16 pre-write read also reported EU. Build .17 disables direct writes,
+including after successful authentication. No firmware transfer is implemented.
+The US-region goal remains incomplete.
+
+Build .16 returned seven zero model-descriptor bytes. Together with series 22
+and unit 00, this matches the base DU-E5000 entry in the older desktop model
+table. It does not certify a particular firmware image's compatibility.
 
 ## Develop
 
@@ -114,9 +118,9 @@ Do not repeat the same write sequence; the next investigation is the app's
 preparation workflow. Firmware 4.3.0 is a candidate from its source, not a
 verified downgrade prescription.
 
-After session authentication, the information batch, and motor authentication,
-**Set region to US** becomes available only for the observed E50X0 / 4.5.0
-with EU readback. Tapping it attempts a persistent OEM destination change.
+As of build .17, **Set region to US** remains disabled after authentication.
+No production path currently grants direct-write eligibility. The retained
+experimental implementation is tested using synthetic eligible sessions:
 It first reads the current destination again; only EU (0) permits the write.
 It sends `00 16 A8 01 01` once, watches for AA or AB, and reads back the
 current destination after AA or an acknowledgement timeout with completed ATT.
@@ -124,7 +128,7 @@ US (1) readback is the value check. An acknowledgement alone is never success.
 Rejections, write failures and unverified readback stop the attempt. There is
 no automatic retry, downgrade, factory-slot write or separate speed setter.
 
-Copy the log after **US-region attempt end**. If US is read back, disconnect,
+For a future validated write workflow, if US is read back, disconnect,
 turn the bike fully off and on, reconnect, authenticate the session, and run
 **Read region and compatibility** again. Copy that second log and report that
 the bike was power-cycled. The app cannot detect a physical power cycle; a US

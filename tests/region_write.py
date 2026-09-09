@@ -22,6 +22,8 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate('''async opts => {
           window.regionWrites = []; window.regionReads = 0;
           session.verified = session.motorEligible = session.motorAuthenticated = true;
+          // Synthetic eligible path for testing the retained setter; production never enables it yet.
+          session.directWriteEligible = true;
           session.currentDestination = 0;
           for (const short of ['2afe','2afd','2af9','2afb'])
             session.chars[short] = await session.service.getCharacteristic(UUID(short));
@@ -67,7 +69,7 @@ class RegionWriteTests(unittest.TestCase):
 
     def test_authentication_and_destination_gates(self):
         self.prepare()
-        for field, value in [('verified',False),('motorEligible',False),('motorAuthenticated',False),('currentDestination',1),('regionWriteAttempted',True)]:
+        for field, value in [('directWriteEligible',False),('verified',False),('motorEligible',False),('motorAuthenticated',False),('currentDestination',1),('regionWriteAttempted',True)]:
             self.page.evaluate('''([field,value]) => { window.previous = session[field];session[field]=value;controls();setUS(); }''',[field,value])
             self.assertTrue(self.page.locator('#setUS').is_disabled())
             self.assertEqual(self.packets(),[])

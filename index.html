@@ -348,13 +348,13 @@ END HANDOFF NOTES
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Sets the stored OEM destination to US (1). Experimental on firmware 4.5.0: it may require preparation and reject the change. One attempt, followed by readback. Restart the bike afterward to check persistence.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Direct US writes were rejected on this motor and firmware. The preparation workflow is under investigation; region changes are currently unavailable.</div></div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.16';
+const BUILD = '2026-09-09.17';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -766,7 +766,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'eTuning routes this firmware through preparation. Authenticate motor to enable a one-shot US write experiment.';
+    return 'Direct US write rejected on this firmware. eTuning routes it through preparation; that workflow is under investigation.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -848,6 +848,9 @@ async function identifyDrive() {
     s.motorEligible = model?.length >= 5 && firmware?.length >= 5 && destination?.length >= 5
       && model[3] === 0x22 && model[4] === 0 && firmware[3] === 0x45 && firmware[4] === 0
       && destination[4] <= 5;
+    // Builds .15 and .16 both received AB 3A after successful motor authentication.
+    // No supported direct-write path has been established. Authentication alone is insufficient.
+    s.directWriteEligible = false;
     s.currentDestination = destination?.length >= 5 ? destination[4] : undefined;
     $('motorStatus').textContent = s.motorEligible
       ? 'Ready for a motor authentication experiment. No region or firmware changes.'
@@ -1000,7 +1003,7 @@ async function authenticateMotor() {
     s.motorAuthenticated = true;
     log('MILESTONE: motor authentication completion marker 00 16 E2 FF FF observed. Region-write permission and persistence remain unverified.');
     $('motorStatus').textContent = 'Motor authentication completion observed.';
-    if (s.currentDestination === 0) $('regionStatus').textContent = 'Ready for one US-region write experiment. Firmware compatibility remains unverified.';
+    if (s.currentDestination === 0) $('regionStatus').textContent = 'Motor authenticated; direct US write remains unavailable. Preparation workflow under investigation.';
   } catch (error) {
     log(`Motor authentication stopped: ${error.message}. Reconnect before retrying.`);
     if (session === s) disconnect();
@@ -1012,7 +1015,7 @@ async function authenticateMotor() {
   }
 }
 function canSetUS(s) {
-  return !!(s?.verified && s.motorEligible && s.motorAuthenticated
+  return !!(s?.verified && s.directWriteEligible === true && s.motorEligible && s.motorAuthenticated
     && s.currentDestination === 0 && !s.regionWriteAttempted);
 }
 // eTuning w.z sends this exact five-byte setter. In.F6 recognizes AA;
