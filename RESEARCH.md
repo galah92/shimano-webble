@@ -1408,3 +1408,34 @@ sizes, sequence wraparound and all-zero checksum windows. This validates
 encoding parity, not successful transfer on SC-E7000. Local file-check tests
 and the Chromium picker test also pass. Next: correlated reply handling and
 worker state transitions, followed by paired handover/recovery validation.
+
+## Build .21: M reply interpretation and attempt evidence
+
+Ported Hn.K/C/J envelope candidates and C0644tk/C0776xk reply classification
+into the app. Candidate framing is retained explicitly: raw and leading-zero
+interpretations are not checksum-validated. Only the escaped interpretation
+checks its checksum. The source protocol mask is preserved. The reply window
+uses distinct query and data sequences: 83 correlates to the query; C0 to the
+data; 91/92 are statuses, never acknowledgements. The whole notification is
+processed before reporting accumulated evidence, and a positive query failure
+or checksum rejection dominates success evidence. Closed windows ignore late
+notifications. A caller can close on timeout/disconnect/write failure.
+
+This accumulator has no timers, writes, retry authority or sequence allocator.
+It reports `evidence-complete`, not update success. Checkpoint F2 00 31/32
+remains explicitly uncorrelated and must be scoped by a future transport;
+sequence wrap and delayed checkpoint freshness are not solved by classification.
+Neither raw candidate parsing nor a checkpoint marker alone authorizes progress.
+The region and firmware controls remain disabled as before.
+
+Re-read C0776xk.F0: listener registration precedes the 0B query containing
+[query sequence, 03, data sequence]; the source waits up to 3000ms after a
+successful query write, with matching query errors taking precedence. The
+browser accumulator is only the evidence part of that worker, not its timing
+or recovery implementation.
+
+Tests: all 14 Java-generated envelope vectors match. Additional cases cover
+raw/escaped acknowledgements, both ACK/checkpoint orders, status-only traffic,
+wrong sequence, checksum failure with ACK in the same notification, failure
+remaining sticky, timeout/close behavior, and stale ACK from another attempt.
+Packet-codec, file-check and Chromium startup/picker regression checks pass.

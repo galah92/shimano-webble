@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.20';
+const BUILD = '2026-09-09.21';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -401,6 +401,96 @@ function firmwareTransferGeometry(data, component) {
     checksum: firmwareSum(data), checkpoints: component === 'M' ? Math.ceil(data.length / 1024) : 0};
 }
 // END FIRMWARE PACKET ENCODERS
+
+// BEGIN M FIRMWARE REPLIES
+// Hn.K/C/J returns candidate interpretations, not a unique validated frame.
+// Keep framing provenance: a raw candidate has no checksum guarantee.
+function mFirmwareEnvelopes(raw) {
+  const candidates = [];
+  const add = (data, framing) => {
+    if (!data.length) return;
+    let protocol = data[0], payload = data.slice(1);
+    if (protocol === 0x48 && data.length > 2) payload = data.slice(2);
+    else if (protocol === 0xf2 && data.length >= 3) { protocol = 0x48; payload = data.slice(); }
+    candidates.push({protocol, payload, framing});
+  };
+  add(raw, 'raw');
+  if (raw.length > 1 && raw[0] === 0) add(raw.slice(1), 'leading-zero');
+  if (raw.length < 3) return candidates;
+  const frame = raw[0] === 0 && raw.length > 3 ? raw.slice(1) : raw;
+  if (frame[frame.length - 1] !== 0xbb) return candidates;
+  const decoded = [];
+  for (let i = frame[0] === 0xbb ? 1 : 0; i < frame.length - 1; i++) {
+    let byte = frame[i];
+    if (byte === 0xbd && i + 1 < frame.length - 1) byte = frame[++i] ^ 0x20;
+    decoded.push(byte);
+  }
+  if (decoded.length >= 2 && ((firmwareSum(decoded.slice(0, -1)) + 1) & 255) === decoded[decoded.length - 1])
+    add(Uint8Array.from(decoded.slice(0, -1)), 'escaped-checksum');
+  return candidates;
+}
+function mFirmwareEvents(protocol, payload, querySequence, dataSequence, checkpoint) {
+  if (![protocol, querySequence, dataSequence].every(v => Number.isInteger(v) && v >= 0 && v <= 255))
+    throw new Error('Expected unsigned protocol and sequence bytes');
+  const events = [];
+  if ((protocol & 0x0b) === 0x0b) {
+    if (payload.length > 3 && payload[1] === 0x83 && payload[2] === querySequence)
+      events.push(['query_status', payload[3]]);
+    if (payload.length > 2) {
+      const opcode = payload[1], sequence = payload[2];
+      if (opcode === 0x91 || opcode === 0x92)
+        events.push([sequence === dataSequence ? 'data_status' : 'other_data_status', opcode]);
+      if (opcode === 0xc0)
+        events.push([sequence === dataSequence ? 'data_ack' : 'other_data_ack', sequence]);
+    }
+  }
+  if (checkpoint) {
+    for (let i = 0; i < payload.length - 2; i++) {
+      if (payload[i] !== 0xf2 || payload[i + 1] !== 0) continue;
+      if (payload[i + 2] === 0x31 || payload[i + 2] === 0x32)
+        events.push(['uncorrelated_checksum_status', payload[i + 2]]);
+      break;
+    }
+  }
+  return events;
+}
+// One attempt's evidence accumulator, not an updater or a retry policy.
+// Feed only its active notification window; checkpoint markers have no sequence
+// and cannot prove freshness. A future transport must establish that boundary.
+function mFirmwareReplyWindow(querySequence, dataSequence, checkpoint = false) {
+  mFirmwareEvents(0, [], querySequence, dataSequence, checkpoint);
+  let ack = false, checksum = null, error = null, closed = false;
+  const status = () => ({ack, checksum, error,
+    state: error ? 'failed' : ack && (!checkpoint || checksum === 0x31) ? 'evidence-complete' : 'waiting',
+    checksumCorrelated: false, installable: false});
+  return {
+    receive(raw) {
+      if (closed) return status();
+      // Aggregate the whole notification before judging success: errors dominate.
+      for (const candidate of mFirmwareEnvelopes(raw)) {
+        for (const [kind, value] of mFirmwareEvents(candidate.protocol, candidate.payload, querySequence, dataSequence, checkpoint)) {
+          if (kind === 'query_status' && value > 0) error = `query-status-${value}`;
+          if (kind === 'data_ack') ack = true;
+          if (kind === 'uncorrelated_checksum_status') {
+            checksum = value;
+            if (value === 0x32) error = 'checksum-rejected';
+          }
+        }
+      }
+      return status();
+    },
+    close(reason) {
+      if (!closed) {
+        if (reason) error = reason;
+        else if (status().state === 'waiting') error = 'incomplete-reply';
+        closed = true;
+      }
+      return status();
+    },
+    status,
+  };
+}
+// END M FIRMWARE REPLIES
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.

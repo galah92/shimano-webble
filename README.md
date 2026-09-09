@@ -222,3 +222,8 @@ Build .20 adds the D/M packet encoders and reports transfer block counts when
 local files pass validation. Their full output matches the offline codecs for
 both preparation and restoration images. Transfer remains unavailable until
 reply handling, bootloader handover and recovery are validated.
+
+Build .21 adds M reply classification and per-attempt evidence handling for the
+future updater, tested against Java envelope fixtures and notification-order
+cases. It does not send firmware. Checkpoint freshness, the timed transport,
+D reply handling and paired handover/recovery still require implementation.
