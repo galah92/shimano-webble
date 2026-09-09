@@ -593,3 +593,50 @@ logs and exports. Synthetic fixtures use invented serials and a fixed
 00..0F challenge; Python integer arithmetic and cryptography AES/ECB provide
 an independent reference for the browser computations. No captured motor
 authentication exchange exists, so actual bike validation is still required.
+
+## Independent desktop-library cross-check after build .14
+
+Statically inspected the assemblies distributed in E-TUBE Project 3.4.5,
+retrieved from the [installer archive mirror](https://assets.bettershifting.com/archive/E-tube_Proj_V_3_4_5.zip).
+The installer was unpacked without execution. This is an archived distribution,
+not a freshly authenticated download from Shimano; hashes identify the exact
+evidence inspected, rather than proving publisher authenticity. Binaries and
+disassembly remain outside this public repository.
+
+- ZIP SHA-256: `62266eedf48e9a8f6ec25dd68c9c899f405bf41d9bf9fe3931786877644d4787`
+- etubedata.dll SHA-256: `e67f2a12a678628521095dfef9cc27d5588abda8988606206b03ad43382e1dbe`
+- etubedatalinks.dll SHA-256: `814d8096d9f6e5552d8131ff840d3bf407b0f0b089c9a0a821cbb34f141e5ab5`
+
+`AuthKeyGenerator.GenerateKeys` independently agrees with the APK reconstruction:
+the same serial-derived seeds, byte-1 warmup, seven request bytes, discarded
+eighth byte, and fresh-word start for the sixteen AES-key bytes.
+`DuAuthHelper.ProcessRegulationSetAuth` performs key generation, the D8 challenge
+request, encryption and the E0 response. This corroborates the algorithm, but
+does not replace a live test of the WebBLE framing and completion handling.
+
+The library provides useful distinctions absent from our earlier log labels:
+
+| Item | Library interpretation | Remaining limit |
+| --- | --- | --- |
+| Error 3A | `DCC_PRM_ERR_CMD_NOT_DISPOSE` | Does not identify which setup prerequisite was missing. |
+| Error 3B | `DCC_PRM_ERR_CMD_INVALID` | The D8 handler returns authentication `Unnecessary`; this is not proof that a destination write is allowed. |
+| Error 46 | `DCC_PRM_ERR_AUTH_LOCK` | The D8 handler returns authentication `Locked`. |
+| E8 / EA | Authentication-lock release request / reply | `UnlockRegulationSetAuth` uses the serial-derived seven bytes; caller policy and live behavior need verification before adding a retry. |
+| Destination selector 0 / 1 | Factory / OEM rewrite selectors | Consistent with the two observed reads; do not assume both values are changed together. |
+
+`ProcessRandomValueAuth` sends the three E0 fragments through the desktop
+send/receive helper, with 100 ms spacing, and checks the last communication
+result. The mobile APK supplies our E2 FF FF completion criterion. Their
+different transports do not establish that intermediate desktop replies have
+the same shape on BLE; build .14's early-completion rejection still requires
+live validation.
+
+A further read-only lead is `DUUnitDataLink.GetMaxAssistSpeedForEachDestination`:
+group 16, command BC, one destination parameter, reply BE. It extracts a
+two-byte unsigned value from response parameters 1 and 2. Units and BLE
+response layout are not yet validated, so this query has not been added to
+the app or used to predict the bike's assistance cutoff.
+
+Next evidence needed: the build .14 motor-authentication result. EU readback is
+established by the user's build .13 test. US configuration, persistence and
+speed behavior remain unverified; no firmware or destination write is enabled.

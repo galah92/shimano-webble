@@ -81,7 +81,8 @@ each query on all three channels. Startup traffic cannot hide later response
 types. No new bike commands were added. Export tests: `python tests/log_export.py`.
 
 Build .11 recognizes the observed destination response `00 16 AF 3A` and stops
-further destination reads promptly. Its meaning is unresolved; it is never
+further destination reads promptly. An older Shimano library names error 3A
+`CMD_NOT_DISPOSE`; the precise rejected state remains unresolved. It is never
 decoded as a region or treated as permission to change configuration.
 
 **Clear log** clears the visible and saved log history. It leaves the Bluetooth
@@ -96,7 +97,9 @@ response and waits for the APK completion marker `00 16 E2 FF FF`.
 Copy the log after **motor authentication end**. This is an experiment; the
 marker does not establish permission to change region. No destination setter
 or firmware update is implemented. DB replies stop the run; the APK's E8
-fallback is not implemented until its effect is established.
+fallback is not implemented. An older Shimano library identifies E8 as an
+authentication-lock release request; its applicability to this bike still
+needs verification.
 
 The shared goal is a verified phone-only US-destination workflow with readback
 and persistence checks. Current baseline: session setup and EU readback work.
