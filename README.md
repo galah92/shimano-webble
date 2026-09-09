@@ -179,6 +179,10 @@ Offline component selection: `python3 tools/compare_components.py D.dat M.dat`
 accepts optional `--installed-d` and `--installed-m` four-field versions. It
 compares each component separately and leaves the order unresolved if either
 installed version is unknown. Tests: `python3 tests/component_selection.py`.
+Use `--force-equal` to model the installer's equal-version rewrite flag;
+without it, equal versions are omitted. The observed `f9c41` installer caller
+passes this flag as true. Neither mode models failed-read/recovery selection
+or proves that a component will be retained in the actual preparation workflow.
 The build .18 live batch independently read D **4.5.0.0** and M **4.4.8.0**;
 destination remained EU (0). The sanitized baseline is in
 `tests/bike_baseline.json`. Use `--installed-d 4.5.0.0 --installed-m 4.4.8.0`

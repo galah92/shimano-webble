@@ -31,6 +31,17 @@ class ComponentSelectionTests(unittest.TestCase):
         for d, m in [(None, None), ('4.5.0.0', None), ('4.15.0.0', '4.2.1.0')]:
             self.assertIsNone(plan(*images(), d, m)['normal_mode_order'])
 
+    def test_force_equal_selects_both_without_changing_comparison(self):
+        for d, m in [('4.3.0.0', '4.2.1.0'), ('4.5.0.0', '4.2.1.0'),
+                     ('4.3.0.0', '4.4.8.0')]:
+            ordinary = plan(*images(), d, m)
+            forced = plan(*images(), d, m, force_equal=True)
+            self.assertEqual(forced['components'], ordinary['components'])
+            self.assertEqual(forced['normal_mode_order'], ['M', 'D'])
+            self.assertFalse(forced['installable'])
+        for d, m in [(None, '4.2.1.0'), ('4.15.0.0', '4.2.1.0')]:
+            self.assertIsNone(plan(*images(), d, m, force_equal=True)['normal_mode_order'])
+
     def test_full_version_and_bad_input(self):
         self.assertEqual(compare('4.3.0.0', '4.3.0.1'), 'downgrade')
         self.assertEqual(compare('4.3.0.1', '4.3.0.0'), 'upgrade')

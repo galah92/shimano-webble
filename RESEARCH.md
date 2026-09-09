@@ -1226,3 +1226,34 @@ level. The package does not establish the actual eTuning preparation pair,
 whether M must be downgraded, or whether browser transfer, reset and recovery
 will work. Those remain required before any firmware operation; US destination
 and persistence have still not been achieved.
+
+## Equal-version rewriting in the installer caller
+
+Tracing the worker caller resolves a limitation of ordinary version comparison:
+`f9c41` calls `this.g.u3(c0549qn, this, true)` (decompiled source line 1188).
+`Th.u3` passes that boolean unchanged to `Th.v3`. In the instruction-level
+`Th.v3` dump, labels L919-L939 construct separate M and D force flags when the
+argument is true, the relevant native-read exceptional flag is false, and
+the version comparison equals `Mh.f`. `Mh.l` returns `Mh.f` for equal versions.
+Labels L939-L95b include those force flags in the component-selection booleans.
+Thus equality does not, by itself, establish that this installer skips a
+component. This is a caller/worker finding; it does not establish package
+contents or every entry route into the activity.
+
+The special alternative-pair search `Th.f3` immediately returns null unless
+the family is `Ih.k` (EP800), its flag is enabled, and native information is
+available. It is not evidence of an E5000 path that retains the current M.
+
+`compare_components.py --force-equal` now models equal-version rewriting for
+the case with valid independent native reads. With the recovered restoration
+pair and the measured D/M baseline, both comparisons remain `equal`, but
+the selected order becomes M then D. Without the flag the order remains empty.
+Unknown or recovery-state versions still yield no modeled order, and both
+modes retain `installable: false`. Four selection tests pass, covering mixed
+equal/downgrade cases and unresolved reads under the force flag.
+
+Consequently, neither the older candidate pair nor a mixed D 4.3.0 / M 4.4.8
+pair establishes a D-only preparation procedure. Preserving M would be a
+distinct workflow requiring evidence, not a faithful consequence of the
+observed installer call. No additional live probe or repeated US setter
+is needed to answer this source-level question.

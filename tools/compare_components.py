@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare raw E5000 component files with separately read installed versions.
 
-Offline normal-mode selection only. Does not authorize or perform an update.
+Offline selection with valid component reads. Does not authorize or perform an update.
 """
 import argparse
 import json
@@ -27,7 +27,7 @@ def compare(target, installed):
     return 'upgrade' if target > installed else 'downgrade' if target < installed else 'equal'
 
 
-def plan(d_data, m_data, installed_d=None, installed_m=None):
+def plan(d_data, m_data, installed_d=None, installed_m=None, force_equal=False):
     d, m = inspect(d_data), inspect(m_data)
     if d['component'] != 'D' or m['component'] != 'M':
         raise ValueError('Provide D and M images in that order')
@@ -37,11 +37,12 @@ def plan(d_data, m_data, installed_d=None, installed_m=None):
                                 comparison=compare(header['version'], installed))
     unresolved = any(c['comparison'] in ('read-required', 'recovery-state-unresolved')
                      for c in components.values())
-    return dict(components=components,
+    return dict(components=components, force_equal=force_equal,
                 normal_mode_order=None if unresolved else [name for name, c in components.items()
-                    if c['comparison'] != 'equal'],
+                    if c['comparison'] != 'equal' or force_equal],
                 installable=False,
-                limitations=['normal mode only; forced rewriting and recovery are not modeled',
+                limitations=['valid native reads only; recovery and failed-read selection are not modeled',
+                             'force_equal models Th.v3 equal-version rewriting, not the complete installer workflow',
                              'installed values require independent D and M native reads',
                              'target provenance, compatibility and transfer recovery unverified'])
 
@@ -52,13 +53,15 @@ def main():
     parser.add_argument('m_file', type=Path)
     parser.add_argument('--installed-d')
     parser.add_argument('--installed-m')
+    parser.add_argument('--force-equal', action='store_true',
+                        help='Model the worker flag that also selects equal-version components')
     args = parser.parse_args()
     try:
         images = []
         for path in (args.d_file, args.m_file):
             with path.open('rb') as f:
                 images.append(f.read(32 * 1024 * 1024 + 1))
-        result = plan(*images, args.installed_d, args.installed_m)
+        result = plan(*images, args.installed_d, args.installed_m, args.force_equal)
     except (OSError, ValueError) as error:
         parser.exit(1, f'{error}\n')
     print(json.dumps(result, indent=2))
