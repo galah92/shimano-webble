@@ -349,12 +349,68 @@ END HANDOFF NOTES
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
 <div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Direct US writes were rejected on this motor and firmware. The preparation workflow is under investigation; region changes are currently unavailable.</div></div>
+<details class="card"><summary>Check preparation files</summary>
+<p>Select the two extracted DAT files. This checks their contents locally; it does not install firmware or connect to the bike.</p>
+<input id="firmwareFiles" type="file" accept=".dat" multiple aria-label="Select D and M firmware files" />
+<div id="firmwareStatus" role="status">Choose both files from the same package.</div>
+</details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.18';
+const BUILD = '2026-09-09.19';
+// BEGIN FIRMWARE FILE CHECKS
+// Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.
+// Hashes identify reviewed source files, not hardware compatibility or permission to flash.
+const FIRMWARE_IMAGES = Object.freeze({
+  '3d3df4dfe3de333062f445b6719fa5033f93dc9d384448134ee6041d216c6af0': 'preparation',
+  '10190fd78e6527908c0e43405184c414b612bc4becce9ca5483612665ced6b56': 'preparation',
+  '44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb': 'restoration',
+  '9ea350e988345a9d9fb41c1363562ca190f1a8d5e1cc8a38c6373f69b877f033': 'restoration',
+});
+function firmwareVersion(data, offset) {
+  const [packed, patch, build] = data.slice(offset, offset + 3);
+  if (packed >> 4 !== 4 || (packed & 15) > 9 || patch === 255 || build === 255) return null;
+  return [packed >> 4, packed & 15, patch, build];
+}
+function firmwareHeader(data) {
+  if (!(data instanceof Uint8Array) || data.length < 256 || data.length > 32 * 1024 * 1024)
+    throw new Error('Expected a raw DAT between 256 bytes and 32 MiB');
+  const candidates = [];
+  if (data.slice(0, 16).every(b => b === 255) && data[40] === 34 && data[41] === 0 && data[42] === 4)
+    candidates.push({component: 'D', version: firmwareVersion(data, 16), minimum: firmwareVersion(data, 47)});
+  if (data[12] === 255 && data[13] === 255 && data[14] === 34 && data[15] === 0)
+    candidates.push({component: 'M', version: firmwareVersion(data, 8), minimum: firmwareVersion(data, 16)});
+  if (candidates.length !== 1 || !candidates[0].version || !candidates[0].minimum)
+    throw new Error('Unrecognized raw E5000 header or missing version requirements; wrapped files are unsupported');
+  return candidates[0];
+}
+function firmwarePairRequirements(d, m) {
+  if (d.component !== 'D' || m.component !== 'M') throw new Error('A pair needs one D and one M image');
+  const rank = v => v[0] * 1000000 + v[1] * 10000 + v[2] * 100 + v[3];
+  return rank(m.version) >= rank(d.minimum) && rank(d.version) >= rank(m.minimum);
+}
+async function checkFirmwarePair(files) {
+  if (files.length !== 2) throw new Error('Select exactly two DAT files: one D and one M');
+  const headers = [];
+  for (const file of files) {
+    if (file.size < 256 || file.size > 32 * 1024 * 1024) throw new Error('File size outside supported DAT range');
+    const data = new Uint8Array(await file.arrayBuffer());
+    const header = firmwareHeader(data);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    const hash = Array.from(digest, b => b.toString(16).padStart(2, '0')).join('');
+    const source = FIRMWARE_IMAGES[hash];
+    if (!source) throw new Error('File does not match a reviewed preparation or restoration image');
+    headers.push({...header, source});
+  }
+  const d = headers.find(h => h.component === 'D'), m = headers.find(h => h.component === 'M');
+  if (!d || !m) throw new Error('A pair needs one D and one M image');
+  if (d.source !== m.source || !firmwarePairRequirements(d, m)) throw new Error('Mixed or incompatible component pair');
+  // No bytes or authorization token are retained. A future installer must revalidate its inputs.
+  return {source: d.source, dVersion: d.version.join('.'), mVersion: m.version.join('.'), installable: false};
+}
+// END FIRMWARE FILE CHECKS
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -1148,6 +1204,23 @@ $('clearLog').onclick = () => {
   try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
   $('exportStatus').textContent = 'Log cleared.';
 };
+let firmwareCheckGeneration = 0;
+$('firmwareFiles').onchange = async () => {
+  const generation = ++firmwareCheckGeneration;
+  const files = Array.from($('firmwareFiles').files);
+  $('firmwareStatus').textContent = 'Checking files…';
+  try {
+    const pair = await checkFirmwarePair(files);
+    if (generation !== firmwareCheckGeneration) return;
+    const message = `Verified ${pair.source} files: D ${pair.dVersion}, M ${pair.mVersion}. Pair requirements pass. Installation is not available yet.`;
+    $('firmwareStatus').textContent = message;
+    log(message);
+  } catch (error) {
+    if (generation === firmwareCheckGeneration) $('firmwareStatus').textContent = `Files not accepted: ${error.message}`;
+  }
+};
+
+
 $('copyLog').onclick = async () => {
   const snapshot = exportLog();
   try {

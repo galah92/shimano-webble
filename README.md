@@ -210,3 +210,10 @@ before M, requiring a reconnect. Firmware preparation remains unavailable.
 M-transfer replies offline; `python3 tests/m_reply.py` checks Java reference
 vectors, sequence matching and checksum distinctions. It does not reassemble
 notifications or authorize progress to another firmware block.
+
+Build .19 adds **Check preparation files**, a local-only check for a pair of
+extracted DAT files. It recognizes reviewed preparation/restoration contents,
+uses internal versions rather than file names, and rejects mixed pairs. It
+requires raw files (the restoration D wrapper is not supported). Passing this
+check does not enable installation; firmware transfer and recovery remain in
+development. No additional bike test is needed for this build.

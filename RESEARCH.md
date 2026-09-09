@@ -1363,3 +1363,25 @@ the bike. Next work is implementation and validation of the paired BLE update,
 bootloader handover and recovery using this source-identified pair and the
 matching restoration assets. The guide is supporting evidence, not a live
 test of WebBLE on this Pixel/bike; US configuration remains unachieved.
+
+## Build .19: local firmware pair checks in the single-file app
+
+The page now accepts two local raw DAT files in a collapsed file-check section.
+It identifies D/M and versions from headers, checks both peer minima with the
+source's decimal version ranking, and requires exact SHA-256 matches to the
+reviewed public preparation or extracted restoration images. File names and
+selection order are ignored. Mixed pairs, duplicate components, modified bytes,
+wrapped files and unsupported sizes are rejected. No binaries are committed.
+The restoration D input must already be unwrapped; browser decryption is not
+implemented. This is file validation, not a compatibility certification.
+
+The checker retains no firmware bytes or permission token, and makes no BLE
+calls. A later installer must validate its actual inputs again. UI results are
+protected against a previous asynchronous selection overwriting a newer one.
+Transfer and region controls remain unavailable. The next implementation gap
+is the paired transfer state machine, bootloader handover and recovery.
+
+Validation: Node tests exercise the exact page functions, including both mixed
+pair failures and unknown-file rejection. Private integration checks use all
+four actual images, reversed file order, duplicates and one-byte corruption.
+A Chromium check covers page startup and invalid-file/cleared-picker feedback.
