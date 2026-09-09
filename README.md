@@ -22,7 +22,7 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .10, tap **Read region and compatibility** after session verification.
+In build .11, tap **Read region and compatibility** after session verification.
 It runs the verified connection setup, reads display/motor information and both
 destination slots, and reports the current region against the US target (value 1).
 Keep Chrome foregrounded until **information batch end**, then copy the log.
@@ -77,3 +77,7 @@ clipboard access fails, select and copy the log text directly.
 Build .10 also reports notification headers, counts and timing separately for
 each query on all three channels. Startup traffic cannot hide later response
 types. No new bike commands were added. Export tests: `python tests/log_export.py`.
+
+Build .11 recognizes the observed destination response `00 16 AF 3A` and stops
+further destination reads promptly. Its meaning is unresolved; it is never
+decoded as a region or treated as permission to change configuration.

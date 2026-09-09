@@ -52,6 +52,15 @@ class Characteristic extends EventTarget {
         const rx = characteristics['2afd'];
         const slot = packet[3];
         if (options.batchTimeout || options.regionTimeout) return;
+        if (options.regionAlternate) {
+          const send = () => {
+            rx.value = value([0, 22, 175, 58, 1, 0, 0, 0, 0, 0]);
+            rx.dispatchEvent(new Event('characteristicvaluechanged'));
+          };
+          if (options.regionAlternateDelayed) setTimeout(send, 20); else send();
+          if (options.regionAlternateWriteFailure) throw new DOMException('Destination write failed', 'NetworkError');
+          return;
+        }
         // The other slot must not satisfy this query.
         rx.value = value([0, 22, 174, 1 - slot, 1, 0, 0, 0, 0, 0]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
@@ -344,6 +353,30 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.page.locator('#region').inner_text(), 'EU')
         self.assertFalse(any(x[1] == '2afe' and x[2][2] == 168 for x in self.writes()))
         self.assertIn('target US = 1', self.page.locator('#log').inner_text())
+
+    def test_destination_alternate_stops_without_decoding_or_second_read(self):
+        for delayed in (False, True):
+            self.ready_for_identify(regionAlternate=True, regionAlternateDelayed=delayed)
+            self.page.wait_for_function("document.getElementById('log').textContent.includes('--- information batch end;')", timeout=5000)
+            log = self.page.locator('#log').inner_text()
+            self.assertIn('alternate response 00 16 AF 3A; meaning unresolved', log)
+            self.assertIn('Current destination: not completed', log)
+            self.assertNotIn('no matching reply', log)
+            self.assertNotIn('Current destination: US', log)
+            self.assertIn('unknown', self.page.locator('#regionStatus').inner_text())
+            self.assertIn('DU-E7000', self.page.locator('#drive').inner_text())
+            region_writes = [x for x in self.writes() if x[1] == '2afe' and x[2][1] == 22]
+            self.assertEqual([x[2] for x in region_writes], [[0, 22, 172, 0]])
+            self.assertFalse(self.errors)
+            self.context.close()
+
+    def test_destination_alternate_does_not_hide_att_write_failure(self):
+        self.ready_for_identify(regionAlternate=True, regionAlternateWriteFailure=True)
+        self.wait_batch()
+        log = self.page.locator('#log').inner_text()
+        self.assertIn('Information batch stopped: Destination write failed', log)
+        self.assertNotIn('RESULT Destination slot 0: alternate', log)
+        self.assertFalse(self.errors)
 
     def test_unknown_and_short_region_are_not_eu_or_ready(self):
         for options in ({'regionValue': 255}, {'regionShort': True}):

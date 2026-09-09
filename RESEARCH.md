@@ -416,3 +416,23 @@ At the user's request, log export is simplified to one Copy log button using
 the latest connection. Full-log download, export mode selection, and Clear log
 buttons are removed. The end marker/count remain; clipboard failure tells the
 user to select and copy the visible text. Bluetooth commands are unchanged.
+
+## Build .10 live AF/3A result and .11 handling
+
+Both destination reads produced a 10-byte 2AFD notification beginning
+`00 16 AF 3A`, at 98 ms and 87 ms respectively. The previous AE/slot-only
+matcher ignored these and waited eight seconds per query. Temporal association
+is strong, but the exact meaning of AF/3A remains unresolved.
+
+The examined old `d/a/a/a/h.java::a` and new `In.java::F6` receive switches
+handle AE destination data and AA write responses; no explicit AF case or
+reliable mapping of 3A was found. This bounded source inspection does not prove
+that no such mapping exists elsewhere. Do not import meanings from ATT or UDS
+error tables, or infer a firmware restriction from this response alone.
+
+Build .11 recognizes only the exact observed AF/3A header during destination
+reads. It waits for ATT write completion, reports an alternate response with
+unknown semantics, and stops the remaining destination checks because the
+header has no verified slot identifier. Alternate payloads never enter region
+decoding. Verified model and firmware results remain visible. No new BLE
+commands or configuration writes are introduced; Copy log remains one button.

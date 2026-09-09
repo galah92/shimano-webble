@@ -352,7 +352,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.10';
+const BUILD = '2026-09-09.11';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -655,8 +655,8 @@ const INFO_QUERIES = [
   {name: 'Captured setup 06', tx: '2afa', rx: '2af9', packet: [0, 6, 0], prefix: [0x26], setup: true, echo: 0, pause: 200},
   {name: 'Drive-unit model', tx: '2afe', rx: '2afd', packet: [0, 1, 0x1c, 0], prefix: [0, 1, 0x1e]},
   {name: 'Drive-unit firmware', tx: '2afe', rx: '2afd', packet: [0, 1, 0x2c, 0], prefix: [0, 1, 0x2e]},
-  {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0]},
-  {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1]},
+  {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0], destination: true},
+  {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1], destination: true},
 ];
 function queryInfo(s, query) {
   assertCurrent(s);
@@ -665,6 +665,7 @@ function queryInfo(s, query) {
   return new Promise((resolve, reject) => {
     let written = false;
     let response;
+    let alternate = false;
     let settled = false;
     const started = performance.now();
     const traffic = {};
@@ -698,13 +699,17 @@ function queryInfo(s, query) {
       }
       s.controller.signal.removeEventListener('abort', onAbort);
       if (error) reject(error);
-      else resolve({name: query.name, status: timedOut ? 'no matching reply' : response.length < (query.setup ? 2 : 5) ? 'short reply' : 'reply received', fields: response});
+      else resolve({name: query.name, alternate, status: alternate ? 'alternate response 00 16 AF 3A; meaning unresolved' : timedOut ? 'no matching reply' : response.length < (query.setup ? 2 : 5) ? 'short reply' : 'reply received', fields: alternate ? undefined : response});
     };
     const onAbort = () => finish(new Error('Disconnected during information batch'));
     const onValue = ev => {
       const data = bytes(ev.target.value);
-      if (!query.prefix.every((byte, i) => data[i] === byte)) return;
+      // Only the exact header observed after both live destination reads.
+      // AF/3A is not established as a generic error or an authorization status.
+      const observedAlternate = query.destination && [0, 0x16, 0xaf, 0x3a].every((byte, i) => data[i] === byte);
+      if (!observedAlternate && !query.prefix.every((byte, i) => data[i] === byte)) return;
       if (response) return;
+      alternate = observedAlternate;
       response = data.slice(0, 5);
       log(`RX ${query.rx.toUpperCase()} ${query.name}: ${hex(response)} (${data.length} bytes total; trailing bytes omitted)`);
       if (written) finish();
@@ -783,6 +788,11 @@ async function identifyDrive() {
       assertCurrent(s);
       results.push(result);
       log(`RESULT ${result.name}: ${result.status}`);
+      if (result.alternate) {
+        // No slot identifier: avoid attributing a delayed AF/3A to the next read.
+        log('Destination checks stopped after AF/3A. Current region remains unknown; reconnect before another batch.');
+        break;
+      }
       if (query.setup) {
         if (result.status !== 'reply received') throw new Error(`${query.name}: required setup reply not received`);
         if (query.echo !== undefined && result.fields[1] !== query.echo) {
@@ -809,7 +819,9 @@ async function identifyDrive() {
       $('region').textContent = regionName(destination[4]);
       log(`Current destination: ${regionName(destination[4])} (value ${destination[4]}); target US = 1`);
     }
-    const readiness = regionReadiness(model, firmware, destination);
+    const readiness = results.some(item => item.alternate)
+      ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
+      : regionReadiness(model, firmware, destination);
     $('regionStatus').textContent = readiness;
     log(readiness);
   } catch (e) {
