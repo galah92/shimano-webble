@@ -227,3 +227,8 @@ Build .21 adds M reply classification and per-attempt evidence handling for the
 future updater, tested against Java envelope fixtures and notification-order
 cases. It does not send firmware. Checkpoint freshness, the timed transport,
 D reply handling and paired handover/recovery still require implementation.
+
+Build .22 implements the timed M query exchange with immediate-reply handling,
+separate write/reply deadlines, abort and listener cleanup. Fake-clock tests
+cover failure and race cases. It remains disconnected from the bike controls;
+firmware data transfer and automatic retries are not enabled.

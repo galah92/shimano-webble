@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.21';
+const BUILD = '2026-09-09.22';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -491,6 +491,62 @@ function mFirmwareReplyWindow(querySequence, dataSequence, checkpoint = false) {
   };
 }
 // END M FIRMWARE REPLIES
+
+// BEGIN M FIRMWARE QUERY
+// C0776xk.F0 query phase only. Caller supplies an exclusive, already subscribed
+// transport and explicit sequence bytes. No data write, retry or bootloader entry.
+async function queryMFirmwareBlock({write, subscribe, signal, querySequence, dataSequence, checkpoint = false}) {
+  const evidence = mFirmwareReplyWindow(querySequence, dataSequence, checkpoint);
+  if (signal?.aborted) throw new Error('Firmware query aborted');
+  return new Promise((resolve, reject) => {
+    let settled = false, writeCompleted = false, unsubscribe = null;
+    let writeTimer = null, replyTimer = null;
+    const cleanup = () => {
+      clearTimeout(writeTimer); clearTimeout(replyTimer);
+      signal?.removeEventListener('abort', abort);
+      const remove = unsubscribe;
+      unsubscribe = null;
+      if (remove) remove();
+    };
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      const result = evidence.close(error?.message);
+      try { cleanup(); } catch (cleanupError) { error ||= cleanupError; }
+      if (error) reject(error); else resolve(result);
+    };
+    const evaluate = () => {
+      if (settled || !writeCompleted) return;
+      const result = evidence.status();
+      if (result.state === 'failed') finish(new Error(result.error));
+      else if (result.state === 'evidence-complete') finish();
+    };
+    const abort = () => finish(new Error('Firmware query aborted; reconnect before another attempt'));
+    try {
+      // Registration precedes the query write so immediate notifications are retained.
+      unsubscribe = subscribe(raw => {
+        if (settled) return;
+        try { evidence.receive(raw); evaluate(); }
+        catch (error) { finish(error); }
+      });
+      if (typeof unsubscribe !== 'function') throw new Error('Transport must return a listener cleanup function');
+      if (settled) { cleanup(); return; }
+      signal?.addEventListener('abort', abort, {once: true});
+      if (signal?.aborted) { abort(); return; }
+      // Application bound for an ATT promise that never settles; not a retry trigger.
+      writeTimer = setTimeout(() => finish(new Error('Firmware query ATT write timed out; reconnect before another attempt')), 8000);
+      Promise.resolve(write(Uint8Array.of(0x0b, querySequence, 3, dataSequence))).then(() => {
+        if (settled) return;
+        writeCompleted = true;
+        clearTimeout(writeTimer);
+        // Source F0 starts its 3000ms reply deadline after successful ATT completion.
+        replyTimer = setTimeout(() => finish(new Error('Firmware query reply timed out')), 3000);
+        evaluate();
+      }, error => finish(error instanceof Error ? error : new Error(String(error))));
+    } catch (error) { finish(error); }
+  });
+}
+// END M FIRMWARE QUERY
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.

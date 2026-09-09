@@ -1439,3 +1439,27 @@ raw/escaped acknowledgements, both ACK/checkpoint orders, status-only traffic,
 wrong sequence, checksum failure with ACK in the same notification, failure
 remaining sticky, timeout/close behavior, and stale ACK from another attempt.
 Packet-codec, file-check and Chromium startup/picker regression checks pass.
+
+## Build .22: timed M query exchange
+
+Added an unwired `queryMFirmwareBlock` for the source F0 query phase. It accepts
+an exclusive transport's write/subscribe functions and an abort signal; it
+registers before sending 0B [query-sequence, 03, data-sequence]. Immediate RX is
+buffered by the reply accumulator until ATT succeeds. ATT failure overrides
+that buffered evidence. The source's three-second reply deadline starts after
+ATT completion. An additional application eight-second bound handles an ATT
+promise that never settles; it requires reconnect, never automatic retry.
+
+All paths remove listeners and timers, including synchronous write errors,
+abort, query rejection, checksum failure and timeout. A late ATT completion
+cannot restart a closed attempt. The function sends only the query when called;
+no application control calls it, and no data writes or bootloader entry were
+added. Success reports reply evidence, including the unresolved checksum
+correlation flag, not permission to advance a flash.
+
+Fake-clock tests cover immediate notification, notification followed by ATT
+failure, slow ATT followed by a full three-second reply window, stalled ATT,
+late completion, ACK/checkpoint ordering, checksum rejection, buffered query
+error precedence, wrong sequences/status traffic, abort and synchronous failure.
+Existing envelope, file-check and Chromium startup tests pass. Next work is
+the M data/retry worker and D protocol handling, then paired handover/recovery.
