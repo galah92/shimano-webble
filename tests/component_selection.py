@@ -11,12 +11,28 @@ def images():
     d[:16] = b'\xff' * 16
     d[16:19] = bytes([0x43, 0, 0])
     d[40:43] = bytes([34, 0, 4])
+    d[47:50] = bytes([0x42, 0, 0])
     m[8:11] = bytes([0x42, 1, 0])
     m[12:16] = bytes([255, 255, 34, 0])
+    m[16:19] = bytes([0x42, 0, 0])
     return d, m
 
 
 class ComponentSelectionTests(unittest.TestCase):
+    def test_peer_minimum_blocks_mixed_versions_even_when_forced(self):
+        d, m = images()
+        m[8:11] = bytes([0x44, 8, 0])
+        m[16:19] = bytes([0x44, 6, 0])
+        for forced in (False, True):
+            result = plan(d, m, '4.5.0.0', '4.4.8.0', force_equal=forced)
+            self.assertEqual(result['pair_check']['checks'], {'D': True, 'M': False})
+            self.assertIsNone(result['normal_mode_order'])
+        d[16:19] = bytes([0x45, 0, 0])
+        d[47:50] = bytes([0x44, 8, 0])
+        self.assertTrue(plan(d, m)['pair_check']['passed'])
+        m[16:19] = bytes([255, 255, 255])
+        self.assertIsNone(plan(d, m, '4.5.0.0', '4.4.8.0')['normal_mode_order'])
+
     def test_independent_versions_and_order(self):
         for d, m, order in [('4.5.0.0', '4.2.1.0', ['D']),
                             ('4.3.0.0', '4.1.0.0', ['M']),

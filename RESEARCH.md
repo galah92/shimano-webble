@@ -1257,3 +1257,43 @@ pair establishes a D-only preparation procedure. Preserving M would be a
 distinct workflow requiring evidence, not a faithful consequence of the
 observed installer call. No additional live probe or repeated US setter
 is needed to answer this source-level question.
+
+## E5000 file-level D/M minimum-version checks
+
+`Ka.i` explicitly recognizes DUE5000-D (the obfuscated name in its third D
+branch decodes to that string). It reads current version at offset 16,
+minimum peer version at offset 47, and a separate three-byte field at 44.
+The E5000 M branch reads current version at offset 8 and minimum peer at 16.
+`Th.j3` compares M current (`ia2.f`) against D minimum (`ia.g`), and D current
+(`ia.f`) against M minimum (`ia2.g`), rejecting either shortfall. These are
+the standard E5000 branches, not its separate NATIVE_SPEC early-return branch.
+`Ja.a` parses the three-byte packed versions; `Ja.c` uses decimal weights
+major*1000000 + minor*10000 + patch*100 + build. This differs from `Mh.l`'s
+packed comparison and is preserved in the offline pair check.
+
+Measured on the private, classified raw images:
+
+| Image | Minimum peer version |
+| --- | --- |
+| D 4.3.0.0 | M 4.2.0.0 |
+| M 4.2.1.0 | D 4.2.0.0 |
+| D 4.5.0.0 (unwrapped restoration) | M 4.4.8.0 |
+| M 4.4.8.0 (restoration) | D 4.4.6.0 |
+
+Both complete archived pairs satisfy those two comparisons. Both mixed pairs
+fail: D 4.3.0 with M 4.4.8 fails M's D minimum, while D 4.5.0 with M 4.2.1
+fails D's M minimum. This rules out treating retention of the current M with
+the candidate D as satisfying eTuning's file-level compatibility check.
+It does not establish the actual downloaded preparation contents or prove
+that either complete pair can be flashed safely on this bike.
+
+`inspect_firmware.py` now reports `minimum_peer_version` for these known raw
+layouts. `compare_components.py` reports both directional checks and suppresses
+the modeled order on failure or an unrecognized minimum, even when forced.
+Five component-selection tests and ten existing header/transfer tests pass.
+Actual candidate/restoration and both mixed pairs were also checked offline.
+
+This is a check of the intended final pair, not an assertion that a transient
+state between M and D writes is bootable. The original worker's ordering,
+reset suppression and recovery still require validation as a complete
+operation. No live commands were added or firmware files published.

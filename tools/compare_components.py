@@ -27,6 +27,21 @@ def compare(target, installed):
     return 'upgrade' if target > installed else 'downgrade' if target < installed else 'equal'
 
 
+def pair_check(d, m):
+    """Ka.i/Th.j3 E5000: each peer must meet the image's minimum version.
+
+    Ja.c uses decimal weights, unlike Mh.l's packed version comparison.
+    """
+    def rank(v):
+        major, minor, patch, build = version(v)
+        return major * 1000000 + minor * 10000 + patch * 100 + build
+    checks = {}
+    for component, header, peer in [('D', d, m), ('M', m, d)]:
+        minimum = header['minimum_peer_version']
+        checks[component] = None if minimum is None else rank(peer['version']) >= rank(minimum)
+    return dict(checks=checks, passed=all(v is True for v in checks.values()))
+
+
 def plan(d_data, m_data, installed_d=None, installed_m=None, force_equal=False):
     d, m = inspect(d_data), inspect(m_data)
     if d['component'] != 'D' or m['component'] != 'M':
@@ -35,9 +50,10 @@ def plan(d_data, m_data, installed_d=None, installed_m=None, force_equal=False):
     for name, header, installed in [('M', m, installed_m), ('D', d, installed_d)]:
         components[name] = dict(target=header, installed=installed,
                                 comparison=compare(header['version'], installed))
-    unresolved = any(c['comparison'] in ('read-required', 'recovery-state-unresolved')
+    compatibility = pair_check(d, m)
+    unresolved = not compatibility['passed'] or any(c['comparison'] in ('read-required', 'recovery-state-unresolved')
                      for c in components.values())
-    return dict(components=components, force_equal=force_equal,
+    return dict(components=components, force_equal=force_equal, pair_check=compatibility,
                 normal_mode_order=None if unresolved else [name for name, c in components.items()
                     if c['comparison'] != 'equal' or force_equal],
                 installable=False,

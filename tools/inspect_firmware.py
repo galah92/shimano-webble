@@ -29,6 +29,7 @@ def inspect(data):
         raise ValueError('Unrecognized or ambiguous raw E5000 header; wrapped/encrypted assets are not supported')
     component, v = candidates[0]
     return dict(family='E5000/E50X0', component=component, version=v,
+                minimum_peer_version=version(data, 47 if component == 'D' else 16),
                 size=len(data), sha256=hashlib.sha256(data).hexdigest(),
                 validation='header classification only; authenticity, completeness and bike compatibility unverified')
 

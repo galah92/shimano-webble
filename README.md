@@ -179,6 +179,10 @@ Offline component selection: `python3 tools/compare_components.py D.dat M.dat`
 accepts optional `--installed-d` and `--installed-m` four-field versions. It
 compares each component separately and leaves the order unresolved if either
 installed version is unknown. Tests: `python3 tests/component_selection.py`.
+It also checks the images' minimum peer versions. A failed or unreadable peer
+requirement suppresses the transfer order, including under `--force-equal`.
+The old D 4.3.0 / current M 4.4.8 combination fails M's minimum D 4.4.6
+requirement. Passing this file-level check does not prove device compatibility.
 Use `--force-equal` to model the installer's equal-version rewrite flag;
 without it, equal versions are omitted. The observed `f9c41` installer caller
 passes this flag as true. Neither mode models failed-read/recovery selection
