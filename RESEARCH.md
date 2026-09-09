@@ -773,3 +773,30 @@ Before image selection, the physical motor model needs reconciliation with
 the original E7000 handoff and the repeated E50X0 / 4.5.0 BLE replies. The
 user was asked for the casing model. No stock/modified 4.3.0 image has been
 selected, and the US-region goal remains incomplete.
+
+## Electronic identity cross-check and build .16
+
+The user cannot identify the model from the casing. This is not a prerequisite
+for continuing research: the desktop library independently corroborates the
+existing numeric reply interpretation. In the previously hashed
+etubedatalinks.dll, `DuE5000Unit..cctor` (RVA 5A310) sets series number 34
+(hex 22), unit number 0 and model name DU-E5000. `DuE7000Unit..cctor`
+(RVA 5B73C) instead sets series number 33 (hex 21), unit number 0 and
+DU-E7000. Both include seven model-discrimination bytes. This supports the
+E5000-family interpretation of our repeated 22 00 replies, independently of
+eTuning's newer E50X0 family label. It does not identify every later variant.
+
+The desktop constant `DCC_CMD_PU_MD_MODEL_GET_C` is 7C. eTuning `Q5`
+connection state 43 (also state 21 in another path) sends the exact BLE query
+`00 16 7C 00`. `In.F6` case 126 consumes `00 16 7E` with at least ten
+bytes, passing the seven descriptor bytes starting at offset 3 to `y7`.
+That parser uses known variant strings rather than assuming the entire reply
+is a full model name. Some decompiled string-match helpers have missing
+mismatch branches; their reconstructed control flow is not used for inference.
+
+Build .16 appends this one read to the existing batch, retains the ten-byte
+descriptor response, and displays its raw bytes and ASCII without assigning a
+variant. The 7F error prefix is reported promptly; short replies, errors and
+timeouts do not replace the numeric identity or enable a firmware operation.
+Tests cover those four outcomes and verify the exact read-only 2AFE sequence.
+The descriptor's utility on this motor remains a live-test question.

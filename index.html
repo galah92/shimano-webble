@@ -354,7 +354,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.15';
+const BUILD = '2026-09-09.16';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -671,6 +671,9 @@ const INFO_QUERIES = [
   {name: 'Drive-unit firmware', tx: '2afe', rx: '2afd', packet: [0, 1, 0x2c, 0], prefix: [0, 1, 0x2e]},
   {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0], destination: true},
   {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1], destination: true},
+  // Q5 connection state 43; Shimano names this PU_MD_MODEL_GET.
+  // Keep the raw descriptor separate from the independently decoded family code.
+  {name: 'Motor model descriptor', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0x7c, 0], prefix: [0, 0x16, 0x7e], errorPrefix: [0, 0x16, 0x7f], fieldBytes: 10, minLength: 10},
 ];
 function queryInfo(s, query) {
   assertCurrent(s);
@@ -680,6 +683,7 @@ function queryInfo(s, query) {
     let written = false;
     let response;
     let alternate = false;
+    let deviceError = false;
     let settled = false;
     const started = performance.now();
     const traffic = {};
@@ -713,7 +717,7 @@ function queryInfo(s, query) {
       }
       s.controller.signal.removeEventListener('abort', onAbort);
       if (error) reject(error);
-      else resolve({name: query.name, alternate, status: alternate ? 'alternate response 00 16 AF 3A; meaning unresolved' : timedOut ? 'no matching reply' : response.length < (query.setup ? 2 : 5) ? 'short reply' : 'reply received', fields: alternate ? undefined : response});
+      else resolve({name: query.name, alternate, status: deviceError ? `device error: ${hex(response)}` : alternate ? 'alternate response 00 16 AF 3A; meaning unresolved' : timedOut ? 'no matching reply' : response.length < (query.minLength ?? (query.setup ? 2 : 5)) ? 'short reply' : 'reply received', fields: alternate || deviceError ? undefined : response});
     };
     const onAbort = () => finish(new Error('Disconnected during information batch'));
     const onValue = ev => {
@@ -721,11 +725,13 @@ function queryInfo(s, query) {
       // Only the exact header observed after both live destination reads.
       // AF/3A is not established as a generic error or an authorization status.
       const observedAlternate = query.destination && [0, 0x16, 0xaf, 0x3a].every((byte, i) => data[i] === byte);
-      if (!observedAlternate && !query.prefix.every((byte, i) => data[i] === byte)) return;
+      const observedError = query.errorPrefix?.every((byte, i) => data[i] === byte);
+      if (!observedAlternate && !observedError && !query.prefix.every((byte, i) => data[i] === byte)) return;
       if (response) return;
       alternate = observedAlternate;
-      response = data.slice(0, 5);
-      log(`RX ${query.rx.toUpperCase()} ${query.name}: ${hex(response)} (${data.length} bytes total; trailing bytes omitted)`);
+      deviceError = !!observedError;
+      response = data.slice(0, observedError ? 5 : (query.fieldBytes ?? 5));
+      log(`RX ${query.rx.toUpperCase()} ${query.name}: ${hex(response)} (${data.length} bytes total${response.length < data.length ? '; trailing bytes omitted' : ''})`);
       if (written) finish();
     };
     const timer = setTimeout(() => {
@@ -774,7 +780,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; six reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
+  log(`--- information batch start; build ${BUILD}; seven reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -818,6 +824,12 @@ async function identifyDrive() {
       }
     }
     const model = results.find(item => item.name === 'Drive-unit model')?.fields;
+    const descriptor = results.find(item => item.name === 'Motor model descriptor');
+    if (descriptor?.status === 'reply received') {
+      log(`Motor model descriptor ASCII: ${ascii(descriptor.fields.slice(3))}; raw field, variant mapping not assumed.`);
+    } else {
+      log('Motor model descriptor unavailable; no variant inferred.');
+    }
     const firmware = results.find(item => item.name === 'Drive-unit firmware')?.fields;
     if (model?.length >= 5 && firmware?.length >= 5) {
       const result = decodeDriveInfo(model, firmware);

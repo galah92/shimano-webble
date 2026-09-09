@@ -139,6 +139,13 @@ Synthetic write/readback tests: `python tests/region_write.py`.
 
 ## Firmware preparation research
 
+Build .16 adds a read-only **Motor model descriptor** query to the existing
+information batch. Connect, authenticate the session, then choose **Read region
+and compatibility** and copy the log. Motor authentication and the US setter
+are not needed for this check. A missing descriptor is not interpreted as a
+particular model. The casing label is helpful but not a prerequisite for
+continuing electronic identification.
+
 The source distinguishes D and M motor firmware components. The offline tool
 `python3 tools/inspect_firmware.py path/to/file.dat` classifies the known raw
 E5000 header layouts and prints version, size and SHA-256. It does not write

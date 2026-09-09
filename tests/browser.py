@@ -48,6 +48,13 @@ class Characteristic extends EventTarget {
       return;
     }
     if (this.short === '2afe') {
+      if (packet[1] === 22 && packet[2] === 124) {
+        const rx = characteristics['2afd'];
+        if (options.descriptorTimeout) return;
+        rx.value = value(options.descriptorError ? [0,22,127,58,0] : options.descriptorShort ? [0,22,126,0] : [0,22,126,0,0,0,0,0,0,0]);
+        rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        return;
+      }
       if (packet[1] === 22 && packet[2] === 172) {
         const rx = characteristics['2afd'];
         const slot = packet[3];
