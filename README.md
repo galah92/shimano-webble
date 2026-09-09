@@ -257,3 +257,12 @@ Build .26 adds the protocol-88 setup command exchange with corrected reply
 matching, parameter bounds and command-specific deadlines. It passes the
 108 matcher fixtures and timing/failure tests. It remains disconnected from
 bike controls; paired transfer and recovery are not yet ready for a motor test.
+
+Build .27 joins the D setup commands, bank changes and data/query exchanges
+into an unwired full-image data-phase worker. Synthetic images cover both
+reviewed D image lengths, the maximum modeled range, padding and sequence
+wraparound. Failures stop without resending or advancing; input bytes are
+snapshotted before the first write. Run `node tests/d_firmware_image.cjs`.
+The worker returns a checksum for later finish handling; it does not finish,
+reset, enter a bootloader or validate hardware compatibility. Paired image
+installation and recovery remain incomplete. No new bike test is needed.

@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.26';
+const BUILD = '2026-09-09.27';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -728,6 +728,33 @@ function sendDFirmwareCommand({write, subscribe, signal, payload}) {
     replyTimeoutMs: command[0] === 0x21 ? 40000 : 1200});
 }
 // END D FIRMWARE COMMANDS
+
+// BEGIN D FIRMWARE IMAGE WORKER
+// C1 + u1, E5000 data phase. Caller must own the transport exclusively and
+// validate the paired images and live bootloader before invoking this worker.
+// Unwired: no bootloader entry, finish, reset, recovery or UI caller yet.
+async function sendDFirmwareImage({data, write, subscribe, signal}) {
+  firmwareBlock(data, 'D', 0, 0); // Validate all image bounds before any write.
+  const image = Uint8Array.from(data);
+  const blocks = Math.ceil(image.length / 64);
+  let sequence = 255;
+  const nextSequence = () => (sequence = (sequence + 1) & 255);
+  const command = payload => sendDFirmwareCommand({write, subscribe, signal, payload});
+  for (const setup of dFirmwareAddressPlan(image.length, 0).initial) await command(setup.payload);
+  for (let blockIndex = 0; blockIndex < blocks; blockIndex++) {
+    if (signal?.aborted) throw new Error('Firmware operation aborted');
+    for (const setup of dFirmwareAddressPlan(image.length, blockIndex).boundary) await command(setup.payload);
+    const dataSequence = nextSequence();
+    await firmwareDataWrite(write, firmwareBlock(image, 'D', blockIndex * 64, dataSequence), signal);
+    await queryDFirmwareBlock({write, subscribe, signal, dataSequence,
+      querySequence: nextSequence(), blockIndex});
+    // Stop on any failed/uncertain exchange. Source reposition/retry is not
+    // implemented until notification freshness and recovery are established.
+  }
+  return {state: 'data-phase-complete', blocks, checksum: firmwareSum(image),
+    installable: false, finished: false, reset: false};
+}
+// END D FIRMWARE IMAGE WORKER
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.
