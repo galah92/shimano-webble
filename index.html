@@ -347,12 +347,13 @@ END HANDOFF NOTES
 </div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
+<div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.13';
+const BUILD = '2026-09-09.14';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -384,6 +385,7 @@ function controls() {
   $('disconnect').disabled = !connected;
   $('probe').disabled = busy || !connected;
   $('authenticate').disabled = busy || !connected || session?.authenticated || !crypto.subtle;
+  $('motorAuth').disabled = busy || !connected || !session?.motorEligible || session?.motorAttempted;
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || !connected || session?.authenticated;
 }
@@ -409,6 +411,7 @@ function resetSession(s) {
   $('drive').textContent = 'Not tested';
   $('region').textContent = 'Not read';
   $('regionStatus').textContent = 'Read bike information first';
+  $('motorStatus').textContent = 'Read bike information first.';
   protectedStatus('Not tested');
   controls();
   log('Disconnected');
@@ -828,6 +831,12 @@ async function identifyDrive() {
       $('region').textContent = regionName(destination[4]);
       log(`Current destination: ${regionName(destination[4])} (value ${destination[4]}); target US = 1`);
     }
+    s.motorEligible = model?.length >= 5 && firmware?.length >= 5 && destination?.length >= 5
+      && model[3] === 0x22 && model[4] === 0 && firmware[3] === 0x45 && firmware[4] === 0
+      && destination[4] <= 5;
+    $('motorStatus').textContent = s.motorEligible
+      ? 'Ready for a motor authentication experiment. No region or firmware changes.'
+      : 'Motor authentication experiment requires verified E50X0 / 4.5.0 and destination readback.';
     const readiness = results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
       : regionReadiness(model, firmware, destination);
@@ -852,6 +861,141 @@ async function identifyDrive() {
     if (session === s) { busy = false; controls(); }
   }
 }
+// Q5.J0 / X: 32-bit xorshift state seeded by the six serial bytes (little endian).
+// Seven request bytes consume two words; the unused eighth byte is discarded.
+function motorMaterial(serial) {
+  if (serial.length !== 6) throw new Error('Expected six motor serial bytes');
+  const lo = serial[0] | serial[1] << 8, mid = serial[2] | serial[3] << 8;
+  const hi = serial[4] | serial[5] << 8;
+  let u = (123456789 ^ (lo << 16 | mid)) >>> 0;
+  let v = 362436069, w = 521288629, t = ((hi | mid << 16) ^ 88675123) >>> 0;
+  const next = () => {
+    const x = (u ^ u << 11) >>> 0;
+    u = v; v = w; w = t;
+    t = (x ^ x >>> 8 ^ t ^ t >>> 19) >>> 0;
+    return t;
+  };
+  for (let i = 0; i < serial[1]; i++) next();
+  const take = length => {
+    const out = new Uint8Array(length);
+    let word;
+    for (let i = 0; i < length; i++) {
+      if (i % 4 === 0) word = next();
+      out[i] = word >>> ((i % 4) * 8);
+    }
+    return out;
+  };
+  return {request: take(7), key: take(16)};
+}
+// Private exchanges intentionally bypass queryInfo's payload/traffic logging.
+// Install the receiver before TX and require both ATT completion and the reply.
+function motorExchange(s, label, packets, accept) {
+  assertCurrent(s);
+  return new Promise((resolve, reject) => {
+    const rx = s.chars['2afd'];
+    let written = false, settled = false, response, sent = 0;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rx.removeEventListener('characteristicvaluechanged', onValue);
+      s.controller.signal.removeEventListener('abort', onAbort);
+      if (error) reject(error); else resolve(response);
+    };
+    const onAbort = () => finish(new Error('Disconnected during motor authentication'));
+    const onValue = ev => {
+      if (settled || response !== undefined) return;
+      try {
+        const value = accept(bytes(ev.target.value), sent);
+        if (value !== undefined) response = value;
+        if (written && response !== undefined) finish();
+      } catch (error) { finish(error); }
+    };
+    const timer = setTimeout(() => finish(new Error(`${label}: ${written ? 'reply' : 'ATT write'} timed out`)), 8000);
+    rx.addEventListener('characteristicvaluechanged', onValue);
+    s.controller.signal.addEventListener('abort', onAbort, {once: true});
+    (async () => {
+      try {
+        for (let i = 0; i < packets.length; i++) {
+          assertCurrent(s);
+          if (settled) return;
+          log(`TX motor ${label} ${i + 1}/${packets.length}: ${packets[i].length} bytes (payload omitted)`);
+          sent = i + 1;
+          await s.chars['2afe'].writeValueWithResponse(packets[i]);
+          if (settled) return;
+          if (i + 1 < packets.length) await new Promise(r => setTimeout(r, 100));
+        }
+        written = true;
+        if (response !== undefined) finish();
+      } catch (error) { finish(error); }
+    })();
+  });
+}
+async function authenticateMotor() {
+  if (busy || !session?.motorEligible || session.motorAttempted) return;
+  const s = session;
+  s.motorAttempted = true;
+  busy = true;
+  controls();
+  $('motorStatus').textContent = 'Authenticating motor…';
+  log('--- motor authentication start; region and firmware unchanged ---');
+  let serialReply, serial, material, challenge, encrypted;
+  const parts = new Map();
+  const has = (data, prefix) => prefix.every((b, i) => data[i] === b);
+  try {
+    serialReply = await motorExchange(s, 'serial read', [Uint8Array.of(0, 1, 0x3c, 0)], data => {
+      if (!has(data, [0, 1, 0x3e])) return;
+      if (data.length < 9) throw new Error('Short motor serial reply');
+      return data.slice(0, 9);
+    });
+    serial = serialReply.slice(3, 9);
+    if (serial.every(b => b === 0) || serial.every(b => b === 255)) throw new Error('Unavailable motor serial');
+    log('Motor serial received (value omitted).');
+    material = motorMaterial(serial);
+    challenge = await motorExchange(s, 'challenge request', [Uint8Array.of(0, 0x16, 0xd8, ...material.request)], data => {
+      if (has(data, [0, 0x16, 0xdb])) throw new Error('Motor replied DB; APK fallback requires separate investigation');
+      if (!has(data, [0, 0x16, 0xda])) return;
+      if (data.length < 10) throw new Error('Short motor challenge fragment');
+      const tag = data[3], size = tag === 0x34 ? 4 : 6;
+      if (![0x16, 0x26, 0x34].includes(tag)) throw new Error('Unexpected motor challenge fragment tag');
+      if (tag === 0x34 && (data[8] !== 255 || data[9] !== 255)) throw new Error('Invalid final motor challenge padding');
+      const part = data.slice(4, 4 + size), old = parts.get(tag);
+      if (old && !old.every((b, i) => b === part[i])) throw new Error('Conflicting motor challenge fragment');
+      parts.set(tag, part);
+      if (!old) log(`RX motor challenge fragment ${tag.toString(16).toUpperCase()} (payload omitted)`);
+      if (parts.size === 3) return Uint8Array.of(...parts.get(0x16), ...parts.get(0x26), ...parts.get(0x34));
+    });
+    encrypted = await encryptBlock(material.key, challenge);
+    assertCurrent(s);
+    const packets = [
+      Uint8Array.of(0, 0x16, 0xe0, 0x16, ...encrypted.slice(0, 6)),
+      Uint8Array.of(0, 0x16, 0xe0, 0x26, ...encrypted.slice(6, 12)),
+      Uint8Array.of(0, 0x16, 0xe0, 0x34, ...encrypted.slice(12), 255, 255),
+    ];
+    try {
+      await motorExchange(s, 'authentication response', packets, (data, sent) => {
+        if (has(data, [0, 0x16, 0xe3])) throw new Error('Motor replied E3; meaning unresolved');
+        if (!has(data, [0, 0x16, 0xe2])) return;
+        if (sent !== 3) throw new Error('Premature motor authentication completion marker');
+        if (!has(data, [0, 0x16, 0xe2, 255, 255])) throw new Error('Unexpected motor authentication completion fields');
+        return true;
+      });
+    } finally { for (const packet of packets) packet.fill(0); }
+    assertCurrent(s);
+    s.motorAuthenticated = true;
+    log('MILESTONE: motor authentication completion marker 00 16 E2 FF FF observed. Region-write permission and persistence remain unverified.');
+    $('motorStatus').textContent = 'Motor authentication completion observed. US-region write is not yet implemented.';
+  } catch (error) {
+    log(`Motor authentication stopped: ${error.message}. Reconnect before retrying.`);
+    if (session === s) disconnect();
+    $('motorStatus').textContent = 'Motor authentication not verified. See log; reconnect before retrying.';
+  } finally {
+    for (const value of [serialReply, serial, material?.request, material?.key, challenge, encrypted, ...parts.values()]) value?.fill(0);
+    log('--- motor authentication end; copy log now ---');
+    if (session === s) { busy = false; controls(); }
+  }
+}
+$('motorAuth').onclick = authenticateMotor;
 $('identify').onclick = identifyDrive;
 $('connect').onclick = connect;
 $('probe').onclick = runProbe;

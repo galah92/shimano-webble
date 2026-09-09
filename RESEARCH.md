@@ -561,3 +561,35 @@ transfer has been sent by the WebBLE app.
 Next implementation boundary: reconstruct and test the motor exchange and its
 success criterion before attempting a persistent region change. Firmware
 preparation remains a separate, substantially larger implementation task.
+
+## Build .14 motor authentication experiment
+
+The serial read is `00 01 3C 00`, with `00 01 3E` plus six serial bytes
+in little-endian order (bytes 3–8; minimum length nine). The previous note's
+ten-byte minimum for serial data was overly strict; ten bytes are required
+for the motor challenge fragments, not the serial field.
+
+Reconstruction: `Q5.J0` seeds the four 32-bit xorshift words from the serial,
+warms up by serial byte 1, emits seven request bytes (discarding the eighth
+byte of the second word), then emits sixteen key bytes starting at a fresh
+word. `Q5.q1` explicitly uses AES/ECB/NoPadding. `In.F6` assembles DA tags
+16/26/34 into six, six and four bytes, requiring FF FF padding on tag 34.
+The `AbstractC0640tg` getter/setter mapping confirms that concatenating those
+parts in tag order is the sixteen-byte plaintext used in state 71.
+
+The E0 response has tags 16/26/34, carries six/six/four ciphertext bytes, and
+pads the last fragment with FF FF. `In.F6` case E2 with FF FF in bytes 3/4
+sets both the APK's completion flag (`e1`) and atomic flag `a`. Build .14
+reports that marker, without claiming its permission scope. A marker before
+the third response write is treated as premature; ATT completion is required.
+
+The experiment is gated to the observed E50X0 / 4.5.0 with destination
+readback, one attempt per connection. DB, E3, malformed/incomplete/conflicting
+challenge fragments, unexpected completion fields, write failures and timeout
+stop the exchange and disconnect. It does not automatically execute the APK's
+conditional E8/D8 fallback or any persistent configuration operation. Sensitive
+serial, derived key, challenge and ciphertext values are omitted from all app
+logs and exports. Synthetic fixtures use invented serials and a fixed
+00..0F challenge; Python integer arithmetic and cryptography AES/ECB provide
+an independent reference for the browser computations. No captured motor
+authentication exchange exists, so actual bike validation is still required.

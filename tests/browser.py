@@ -77,7 +77,7 @@ class Characteristic extends EventTarget {
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
         if (options.motorTimeout || options.batchTimeout) return;
         rx.value = value(options.motorMalformed ? [0, 1, packet[2] + 2] :
-          [0, 1, packet[2] + 2, packet[2] === 28 ? 33 : 71, packet[2] === 28 ? 0 : 1, 0, 0, 0, 0, 0]);
+          [0, 1, packet[2] + 2, packet[2] === 28 ? (options.motorModel ?? 33) : (options.motorFirmware ?? 71), packet[2] === 28 ? 0 : (options.motorPatch ?? 1), 0, 0, 0, 0, 0]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
       };
       if (options.motorDelayed) setTimeout(send, 20); else send();

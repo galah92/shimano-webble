@@ -22,7 +22,7 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .13, tap **Read region and compatibility** after session verification.
+In build .14, tap **Read region and compatibility** after session verification.
 It runs the verified connection setup plus an experimental seven-step setup
 sequence found in both supplied eTuning versions. It then reads motor information
 and destination slots against the US target (value 1). Replies are required at
@@ -86,3 +86,19 @@ decoded as a region or treated as permission to change configuration.
 
 **Clear log** clears the visible and saved log history. It leaves the Bluetooth
 connection and bike state unchanged; subsequent messages continue logging normally.
+
+## Motor authentication experiment
+
+After a successful information batch reporting E50X0 / 4.5.0 and a valid
+destination, tap **Authenticate motor** once. It privately reads the serial,
+requests the motor challenge, validates all three fragments, computes the AES
+response and waits for the APK completion marker `00 16 E2 FF FF`.
+Copy the log after **motor authentication end**. This is an experiment; the
+marker does not establish permission to change region. No destination setter
+or firmware update is implemented. DB replies stop the run; the APK's E8
+fallback is not implemented until its effect is established.
+
+The shared goal is a verified phone-only US-destination workflow with readback
+and persistence checks. Current baseline: session setup and EU readback work.
+Motor authorization, region-write compatibility, persistence and actual speed
+behavior remain unverified. Firmware preparation is a separate open task.
