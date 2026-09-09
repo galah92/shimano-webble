@@ -1708,3 +1708,28 @@ Synthetic integration tests validate setup/data/finish order, original-byte
 checksum despite FF padding, the one-second delay, failures at each write,
 finish rejection, abort and separate reset semantics. They do not establish
 that firmware preparation, recovery or US destination works on the bike.
+
+## D bootloader identity exchange and field validation
+
+C0041b7.j1 issues commands 2E,2F,30,29,2A (hex), expecting 3A,3B,3C,35,36.
+I1 sends protocol 88 with four-byte command and a 3000-ms timeout. j1
+does not decode the first two version replies; they are retained as opaque
+responses in the browser. The unit response requires at least three bytes
+(opcode/family/unit); J1 requires four bytes per serial half and assembles
+bytes 1-3 from each into a six-byte field for A1. No serial is logged.
+
+For E5000 Ih.n, Ih.M accepts family 34 (22 hex) only. k1 compares embedded
+image family against the intended family, image unit against bootloader unit,
+and bootloader family against Ih.M. The browser's raw-header checker already
+limits the reviewed D layout to family34/unit0; checkDBootloaderImage now
+requires matching identity fields and a six-byte serial. This check alone
+does not authorize flashing or validate bootloader entry/recovery.
+
+Z6/I1 search for an expected opcode anywhere in the supplied response. The
+browser intentionally tightens this to a response prefix: raw, optional
+leading zero, or a recognized protocol-88 envelope. It never scans serial
+or unrelated payload bytes for a matching opcode. This is a deliberate
+bounded parsing policy, not exact reproduction of the loose source matcher;
+live bootloader framing still needs validation before use. Synthetic tests
+cover packet ordering, matching/nonmatching prefixes, truncated identity/serial
+fields, ATT failure stops, and compatible/incompatible image fields.

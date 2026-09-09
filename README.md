@@ -294,3 +294,10 @@ post-finish delay. Reset remains a separate bounded write whose result does
 not claim reboot or firmware verification. `node tests/d_firmware_session.cjs`
 checks ordering, checksum, failure stops and reset semantics; command tests
 cover the 3-second finish deadline. No firmware controls are enabled.
+
+Build .32 adds unwired D bootloader identity queries and image-field checks.
+Replies must start with the expected opcode after recognized framing, rather
+than contain it anywhere. Tests cover the five-query order, six-byte serial
+assembly, truncated replies and incompatible family/unit fields. Run
+`node tests/d_bootloader_identity.cjs`. Bootloader entry, serial-dependent
+setup and paired recovery are still required before a firmware test.

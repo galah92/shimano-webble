@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.31';
+const BUILD = '2026-09-09.32';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -922,6 +922,53 @@ async function requestDFirmwareReset({write, signal}) {
   return {state: 'reset-write-completed', rebootVerified: false, firmwareVerified: false, installable: false};
 }
 // END D FIRMWARE SESSION
+
+// BEGIN D BOOTLOADER IDENTITY
+function dBootloaderReplyMatch(raw, opcode, minimumLength) {
+  const candidates = [raw];
+  if (raw.length > 1 && raw[0] === 0) candidates.push(raw.slice(1));
+  for (const frame of firmwareEnvelopes(raw)) if (frame.protocol === 0x88) candidates.push(frame.payload);
+  // Stricter than Z6/I1's any-byte scan: expected opcode must begin a
+  // normalized response, never occur inside serial/telemetry bytes.
+  for (const data of candidates) {
+    if (data[0] !== opcode) continue;
+    return data.length < minimumLength ? {error: 'Truncated D bootloader response'} : {data: data.slice()};
+  }
+  return null;
+}
+function queryDBootloaderField({write, subscribe, signal, command}) {
+  const fields = {46: [58, 1], 47: [59, 1], 48: [60, 3], 41: [53, 4], 42: [54, 4]};
+  if (!Number.isInteger(command) || !Object.hasOwn(fields, command)) throw new Error('Unsupported D identity query');
+  const [opcode, minimumLength] = fields[command];
+  let match = null, closed = false;
+  const status = () => ({...match, state: !match ? 'waiting' : match.error ? 'failed' : 'evidence-complete', installable: false});
+  const evidence = {status, close() { closed = true; return status(); },
+    receive(raw) { if (!closed && !match) match = dBootloaderReplyMatch(raw, opcode, minimumLength); return status(); }};
+  return runFirmwareExchange({write, subscribe, signal, packet: Uint8Array.of(0x88, command, 0, 0, 0),
+    evidence, replyTimeoutMs: 3000});
+}
+// j1 query order. Serial is kept in memory for A1 setup, never logged here.
+async function queryDBootloaderIdentity({write, subscribe, signal}) {
+  const fields = [];
+  for (const command of [0x2e, 0x2f, 0x30, 0x29, 0x2a]) {
+    const reply = await queryDBootloaderField({write, subscribe, signal, command});
+    fields.push(reply.data);
+  }
+  return {family: fields[2][1], unit: fields[2][2],
+    serial: Uint8Array.of(...fields[3].slice(1, 4), ...fields[4].slice(1, 4)),
+    // j1 requests these but does not decode them; do not invent a version.
+    versionReplies: fields.slice(0, 2), installable: false};
+}
+function checkDBootloaderImage(data, identity) {
+  const header = firmwareHeader(data);
+  if (header.component !== 'D') throw new Error('Expected a D image');
+  if (!identity || identity.family !== 34 || identity.unit !== data[41] ||
+      !(identity.serial instanceof Uint8Array) || identity.serial.length !== 6)
+    throw new Error('D bootloader identity does not match the E5000 image');
+  return {state: 'D-identity-fields-match', family: identity.family, unit: identity.unit,
+    imageVersion: header.version, installable: false};
+}
+// END D BOOTLOADER IDENTITY
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.
