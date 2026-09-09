@@ -836,8 +836,9 @@ To reduce motor iterations, the next work is validated offline. The supplied
 - `M1` produces 70 inner bytes: sequence, 02, 00, 64 data bytes, block checksum,
   and little-endian block index. In the E5000 branch the index starts at zero.
 - `Hn.k0/i0/I` prepend command 0B; `C0483on.U` decodes to 2AFA. This implies a
-  71-byte data write at that layer, not the short 2AFE motor command transport.
-  Actual Chrome/SC-E7000 handling of this long write remains untested.
+  71-byte logical message, distinct from the short 2AFE motor command transport.
+  Hn.t0 then splits it into four ATT writes of at most 20 bytes (see outgoing
+  GATT transport correction below). Live firmware transfer remains untested.
 - `u1/m1` consume separate sequence values for data and query; the no-retry path
   starts with data sequence 0 and wraps after 255. The query refers to the data
   sequence. Source timeouts are 25 seconds for the first three blocks and 3 seconds
@@ -895,7 +896,7 @@ the byte sum from the window start through the last real byte.
 `M0` emits sequence / 11 / 00 / 64 data bytes for ordinary E5000 blocks.
 At a checkpoint it uses type 12 and appends checksum / 00 / 00, including when
 the checksum itself equals zero. With the outer Hn command 0B, those are 68-byte
-and 71-byte data writes. The final checksum is the original image byte sum
+and 71-byte logical messages, fragmented by Hn.t0 before ATT writes. The final checksum is the original image byte sum
 modulo 256. It is not the D codec and must not reuse its FF padding or footer.
 
 `Q9.d` computes recovery-window geometry, including partial final windows.
@@ -1135,7 +1136,9 @@ Re-audited the supplied ATT export: 1,084 rows, SHA-256
 For this capture's characteristic mapping, value handle 0025 (2AFA) has 60
 write requests, maximum 10 bytes; handle 002F (2AFE) has 241, maximum 7 bytes.
 There are no ATT prepare/execute-write operations in the export. None of these
-writes contains the modeled 68/71-byte M or 71-byte D data payloads. The short
+writes establishes a firmware data transfer. The modeled 68/71-byte messages
+are logical messages, not individual ATT writes; absence of long ATT writes
+alone is not evidence that firmware transfer is absent. The short
 0088 setup writes are not evidence of a completed firmware transfer. This
 capture cannot validate our firmware-data reply classification, checkpoint
 correlation, retransmission or recovery behavior. This is bounded to the
@@ -1754,3 +1757,35 @@ source command ordering, input mutation and failure at every one of the
 and 3000-ms deadlines. No live setup or transfer has occurred. Bootloader
 entry, paired asset authorization/validation, handover and recovery remain
 preconditions for an eventual user-facing updater.
+
+## Outgoing GATT transport correction — build .34
+
+The prior encoders and component tests operate on logical Hn.I messages.
+They did not include the Hn.i0 -> d0(z2=true) -> t0 transport step. This
+corrects the earlier description of 68/71-byte blocks as BLE writes.
+For the normal i0 path, t0 prepends 00 to logical messages of at most 18 bytes.
+For longer messages it repeats the protocol byte after a fragment header and
+carries at most 18 message bytes per fragment. Nonfinal headers are
+(index * 32 - 128) modulo 256; the final header is index * 32.
+A 71-byte message therefore produces ATT values of lengths 20/20/20/18,
+with headers 80/A0/C0/60. A 68-byte message ends with a 15-byte fragment.
+C0 chooses Android write type 1 (without response) for every long-message
+fragment; short messages use type 2 (with response). Short direct 2AFE
+messages take D0 and are unchanged. Long 2AFE framing is outside this adapter.
+
+Ten synthetic fixtures execute the original Java t0 for logical lengths
+1, 2, 5, 18, 19, 20, 37, 55, 68 and 71. The browser fragmenter matches every
+byte and write mode. The known live display query also provides a short-frame
+cross-check: logical 13 01 1C 00 becomes ATT 00 13 01 1C 00.
+No vendor source or firmware data is included in those fixtures.
+
+createFirmwareGattWriter snapshots all fragments before writing, serializes
+one logical message at a time and stops permanently after failure or abort.
+Its seven-second total deadline precedes the component workers' eight-second
+write deadline. Native GATT promises cannot be cancelled, but their late
+completion cannot send remaining fragments. Tests cover failure at every
+fragment, timeout, abort, close, concurrency rejection and input mutation.
+There is no retry after uncertain delivery. This adapter remains unwired;
+future component orchestration must use it, not pass logical messages directly
+to a characteristic. Bootloader entry, paired handover, recovery and actual
+firmware traffic validation remain unfinished. No bike test is requested.

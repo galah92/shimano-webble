@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.33';
+const BUILD = '2026-09-09.34';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -378,7 +378,8 @@ function firmwareBlock(data, component, offset, sequence) {
   const chunk = data.subarray(offset, end);
   const windowStart = Math.floor(offset / 1024) * 1024;
   const checkpoint = component === 'M' && end === Math.min(data.length, windowStart + 1024);
-  // Outer transport command 0B followed by the component-specific inner payload.
+  // Logical command 0B + component payload. The GATT adapter adds framing
+  // and splits this message into BLE writes; this is not a raw ATT packet.
   const packet = new Uint8Array(component === 'D' || checkpoint ? 71 : 68);
   packet.set([0x0b, sequence, component === 'D' ? 2 : checkpoint ? 0x12 : 0x11, 0]);
   if (component === 'D') packet.fill(255, 4, 68);
@@ -401,6 +402,58 @@ function firmwareTransferGeometry(data, component) {
     checksum: firmwareSum(data), checkpoints: component === 'M' ? Math.ceil(data.length / 1024) : 0};
 }
 // END FIRMWARE PACKET ENCODERS
+
+// BEGIN FIRMWARE GATT TRANSPORT
+// Hn.i0 -> d0(z2=true) -> t0, normal z3=false path. Short commands gain
+// a leading zero. Long messages repeat the protocol and carry 18-byte pieces.
+function firmwareGattFragments(characteristic, packet) {
+  if (!(packet instanceof Uint8Array) || !packet.length || packet.length > 71)
+    throw new Error('Logical firmware message outside modeled range');
+  if (characteristic === '2afe') {
+    if (packet.length > 20) throw new Error('Long 2AFE messages are not modeled');
+    return [{bytes: packet.slice(), withoutResponse: false}];
+  }
+  if (characteristic !== '2afa') throw new Error('Unsupported firmware characteristic');
+  if (packet.length <= 18) return [{bytes: Uint8Array.of(0, ...packet), withoutResponse: false}];
+  const fragments = [];
+  for (let offset = 1, index = 0; offset < packet.length; offset += 18, index++) {
+    const remaining = packet.length - offset;
+    const header = (index * 32 - (remaining > 18 ? 128 : 0)) & 255;
+    fragments.push({bytes: Uint8Array.of(header, packet[0], ...packet.slice(offset, offset + 18)), withoutResponse: true});
+  }
+  return fragments;
+}
+// Adapter is not connected to the UI. It must be recreated after reconnect.
+// A failed/aborted write poisons this instance: no fragment replay or resume.
+function createFirmwareGattWriter(characteristics, signal) {
+  let failed = false, active = null;
+  const close = () => { failed = true; active?.abort(); };
+  const write = async (name, packet) => {
+    if (failed || signal?.aborted) throw new Error('Firmware transport closed; reconnect required');
+    if (active) throw new Error('Concurrent firmware messages are not permitted');
+    const fragments = firmwareGattFragments(name, packet);
+    const characteristic = characteristics[name];
+    for (const fragment of fragments) {
+      const method = fragment.withoutResponse ? 'writeValueWithoutResponse' : 'writeValueWithResponse';
+      if (typeof characteristic?.[method] !== 'function') throw new Error(`Firmware transport requires ${method}`);
+    }
+    const controller = new AbortController(); active = controller;
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, {once: true});
+    // Finish before the workers' 8-second logical-write deadline. Native GATT
+    // promises cannot be cancelled, but late completion must not send a tail.
+    const timer = setTimeout(abort, 7000);
+    try {
+      for (const fragment of fragments) {
+        const method = fragment.withoutResponse ? 'writeValueWithoutResponse' : 'writeValueWithResponse';
+        await firmwareDataWrite(bytes => characteristic[method](bytes), fragment.bytes, controller.signal);
+      }
+    } catch (error) { failed = true; throw error; }
+    finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); active = null; }
+  };
+  return {write, close};
+}
+// END FIRMWARE GATT TRANSPORT
 
 // BEGIN M FIRMWARE REPLIES
 // Hn.K/C/J returns candidate interpretations, not a unique validated frame.

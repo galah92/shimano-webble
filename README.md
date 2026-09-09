@@ -307,3 +307,11 @@ transfer and finish. Mismatches stop before setup; any failed exchange stops
 the sequence. `node tests/d_component_workflow.cjs` covers the combined
 operation and failure at every write. The operation does not enter the
 bootloader, reset or recover a failed paired update, and has no UI caller.
+
+Build .34 corrects the outgoing firmware transport: existing encoders produce
+logical messages, which need short-command framing or fragmentation before
+BLE writes. The new unwired adapter matches ten original-Java synthetic
+vectors and stops after any uncertain fragment delivery. Run
+`node tests/firmware_gatt.cjs`. Earlier component simulations cover logical
+exchanges; they do not establish a working live firmware transfer. The updater
+still requires bootloader entry, paired handover and recovery validation.
