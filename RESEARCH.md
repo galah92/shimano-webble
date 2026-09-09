@@ -660,3 +660,35 @@ result. The desktop loop itself is not a reason to add unbounded WebBLE retries.
 The live EA response shape remains unverified; build .14 deliberately retains
 its single-attempt behavior while awaiting the first motor-authentication log.
 This finding does not resolve the separate eTuning firmware-preparation gate.
+
+## Live build .14 motor authentication and build .15 setter experiment
+
+The user's 2026-09-09 08:41 UTC test independently reproduced E50X0 / 4.5.0,
+factory and OEM destination 0, then completed the motor exchange:
+serial read, DA tags 16/26/34, three E0 fragments, and E2 FF FF after the
+third fragment. No E8 fallback was required. Sensitive values were omitted
+from the log. This validates the implemented exchange on this bike; it does
+not prove destination-write permission or remove the APK preparation gate.
+
+The next bounded experiment uses the exact mobile setter from eTuning 3.0.7
+`w.z` (lines 483–489): `00 16 A8 01 01`. `In.F6` case -86 recognizes the
+`00 16 AA` header and invokes the region activity callback; it does not inspect
+further response fields. The desktop setter agrees on group 16, opcode A8,
+OEM selector 1 and destination value 1, though its transport has additional
+parameter padding. The mobile five-byte packet is used for BLE.
+
+Build .15 offers a separate explicit button, restricted to the observed
+model/firmware, successful motor authentication and EU readback. A fresh OEM
+read must still return EU before the one permitted setter invocation.
+AA is logged as an acknowledgement, AB as an error with its code. After AA,
+or no acknowledgement within 20 seconds with completed ATT, a new AC 01
+request must return AE 01 01 to report US readback. A write failure, malformed
+error, disconnect or missing/invalid readback never produces that milestone.
+Unknown write outcomes require reconnect/readback rather than retrying.
+
+This is explicitly an experiment outside the newer APK's direct-change policy
+for 4.5.0. It tests whether motor authentication is sufficient for the known
+setter; rejection or unchanged readback leaves preparation unresolved. No
+firmware operation, other destination value, factory-slot setter or speed
+setter is available. Persistence requires a later read after a user-confirmed
+bike power cycle. No software-only test can establish the actual speed outcome.

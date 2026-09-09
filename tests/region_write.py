@@ -1,0 +1,111 @@
+"""US destination write behavior with synthetic BLE replies; no hardware required."""
+import unittest
+from playwright.sync_api import sync_playwright
+import browser
+
+class RegionWriteTests(unittest.TestCase):
+    open = browser.BrowserTests.open
+
+    @classmethod
+    def setUpClass(cls):
+        cls.playwright = sync_playwright().start()
+        cls.browser = cls.playwright.chromium.launch()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.playwright.stop()
+
+    def prepare(self, **options):
+        self.open()
+        self.assertTrue(self.page.locator('#setUS').is_disabled())
+        self.page.evaluate('''async opts => {
+          window.regionWrites = []; window.regionReads = 0;
+          session.verified = session.motorEligible = session.motorAuthenticated = true;
+          session.currentDestination = 0;
+          for (const short of ['2afe','2afd','2af9','2afb'])
+            session.chars[short] = await session.service.getCharacteristic(UUID(short));
+          const rx = session.chars['2afd'];
+          const emit = data => {
+            rx.value = new DataView(Uint8Array.from(data).buffer);
+            rx.dispatchEvent(new Event('characteristicvaluechanged'));
+          };
+          session.chars['2afe'].writeValueWithResponse = async packet => {
+            const p = [...packet]; regionWrites.push(p);
+            if (p[2] === 172) {
+              regionReads++;
+              if (opts.readFailure && regionReads === 2) throw Error('Readback ATT failure');
+              if (opts.shortBefore && regionReads === 1) { emit([0,22,174,1]);return; }
+              emit([0,22,174,0,1]); // Other slot must never satisfy current-value read.
+              emit([0,22,174,1,regionReads === 1 ? (opts.before ?? 0) : (opts.after ?? 1)]);
+              return;
+            }
+            if (p[2] !== 168) throw Error('Unexpected write');
+            if (opts.disconnect) { bike.gatt.disconnect();return; }
+            const reply = () => {
+              emit([0,22,32,79,0]); // Background telemetry is not a write result.
+              if (opts.noAck || opts.stall) return;
+              emit(opts.shortError ? [0,22,171] : opts.rejected ? [0,22,171,opts.rejected] : [0,22,170]);
+            };
+            if (opts.delayed) setTimeout(reply, 20); else reply();
+            if (opts.writeFailure) throw Error('Setter ATT failure');
+            if (opts.stall) return new Promise(()=>{});
+          };
+          controls();
+        }''', options)
+
+    def run_attempt(self):
+        self.page.locator('#setUS').click()
+        # Simulate an additional programmatic tap while busy.
+        self.page.evaluate('setUS()')
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('--- US-region attempt end;')", timeout=25000)
+        self.assertFalse(self.errors)
+        self.assertTrue(self.page.locator('#setUS').is_disabled())
+
+    def packets(self):
+        return self.page.evaluate('regionWrites')
+
+    def test_authentication_and_destination_gates(self):
+        self.prepare()
+        for field, value in [('verified',False),('motorEligible',False),('motorAuthenticated',False),('currentDestination',1),('regionWriteAttempted',True)]:
+            self.page.evaluate('''([field,value]) => { window.previous = session[field];session[field]=value;controls();setUS(); }''',[field,value])
+            self.assertTrue(self.page.locator('#setUS').is_disabled())
+            self.assertEqual(self.packets(),[])
+            self.page.evaluate('field => {session[field]=previous;controls();}',field)
+
+    def test_success_requires_fresh_read_setter_and_us_readback(self):
+        for delayed in (False, True):
+            self.prepare(delayed=delayed); self.run_attempt()
+            self.assertEqual(self.packets(),[[0,22,172,1],[0,22,168,1,1],[0,22,172,1]])
+            self.assertIn('MILESTONE: US (1) read back', self.page.locator('#log').inner_text())
+            self.assertIn('Persistence and assistance speed remain unverified',self.page.locator('#log').inner_text())
+            self.context.close()
+
+    def test_changed_or_short_preflight_never_writes(self):
+        for opts in ({'before':1},{'before':2},{'shortBefore':True}):
+            self.prepare(**opts);self.run_attempt()
+            self.assertEqual(self.packets(),[[0,22,172,1]])
+            self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
+            self.context.close()
+
+    def test_ack_without_changed_value_is_not_success(self):
+        self.prepare(after=0);self.run_attempt()
+        self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
+        self.assertIn('EU read back',self.page.locator('#regionStatus').inner_text())
+
+    def test_failures_never_claim_success_or_retry(self):
+        for opts in ({'rejected':58},{'rejected':59},{'rejected':70},{'shortError':True},{'writeFailure':True},{'readFailure':True},{'disconnect':True},{'stall':True}):
+            with self.subTest(opts=opts):
+                self.prepare(**opts);self.run_attempt()
+                self.assertEqual(sum(p[2]==168 for p in self.packets()),1)
+                self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
+                if not opts.get('readFailure'): self.assertEqual(len(self.packets()),2)
+                self.context.close()
+
+    def test_missing_ack_still_reads_value_without_retry(self):
+        self.prepare(noAck=True);self.run_attempt()
+        self.assertEqual(len(self.packets()),3)
+        self.assertIn('No destination acknowledgement',self.page.locator('#log').inner_text())
+        self.assertIn('MILESTONE: US (1) read back',self.page.locator('#log').inner_text())
+
+if __name__ == '__main__': unittest.main()

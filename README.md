@@ -1,7 +1,8 @@
 # Shimano WebBLE
 
 A single-file Web Bluetooth diagnostic and experimental session-authentication
-console for Shimano STEPS. No configuration or firmware changes are implemented.
+console for Shimano STEPS, with an experimental US-destination setter.
+No firmware changes are implemented.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
@@ -22,7 +23,7 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .14, tap **Read region and compatibility** after session verification.
+Tap **Read region and compatibility** after session verification.
 It runs the verified connection setup plus an experimental seven-step setup
 sequence found in both supplied eTuning versions. It then reads motor information
 and destination slots against the US target (value 1). Replies are required at
@@ -32,8 +33,10 @@ Allow up to 80 seconds if queries go unanswered.
 
 Build .7 confirmed motor communication and reported E50X0 / 4.5.0. The newer
 APK's direct-region gate routes that combination through preparation; 4.3.0
-is the concrete preparation lead under investigation. No destination setter or
-firmware transfer is implemented yet. Missing or unknown destination values
+is the concrete preparation lead under investigation. Build .15 tests whether
+the documented setter works after verified motor authentication on 4.5.0;
+it does not establish that preparation can be skipped. No firmware transfer
+is implemented. Missing or unknown destination values
 are not treated as EU or permission to write. Reconnect for another batch.
 
 ## Develop
@@ -95,13 +98,35 @@ destination, tap **Authenticate motor** once. It privately reads the serial,
 requests the motor challenge, validates all three fragments, computes the AES
 response and waits for the APK completion marker `00 16 E2 FF FF`.
 Copy the log after **motor authentication end**. This is an experiment; the
-marker does not establish permission to change region. No destination setter
-or firmware update is implemented. DB replies stop the run; the APK's E8
+marker does not establish permission to change region. DB replies stop the run; the APK's E8
 fallback is not implemented. An older Shimano library identifies E8 as an
 authentication-lock release request; its applicability to this bike still
 needs verification.
 
+The user's build .14 log verified motor authentication on the real bike, with
+the three DA challenge fragments and E2 FF FF completion after the third E0.
+
+## US destination experiment (build .15)
+
+After session authentication, the information batch, and motor authentication,
+**Set region to US** becomes available only for the observed E50X0 / 4.5.0
+with EU readback. Tapping it attempts a persistent OEM destination change.
+It first reads the current destination again; only EU (0) permits the write.
+It sends `00 16 A8 01 01` once, watches for AA or AB, and reads back the
+current destination after AA or an acknowledgement timeout with completed ATT.
+US (1) readback is the value check. An acknowledgement alone is never success.
+Rejections, write failures and unverified readback stop the attempt. There is
+no automatic retry, downgrade, factory-slot write or separate speed setter.
+
+Copy the log after **US-region attempt end**. If US is read back, disconnect,
+turn the bike fully off and on, reconnect, authenticate the session, and run
+**Read region and compatibility** again. Copy that second log and report that
+the bike was power-cycled. The app cannot detect a physical power cycle; a US
+value in one session does not prove persistence or an assistance-speed outcome.
+
 The shared goal is a verified phone-only US-destination workflow with readback
-and persistence checks. Current baseline: session setup and EU readback work.
-Motor authorization, region-write compatibility, persistence and actual speed
+and persistence checks. Current baseline: session setup, EU readback and motor
+authentication work. Region-write compatibility, persistence and actual speed
 behavior remain unverified. Firmware preparation is a separate open task.
+
+Synthetic write/readback tests: `python tests/region_write.py`.
