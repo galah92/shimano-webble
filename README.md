@@ -185,8 +185,11 @@ destination remained EU (0). The sanitized baseline is in
 to compare candidate files with this observation. The archived D 4.3.0 / M 4.2.1
 pair selects two downgrades, M then D. This does not establish that both are
 required, that the pair matches eTuning's preparation package, or that it is
-installable. Exact restoration images for the observed versions are not yet
-available locally.
+installable. Exact-version restoration assets were subsequently recovered from
+the archived desktop 5.3.4 package: raw M 4.4.8.0 and wrapped D 4.5.0.0.
+Offline D unwrapping passed its embedded digest/length checks and header
+inspection. Transfer and recovery compatibility remain unverified; see
+`RESEARCH.md` for provenance and hashes. Vendor images remain outside this repo.
 
 Build .18 adds native D and M version reads to **Read region and compatibility**.
 They run automatically at the end of that batch; no extra button is needed.

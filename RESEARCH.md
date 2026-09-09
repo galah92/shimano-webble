@@ -1150,6 +1150,7 @@ The goal remains incomplete against the actual acceptance criteria:
 | Motor authentication | E2 FF FF observed repeatedly; does not establish region-write permission |
 | US destination change | Two direct writes rejected AB/3A; later read remained EU |
 | Preparation assets | Archived E5000 D 4.3.0 / M 4.2.1 present and classified; actual eTuning preparation pair and bike compatibility unverified |
+| Baseline restoration assets | Desktop 5.3.4 contains catalog-matched D 4.5.0 / M 4.4.8; D unwrapped with embedded digest/length verification; installation and recovery unverified |
 | Firmware update/recovery | Source-derived offline models and synthetic tests; no real transfer trace or controlled update validation |
 | Fresh US readback and power-cycle persistence | Not achieved |
 | Assistance-speed behavior | Not measured; no claim made |
@@ -1188,3 +1189,40 @@ package and obtain/validate restoration assets, followed by transfer,
 finalization and recovery validation. Repeating this information batch is not
 needed to resolve package contents. US readback, power-cycle persistence and
 assistance-speed behavior remain unachieved.
+
+## Exact-version restoration assets recovered from desktop 5.3.4
+
+The next offline inventory pass found both measured baseline versions in the
+archived Shimano desktop installer. Download source:
+https://assets.bettershifting.com/archive/E-tube_Proj_V_5_3_4.zip
+(linked by https://bettershifting.com/e-tube-project-archive/).
+ZIP size 309,035,074; SHA-256
+`004883e032a6f343e5c11d9b8b45b7f7c77e47ca5dd7259f488f913f6aaede4f`.
+Static extraction: ZIP -> PE overlay ISSetupStream -> embedded
+`E-TUBE PROJECT Professional V5.msi` -> Data1.cab. No installer was executed.
+
+| Bundled file | Bytes | MD5 matching the saved reven firmware catalog | SHA-256 |
+| --- | --- | --- | --- |
+| due5000_d.4.5.0.dat | 138132 | 1e72967e756ad36f096a9ccf9fd43498 | 363a43fc6997d384e0d723fa241b034146365e7c48f1fc8cfda027a948c5a6a7 |
+| due5000_m.4.4.8.dat | 119824 | 77ac236e16662211ed186bdf36b5cc63 | 9ea350e988345a9d9fb41c1363562ca190f1a8d5e1cc8a38c6373f69b877f033 |
+
+Catalog reference: https://github.com/reven-project/etubeapi/blob/master/fw-scraped.yml.
+Matching this catalog is corroboration, not publisher signature verification.
+The files remain in the private analysis directory, not the public repository.
+
+M passes the existing raw-header inspector as E5000/E50X0, M 4.4.8.0.
+D does not have the raw header. A private reconstruction of the supplied
+eTuning 3.0.7 `Ha.d` AES-CBC asset-unwrapping path produced 138,072 plaintext
+bytes. Both embedded plaintext MD5 and declared length matched before saving
+the result. Its header identifies E5000/E50X0, D 4.5.0.0; plaintext SHA-256:
+`44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb`.
+This was a bounded one-file reconstruction, not a general-purpose validated
+wrapper parser; the public raw inspector still rejects wrapped inputs.
+
+`compare_components.py` with the unwrapped D, raw M and measured baseline
+returns `equal` for both, normal order `[]`, and `installable: false`.
+Thus the prior missing-restoration-files gap is resolved at the asset/version
+level. The package does not establish the actual eTuning preparation pair,
+whether M must be downgraded, or whether browser transfer, reset and recovery
+will work. Those remain required before any firmware operation; US destination
+and persistence have still not been achieved.
