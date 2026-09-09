@@ -1956,3 +1956,39 @@ capture of real firmware traffic. The simulated reply model comes from the
 source analysis and still requires live validation. Native component/region
 verification after restart, recovery after interrupted paired changes and
 controlled entry on this bike remain incomplete. No firmware control is enabled.
+
+## Reconnected application readback — build .39
+
+readFirmwareBaseline uses five existing application reads after a fresh session
+has completed authentication and information-transport setup: model001C,
+serial003C, native0084 IC0, native0084 IC1, and destination16AC slot1. It
+checks family34/unit0, valid six-byte serial, supported native version fields,
+and destination range. No configuration, authentication or firmware command is
+sent by this reader. Each read has a3s reply deadline and stops on incomplete
+or failed delivery; the remaining reads are not sent after a timeout. Native
+D/M replies still lack IC echo, so attribution relies on the ordered response
+window and does not establish correlation against arbitrary delayed duplicates.
+
+Motor identity is SHA-256(private16-byte salt || six-byte serial). The same
+salt must be used for before/after comparison; it is not a passkey or an
+application-authentication credential. Raw serials and the fingerprint are
+not included in the public verification summary. The reader's internal serial
+and salt copies are cleared in finally, with the usual JS-copy limitation.
+
+verifyFirmwareAfterReconnect snapshots the expected fingerprint, reviewed
+native pair and EU/US destination, requires distinct previous/current session
+tokens, and compares a fresh readback. Tokens must come from actual connection
+lifecycle objects; caller-supplied token inequality alone cannot prove a BLE
+reconnect. The helper remains unwired. A different motor suppresses both
+firmware and region match flags even if it reports the expected values.
+Version/region mismatches are explicit results; malformed/failed reads throw.
+No reset, region write, repair, rollback or retry follows a mismatch.
+
+Tests drive the reader through the actual GATT adapter, checking all five
+physical read requests, identity mismatch, D/M/region mismatch, unchanged
+expectation despite caller mutation, same-session rejection, and ATT failure,
+truncation and timeout at each read. A native read timeout stops before the
+next IC read. Matching readback is not a power-cycle test: both
+powerCycleVerified and persistenceVerified remain false. The eventual UX
+must acquire fresh sessions and separately establish restart/persistence.
+This implements comparison logic without claiming a live installation result.

@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.38';
+const BUILD = '2026-09-09.39';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1290,6 +1290,60 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
       reset: false, recoveryVerified: false});
     throw error;
   } finally { writer?.close(); keys.fill(0); firmwarePairTransports.delete(owner); }
+}
+
+// Read-only application-protocol verification. Requires a freshly connected,
+// authenticated session with the already validated information setup complete.
+async function readFirmwareBaseline({write, subscribe, signal, identitySalt}) {
+  if (!(identitySalt instanceof Uint8Array) || identitySalt.length !== 16)
+    throw new Error('Expected a private 16-byte identity salt');
+  const salt = identitySalt.slice();
+  const read = (packet, prefix, length) => firmwareEntryExchange({write, subscribe, signal,
+    characteristic: '2afe', packet: Uint8Array.from(packet), timeout: 3000,
+    match: raw => {
+      if (!prefix.every((value, i) => raw[i] === value)) return null;
+      if (raw.length < length) return {error: 'Truncated application verification reply'};
+      return {fields: raw.slice(0, length)};
+    }});
+  let serial;
+  try {
+    const model = (await read([0,1,0x1c,0], [0,1,0x1e], 5)).fields;
+    if (model[3] !== 34 || model[4] !== 0) throw new Error('Verification motor family/unit mismatch');
+    serial = (await read([0,1,0x3c,0], [0,1,0x3e], 9)).fields.slice(3,9);
+    if (serial.every(b => b === 0) || serial.every(b => b === 255)) throw new Error('Unavailable verification motor serial');
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.of(...salt, ...serial)));
+    const identity = Array.from(digest, b => b.toString(16).padStart(2,'0')).join('');
+    // Native D/M replies have no IC echo. Serialize them and stop on the first
+    // incomplete exchange; never retry and then reuse the same reply window.
+    const native = [];
+    for (const ic of [0,1]) {
+      const reply = (await read([0,1,0x84,ic], [0,1,0x86], 6)).fields;
+      const version = firmwareVersion(reply, 3);
+      if (!version) throw new Error('Unsupported native verification version');
+      native.push(version.join('.'));
+    }
+    const destination = (await read([0,0x16,0xac,1], [0,0x16,0xae,1], 5)).fields[4];
+    if (destination > 5) throw new Error('Unknown verification destination');
+    return {family:34, unit:0, identity, dVersion:native[0], mVersion:native[1], destination};
+  } finally { salt.fill(0); serial?.fill(0); }
+}
+async function verifyFirmwareAfterReconnect({expected, previousConnection, connection, ...transport}) {
+  if (!connection || !previousConnection || connection === previousConnection)
+    throw new Error('Verification requires a distinct reconnected session');
+  if (!expected || !/^[a-f0-9]{64}$/.test(expected.identity) ||
+      !['4.3.0.0/4.2.1.0','4.5.0.0/4.4.8.0'].includes(`${expected.dVersion}/${expected.mVersion}`) ||
+      ![0,1].includes(expected.destination)) throw new Error('Expected reviewed versions, motor identity and EU/US destination');
+  // Capture the expectation before any read or asynchronous work.
+  const target = {...expected};
+  const actual = await readFirmwareBaseline(transport);
+  const identityMatches = actual.identity === target.identity;
+  return {state: identityMatches && actual.dVersion === target.dVersion && actual.mVersion === target.mVersion &&
+      actual.destination === target.destination ? 'reconnected-readback-matches' : 'reconnected-readback-mismatch',
+    identityMatches, firmwareReadbackMatches: identityMatches && actual.dVersion === target.dVersion && actual.mVersion === target.mVersion,
+    regionReadbackMatches: identityMatches && actual.destination === target.destination,
+    dVersion:actual.dVersion, mVersion:actual.mVersion, destination:actual.destination,
+    // A new BLE session alone does not prove a power cycle or persistence.
+    reconnectObserved:true, powerCycleVerified:false, persistenceVerified:false, installable:false};
 }
 // END FIRMWARE FILE CHECKS
 const STORAGE_KEY = 'shimano-webble-log-v2';

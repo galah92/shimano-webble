@@ -343,3 +343,10 @@ fragmentation, checkpoints, bank boundaries and failure before/after every
 write in the small pair. Failures now explicitly mark device state unknown:
 an unconfirmed finish does not prove the component stayed unchanged. Live
 entry, recovery and post-restart verification remain unfinished.
+
+Build .39 adds unwired read-only verification after reconnect: motor identity,
+both native versions and region. `node tests/firmware_readback.cjs` checks
+mismatches and every read failure through the GATT adapter. The caller must
+supply actual connection lifecycle tokens and the same private identity salt.
+Matching readback does not establish power-cycle persistence; that remains
+an explicit live verification requirement.
