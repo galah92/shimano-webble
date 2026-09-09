@@ -2028,3 +2028,25 @@ functions, checking each prerequisite's resulting state. Manual controls are
 under Advanced diagnostics. A pending baseline changes the guided click to
 verification-only; clearing that pending state cannot fall through into a
 second probe. Physical probe packets and its allowlist are unchanged.
+
+
+### Build .41 live probe result; .42 diagnostics
+
+The 2026-09-09 17:04 UTC user log confirms the guided setup, original native
+D4.5.0.0/M4.4.8.0/EU reads, and motor E2FFFF marker. Probe baseline completed,
+then M-update-entry began at 17:04:50.948 and stopped at 17:04:58.299. No reset
+was requested and the allowlisted probe has no image-transfer commands.
+Entry/exit is not established and post-probe readback was not included.
+
+The 7.35-second phase is consistent with the one-second mode delay, several
+ATT writes and six-second PCA reply timeout, but the old log cannot prove the
+failed substep. Hn.R source prefix matching was rechecked without identifying
+a justified packet change. Build .42 preserves the sequence and matchers and
+logs initial-status/set-mode/configured-status/pca-request, ATT completion,
+accepted bridge status and at most 12 distinct three-byte RX headers per step.
+No serial or authentication payload is exposed. The test now simulates a
+missing PCA reply and checks exact diagnostic attribution.
+
+Copy log now retains the latest probe's connection and subsequent reconnects
+when a probe start marker is present; previously latest-session slicing lost
+the first half of an entry/exit test. The browser test covers both halves.

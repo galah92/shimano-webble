@@ -60,6 +60,9 @@ with sync_playwright() as p:
         assert page.evaluate('calls')==expected
     page.reload()
     assert page.evaluate('probeRecord.verified')
+    page.evaluate("text => { logEl.textContent=text; }", "[one] Connected; first\n[one] Bootloader entry/exit probe started.\n[one] stopped\n[two] Connected; second\n[two] Post-probe readback: matches\n")
+    copied=page.evaluate('exportLog()')
+    assert 'stopped' in copied and 'Post-probe readback' in copied
     assert not errors,errors
     browser.close()
 print('Guided test UI: embedded profile, passkey gate, ordered automatic setup, verification-only restart, prerequisite failures and saved record passed')

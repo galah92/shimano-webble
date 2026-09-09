@@ -3,9 +3,9 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const {webcrypto}=require('node:crypto');
 const code=fs.readFileSync(__dirname+'/../index.html','utf8').split('// BEGIN FIRMWARE PACKET ENCODERS')[1].split('// END FIRMWARE FILE CHECKS')[0];
 const credentials=()=>Uint8Array.from({length:15},(_,i)=>i+1);
-async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,wrongBaseline=false}={}) {
+async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,wrongBaseline=false,dropPca=false}={}) {
  let now=0,id=0,listener=null,result,error,stage='',status=141,selector=13,baseline;
- const timers=new Map(),calls=[],stages=[],controller=new AbortController();
+ const timers=new Map(),calls=[],stages=[],diagnostics=[],controller=new AbortController();
  const ctx=vm.createContext({Uint8Array,Error,AbortController,crypto:webcrypto,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});
  vm.runInContext(code,ctx);
  const rx=p=>{if(stage!==drop&&listener)listener(Uint8Array.from(p));};
@@ -23,7 +23,7 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
    if(name==='2afa'&&logical[0]===3){status=128|(logical[1]&96)|selector;rx([35,0]);}
    else if(name==='2afa'&&logical[0]===4)rx([36,status]);
    else if(name==='2afa'&&logical[0]===6)rx([38,0]);
-   else if(logical[1]===50)rx([50,34,1]);
+   else if(logical[1]===50){if(!dropPca)rx([50,34,1]);}
    else if(stage==='M-bootloader-version'){assert.deepEqual(logical,[0,240,0,65,0,0,0]);rx([242,0,81,32,3,0]);}
    else if(stage==='D-bootloader-entry'){
     assert.equal(logical[0],136);const s=logical[1];assert(s>=1&&s<=5);assert.deepEqual(logical.slice(2),[3*s-2,3*s-1,3*s]);rx([0,136,17,s]);
@@ -36,7 +36,7 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
  }
  const characteristic=name=>({async writeValueWithResponse(p){native(name,p);},async writeValueWithoutResponse(){throw Error('Probe must never send fragmented firmware data');}});
  const promise=ctx.probeBootloaderRoundTrip({characteristics:{'2afa':characteristic('2afa'),'2afe':characteristic('2afe')},credentials:credentials(),identitySalt:new Uint8Array(16).fill(7),signal:controller.signal,
-  subscribe(fn){assert.equal(listener,null);listener=fn;return()=>listener=null;},onBaseline(b){baseline=b;},onStage(s){stage=s;stages.push(s);if(s==='D-update-entry'){selector=0;status=128;}}
+  subscribe(fn){assert.equal(listener,null);listener=fn;return()=>listener=null;},onDiagnostic(e){diagnostics.push(e);},onBaseline(b){baseline=b;},onStage(s){stage=s;stages.push(s);if(s==='D-update-entry'){selector=0;status=128;}}
  }).then(r=>result=r,e=>error=e);
  for(let i=0;i<1000&&!result&&!error;i++){
   await new Promise(setImmediate);if(result||error)break;
@@ -44,7 +44,7 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
   now=Math.min(...[...timers.values()].map(t=>t.at));for(const [key,t]of[...timers])if(t.at<=now){timers.delete(key);t.fn();}
  }
  await promise;assert.equal(timers.size,0);assert.equal(listener,null);
- return {result,error,calls,stages,baseline,ctx};
+ return {result,error,calls,stages,baseline,ctx,diagnostics};
 }
 (async()=>{
  const ok=await run();assert(!ok.error,ok.error?.message);assert(ok.result.resetRequested);assert.equal(ok.result.rebootVerified,false);assert.equal(ok.result.firmwareDataSent,false);assert(ok.baseline.identity);
@@ -55,6 +55,11 @@ async function run({fail=-1,late=false,abortAt=-1,drop=null,wrongIdentity=false,
  for(const drop of ok.stages.filter(s=>s!=='reset-request')){const r=await run({drop});assert(r.error);assert.equal(r.error.stage,drop);}
  const wrong=await run({wrongIdentity:true});assert(wrong.error);assert(!wrong.error.resetRequested);
  const original=await run({wrongBaseline:true});assert(original.error);assert.equal(original.calls.length,5);assert(!original.baseline);
+ const pca=await run({dropPca:true});assert(pca.error);assert.equal(pca.error.stage,'M-update-entry');
+ const stopped=pca.diagnostics.at(-1);assert.equal(stopped.step,'pca-request');assert.equal(stopped.reason,'reply-timeout');
+ assert(pca.diagnostics.some(e=>e.step==='pca-request'&&e.event==='ATT-completed'));
+ assert(ok.diagnostics.filter(e=>e.prefix).every(e=>e.prefix.length<=3));
+ assert(ok.diagnostics.filter(e=>e.packet).every(e=>e.packet[0]!==136));
  let count=0;const writer=ok.ctx.createBootloaderProbeWriter({'2afa':{async writeValueWithResponse(){count++;}},'2afe':{async writeValueWithResponse(){count++;}}},credentials());
  const forbidden=[['2afa',[136,40,0,0,0]],['2afa',[11,0,4,1]],['2afa',[11,0,2,...new Array(68).fill(0)]],['2afe',[0,22,168,1,1]],['2afa',[136,1,99,99,99]]];
  for(const command of [6,7,8,9,10,33,36,38,39])forbidden.push(['2afa',[136,command,0,0,0]]);
