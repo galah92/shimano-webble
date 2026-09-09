@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.29';
+const BUILD = '2026-09-09.30';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -657,10 +657,16 @@ function mFirmwareCommandPlan(command, args, targetSelector) {
       command === 39 && (args[1] !== 0 || args[2] !== 0))
     throw new Error('M command arguments outside modeled range');
   const payload = [0, 0xf0, 0, command, ...args];
-  // g0 relays through i0(13 hex) only when payload[0] equals selector.
-  return {characteristic: targetSelector === 0 ? '2afa' : '2afe',
-    packet: Uint8Array.from(targetSelector === 0 ? [0x13, ...payload.slice(1)] : payload),
+  return {...mFirmwareRoute(payload, targetSelector),
     replyTimeoutMs: deadlines[command], installable: false};
+}
+function mFirmwareRoute(payload, targetSelector) {
+  if (!Number.isInteger(targetSelector) || targetSelector < 0 || targetSelector > 255)
+    throw new Error('Expected verified unsigned target selector');
+  // Hn.g0 relays through i0(13 hex) when payload[0] equals selector.
+  const relay = payload[0] === targetSelector;
+  return {characteristic: relay ? '2afa' : '2afe',
+    packet: Uint8Array.from(relay ? [0x13, ...payload.slice(1)] : payload)};
 }
 function mFirmwareCommandMatch(raw) {
   const candidates = [raw, ...firmwareEnvelopes(raw).map(x => x.payload)];
@@ -693,6 +699,70 @@ function sendMFirmwareCommand({write, subscribe, signal, command, args, targetSe
     signal, packet: plan.packet, evidence, replyTimeoutMs: plan.replyTimeoutMs});
 }
 // END M FIRMWARE COMMANDS
+
+// BEGIN M FIRMWARE SESSION
+function mBootloaderVersionMatch(raw) {
+  const candidates = [raw, ...firmwareEnvelopes(raw).map(x => x.payload)];
+  for (const data of candidates) {
+    // Source d1 checks F2 and status, without constraining the intervening byte.
+    let versionIndex = -1, errorIndex = -1;
+    for (let i = 0; i + 2 < data.length; i++) {
+      if (data[i] !== 0xf2) continue;
+      if (data[i + 2] === 0x32 && errorIndex < 0) errorIndex = i;
+      if (data[i + 2] === 0x51 && versionIndex < 0) versionIndex = i;
+    }
+    if (errorIndex >= 0) return {error: `M bootloader version rejected; code ${data[errorIndex + 3] ?? 'unknown'}`};
+    if (versionIndex < 0) continue;
+    if (versionIndex + 5 >= data.length) return {error: 'Truncated M bootloader version'};
+    const packed = data[versionIndex + 3];
+    const version = [packed >> 4, packed & 15, data[versionIndex + 4], data[versionIndex + 5]];
+    const rank = (version[0] << 24) | (version[1] << 16) | (version[2] << 8) | version[3];
+    return {version, mode: rank > 0x02000200 ? 1 : 2}; // E5000, not EP.
+  }
+  return null;
+}
+function queryMBootloaderVersion({write, subscribe, signal, targetSelector}) {
+  const route = mFirmwareRoute([0, 0xf0, 0, 0x41, 0, 0, 0], targetSelector);
+  let match = null, closed = false;
+  const status = () => ({...match, state: !match ? 'waiting' : match.error ? 'failed' : 'evidence-complete', installable: false});
+  const evidence = {status, close() { closed = true; return status(); },
+    receive(raw) { if (!closed && !match) match = mBootloaderVersionMatch(raw); return status(); }};
+  return runFirmwareExchange({write: packet => write(route.characteristic, packet), subscribe, signal,
+    packet: route.packet, evidence, replyTimeoutMs: 6000});
+}
+function configureMFirmwareMode({write, subscribe, signal, mode}) {
+  if (mode !== 1 && mode !== 2) throw new Error('Expected M configuration mode 1 or 2');
+  let accepted = false, closed = false;
+  const status = () => ({state: accepted ? 'evidence-complete' : 'waiting', commandCorrelated: false, installable: false});
+  const evidence = {status, close() { closed = true; return status(); },
+    receive(raw) {
+      if (!closed) accepted ||= [raw, ...firmwareEnvelopes(raw).map(x => x.payload)]
+        .some(data => data.length >= 3 && data[1] === 0x84 && data[2] === 0);
+      return status();
+    }};
+  return runFirmwareExchange({write: packet => write('2afa', packet), subscribe, signal,
+    packet: Uint8Array.of(0x0b, 0, 4, mode), evidence, replyTimeoutMs: 2000});
+}
+// Requires bootloader entry and G0 target-slot selection beforehand. This
+// operation is deliberately unwired until paired identity/recovery is verified.
+async function transferMFirmware({data, nextSequence, write, subscribe, signal, targetSelector}) {
+  firmwareBlock(data, 'M', 0, 0);
+  if (typeof nextSequence !== 'function') throw new Error('Expected exclusive sequence allocator');
+  const image = Uint8Array.from(data);
+  const transport = {write, subscribe, signal, targetSelector};
+  const boot = await queryMBootloaderVersion(transport);
+  await sendMFirmwareCommand({...transport, command: 0x21, args: [0, 14, 0]});
+  await configureMFirmwareMode({...transport, mode: boot.mode});
+  await sendMFirmwareCommand({...transport, command: 0x24, args: [0, 0, 0xfc]});
+  await sendMFirmwareCommand({...transport, command: 0x26, args: [0, 0, 0]});
+  await firmwareDelay(150, signal);
+  const result = await sendMFirmwareImage({data: image, nextSequence, subscribe, signal,
+    write: packet => write('2afa', packet)});
+  await sendMFirmwareCommand({...transport, command: 0x27, args: [result.checksum, 0, 0]});
+  return {...result, state: 'M-transfer-finished', bootloaderVersion: boot.version,
+    mode: boot.mode, finished: true, reset: false, installable: false};
+}
+// END M FIRMWARE SESSION
 
 // BEGIN D FIRMWARE REPLIES
 // C0041b7.m1/Y6, E5000 branch (d=true). Shared Hn envelope candidates.

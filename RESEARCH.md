@@ -1663,3 +1663,26 @@ it. B0 remains to be integrated: its boolean comes from y0's C0677uk version
 comparison (strictly greater than packed 2.0.2.0), not the application-mode
 native M firmware version. B0 uses i0(0B) and Wi(6), which tests reply bytes
 1/2 for 84/00. Bootloader version/identity and handover remain unverified live.
+
+## M bootloader query, mode and session integration
+
+The private Java oracle executed C0776xk.b(): the bootloader-version request
+is [00,F0,00,41,00,00,00], sent by y0 via Hn.g0 with a 6000-ms timeout.
+Wi(5)/d1 look for F2 at an offset and status at offset+2; unlike C0/e1,
+they do not require the intervening byte to be zero. y0 rejects an observed
+32 marker before parsing 51. Its next byte contains major/minor nibbles,
+followed by patch and build. A short 51 result is an error, not version zero.
+
+C0677uk.a selects the newer mode only above 2.0.2.0, strictly. E5000 B0
+sends outer 0B with [00,04,01] above that boundary and [00,04,02] otherwise.
+Wi(6) tests bytes 1/2 for 84/00; its timeout is 2000 ms. The app now models
+these predicates and joins version/start/mode/address/clear, 150-ms delay,
+data and finish without reset. Synthetic integration tests cover both sides
+of the threshold and failing ATT at each of the ten writes for a 65-byte
+image. Existing full-image tests separately cover image geometry/checkpoints.
+
+This operation requires prior bootloader entry and target-slot selection.
+Source G0 calls Hn.s0(0) before y0; it is not implicitly performed by the
+new operation. The target selector still has to come from verified routing.
+Neither the version predicate nor a finish acknowledgement proves compatibility
+or persistence on this bike. Live update and recovery remain unvalidated.

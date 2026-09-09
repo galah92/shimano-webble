@@ -280,3 +280,11 @@ exchange, with explicit routing, argument bounds and source-specific deadlines.
 Tests cover relay/direct routes, early replies, rejection, timeout and abort.
 Run `node tests/m_firmware_command.cjs`. It does not enter update mode, reset
 the motor, or connect these commands to the data worker or user controls.
+
+Build .30 joins the M bootloader-version query, start, configuration mode,
+address/checksum setup, data phase and finish. It suppresses reset for later
+paired handover. Integration tests exercise the version threshold, both routes
+and ATT failure at every stage: `node tests/m_firmware_session.cjs`.
+Bootloader entry and target selection remain preconditions, not implemented
+by this operation. Paired identity validation and recovery are still needed;
+the operation has no bike-control caller.
