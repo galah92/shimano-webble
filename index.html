@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.27';
+const BUILD = '2026-09-09.28';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -591,6 +591,10 @@ async function sendMFirmwareBlock({data, offset, nextSequence, write, subscribe,
   // Snapshot before awaits so file selection/mutation cannot change a retry's bytes.
   firmwareBlock(data, 'M', offset, 0);
   const image = Uint8Array.from(data);
+  return sendMSnapshotBlock({image, offset, nextSequence, write, subscribe, signal});
+}
+// Internal worker: image belongs to the calling block/image operation.
+async function sendMSnapshotBlock({image, offset, nextSequence, write, subscribe, signal}) {
   const checkpoint = Math.min(image.length, offset + 64) === Math.min(image.length, (Math.floor(offset / 1024) + 1) * 1024);
   const sequence = () => {
     const value = nextSequence();
@@ -615,6 +619,25 @@ async function sendMFirmwareBlock({data, offset, nextSequence, write, subscribe,
   }
 }
 // END M FIRMWARE BLOCK WORKER
+
+// BEGIN M FIRMWARE IMAGE WORKER
+// Data phase only. Setup must establish FC0000 and clear the checksum first.
+// The paired coordinator supplies an exclusive sequence allocator. No UI caller.
+async function sendMFirmwareImage({data, nextSequence, write, subscribe, signal}) {
+  firmwareBlock(data, 'M', 0, 0);
+  if (typeof nextSequence !== 'function') throw new Error('Expected exclusive sequence allocator');
+  const image = Uint8Array.from(data);
+  let attempts = 0;
+  for (let offset = 0; offset < image.length; offset += 64) {
+    const result = await sendMSnapshotBlock({image, offset, nextSequence, write, subscribe, signal});
+    attempts += result.attempts;
+    // A checkpoint requires both ACK and checksum evidence before advancing.
+    // Uncertain/failing windows stop; source recovery is not implemented here.
+  }
+  return {state: 'data-phase-complete', ...firmwareTransferGeometry(image, 'M'),
+    attempts, installable: false, finished: false, reset: false};
+}
+// END M FIRMWARE IMAGE WORKER
 
 // BEGIN D FIRMWARE REPLIES
 // C0041b7.m1/Y6, E5000 branch (d=true). Shared Hn envelope candidates.

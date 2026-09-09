@@ -266,3 +266,11 @@ snapshotted before the first write. Run `node tests/d_firmware_image.cjs`.
 The worker returns a checksum for later finish handling; it does not finish,
 reset, enter a bootloader or validate hardware compatibility. Paired image
 installation and recovery remain incomplete. No new bike test is needed.
+
+Build .28 adds the unwired M image data-phase worker. It snapshots an image
+once, advances only after each block/checkpoint passes, and retains the bounded
+protocol-directed block retries. `node tests/m_firmware_image.cjs` exercises
+synthetic images at both reviewed M lengths and the maximum modeled range,
+sequence wrap, zero padding, checkpoint loss/rejection and uncertain writes.
+M setup, finish, paired handover and recovery remain separate unfinished work;
+no firmware operation is available from the bike controls.

@@ -1618,3 +1618,23 @@ ATT failure after RX, both reply deadlines starting after a slow ATT, rejection,
 ignored indexed results, stalled ATT, late completion, abort and no retries.
 M/D query, M worker, envelope, file-check and Chromium startup regressions pass.
 Next: D setup/data orchestration, then paired M/D handover and recovery.
+
+## Full-image data phases and remaining M setup
+
+Builds .27/.28 join D setup/bank/data/query operations and M data/query
+operations respectively. Full-image tests use deterministic synthetic bytes,
+including the reviewed image lengths, not a live bootloader or firmware update.
+M owns one snapshot for all blocks and retries. Its sequence allocator remains
+caller-supplied; this is not a claim of identical diagnostic-only sequence
+consumption in the APK. Both workers return data-phase completion only.
+Neither finishes, resets, enters a bootloader nor recovers from disconnect.
+
+Re-reading C0776xk.x0 lines 4291-4330 shows START (33 decimal), then B0,
+WRITE_ADDRESS_SET (36), CLEAR_CHECKSUM (38), 150 ms, E0 data, FINISH (39)
+with the original image checksum and conditional RESET (40). B0 constructs
+[00,04,mode], choosing mode 1 when the EP flag or its supplied boolean is
+true, otherwise mode 2. It uses a separate exchange from C0, so implementing
+only start/address/checksum commands would omit setup. C0 constructs
+[00,F0,00,command,arg0,arg1,arg2] and sends through Hn.g0 using its
+constructor-supplied transport selector. The selector, B0 input boolean and
+reply predicates still need validation before that setup is wired.
