@@ -159,3 +159,10 @@ are unsupported. Tests: `python3 tests/firmware_header.py`.
 Archived E5000 4.1.0 files were used only as parser reference samples. They
 are not preparation candidates. Exact physical motor identification, the
 4.3.0 candidate contents, transfer completion and recovery remain open.
+
+Offline D-transfer analysis: `python3 tools/plan_d_transfer.py path/to/D.dat`
+reports block counts, padding, checksums and bank boundaries. It cannot connect
+to or update a bike. `python3 tests/d_transfer.py` checks synthetic vectors from
+the supplied app's Java routines and boundary cases. M transfer and the correct
+D/M preparation pair remain under investigation; equal version numbers must
+not be assumed. No new motor test is needed for these offline changes.
