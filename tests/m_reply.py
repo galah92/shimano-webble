@@ -3,10 +3,24 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from m_reply import classify
+from m_reply import classify, envelopes
+import json
 
 
 class MReplyTests(unittest.TestCase):
+    def test_java_envelope_vectors(self):
+        vectors = json.loads(Path(__file__).with_name('m_envelope_vectors.json').read_text())
+        for vector in vectors:
+            with self.subTest(raw=vector['raw']):
+                actual = [[protocol, payload.hex()] for protocol, payload in envelopes(bytes.fromhex(vector['raw']))]
+                self.assertEqual(actual, vector['envelopes'])
+
+    def test_raw_and_escaped_ack_reach_same_classifier(self):
+        for raw in ('0b00c007', '000b00c007', 'bb0b00c007d3bb'):
+            events = [event for protocol, payload in envelopes(bytes.fromhex(raw))
+                      for event in classify(protocol, payload, 8, 7)]
+            self.assertEqual(events, [('data_ack', 7)])
+
     def test_query_and_data_sequences_are_distinct(self):
         self.assertEqual(classify(11, bytes([0,131,8,1]), 8,7), [('query_status',1)])
         self.assertEqual(classify(11, bytes([0,131,7,1]), 8,7), [])
