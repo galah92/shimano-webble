@@ -352,7 +352,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.12';
+const BUILD = '2026-09-09.13';
 const STORAGE_KEY = 'shimano-webble-log-v2';
 const UUID = n => `0000${n}-5348-494d-414e-4f5f424c4500`;
 const SERVICE_18FF = UUID('18ff');
@@ -653,6 +653,15 @@ const INFO_QUERIES = [
   {name: 'Captured setup 03', tx: '2afa', rx: '2af9', packet: [0, 3, 0], prefix: [0x23], setup: true, echo: 0, pause: 1000},
   {name: 'Captured setup 04', tx: '2afa', rx: '2af9', packet: [0, 4], prefix: [0x24], setup: true, pause: 1000},
   {name: 'Captured setup 06', tx: '2afa', rx: '2af9', packet: [0, 6, 0], prefix: [0x26], setup: true, echo: 0, pause: 200},
+  // Both supplied eTuning versions: connection states 34–40, before destination reads.
+  // This is the APK sequence (03 4B), not a replay of the capture's 03 4D / 88 writes.
+  {name: 'eTuning setup 0C', tx: '2afa', rx: '2af9', packet: [0, 0x0c, 1], prefix: [0x2c], setup: true, echo: 0, pause: 200},
+  {name: 'eTuning setup 03 4B', tx: '2afa', rx: '2af9', packet: [0, 3, 0x4b], prefix: [0x23], setup: true, echo: 0, pause: 1000},
+  {name: 'eTuning setup 04', tx: '2afa', rx: '2af9', packet: [0, 4], prefix: [0x24], setup: true, pause: 1000},
+  {name: 'eTuning setup 06 1F', tx: '2afa', rx: '2af9', packet: [0, 6, 0x1f], prefix: [0x26], setup: true, echo: 0, pause: 200},
+  {name: 'Restore setup 03', tx: '2afa', rx: '2af9', packet: [0, 3, 0], prefix: [0x23], setup: true, echo: 0, pause: 1000},
+  {name: 'Restore setup 04', tx: '2afa', rx: '2af9', packet: [0, 4], prefix: [0x24], setup: true, pause: 1000},
+  {name: 'Restore setup 06', tx: '2afa', rx: '2af9', packet: [0, 6, 0], prefix: [0x26], setup: true, echo: 0, pause: 200},
   {name: 'Drive-unit model', tx: '2afe', rx: '2afd', packet: [0, 1, 0x1c, 0], prefix: [0, 1, 0x1e]},
   {name: 'Drive-unit firmware', tx: '2afe', rx: '2afd', packet: [0, 1, 0x2c, 0], prefix: [0, 1, 0x2e]},
   {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0], destination: true},
@@ -760,7 +769,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; six reads plus three captured setup commands; US target = 1 ---`);
+  log(`--- information batch start; build ${BUILD}; six reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -796,7 +805,7 @@ async function identifyDrive() {
       if (query.setup) {
         if (result.status !== 'reply received') throw new Error(`${query.name}: required setup reply not received`);
         if (query.echo !== undefined && result.fields[1] !== query.echo) {
-          throw new Error(`${query.name}: response byte 1 differs from captured value; stopping`);
+          throw new Error(`${query.name}: response byte 1 differs from expected value; stopping`);
         }
         log(`${query.name}: reply observed; waiting ${query.pause} ms. Internal status semantics remain unverified.`);
         await new Promise(resolve => setTimeout(resolve, query.pause));

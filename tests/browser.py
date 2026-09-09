@@ -25,7 +25,7 @@ class Characteristic extends EventTarget {
     operations.push(['write', this.short, packet]);
     if (this.short === '2afa') {
       const rx = characteristics['2af9'];
-      if ([3, 4, 6].includes(packet[1])) {
+      if ([3, 4, 6, 12].includes(packet[1])) {
         if (options.initDisconnect === packet[1]) { bike.gatt.disconnect(); return; }
         if (options.initTimeout === packet[1]) return;
         rx.value = value([packet[1] + 32, options.initReject === packet[1] ? 1 : packet[1] === 4 ? 141 : 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -283,7 +283,7 @@ class BrowserTests(unittest.TestCase):
                 self.ready_for_identify(motorDelayed=delayed)
                 self.wait_batch()
                 self.assertEqual(self.page.locator('#drive').inner_text(), 'DU-E7000; firmware 4.7.1')
-                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]], ['write', '2afe', [0, 22, 172, 0]], ['write', '2afe', [0, 22, 172, 1]]])
+                self.assertEqual(self.writes()[3:], [['write', '2afa', [0, 19, 1, 28, 0]], ['write', '2afa', [0, 19, 1, 44, 0]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afa', [0, 12, 1]], ['write', '2afa', [0, 3, 75]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 31]], ['write', '2afa', [0, 3, 0]], ['write', '2afa', [0, 4]], ['write', '2afa', [0, 6, 0]], ['write', '2afe', [0, 1, 28, 0]], ['write', '2afe', [0, 1, 44, 0]], ['write', '2afe', [0, 22, 172, 0]], ['write', '2afe', [0, 22, 172, 1]]])
                 ops = self.page.evaluate('operations')
                 self.assertLess(ops.index(['subscribe', '2afd']), ops.index(self.writes()[3]))
                 self.assertFalse(self.errors)
@@ -294,7 +294,7 @@ class BrowserTests(unittest.TestCase):
             with self.subTest(option=option):
                 self.ready_for_identify(**{option: True})
                 self.page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'", timeout=12000)
-                self.assertEqual(self.writes()[8:], [['write', '2afe', [0, 1, 28, 0]]])
+                self.assertEqual(self.writes()[15:], [['write', '2afe', [0, 1, 28, 0]]])
                 self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
                 self.assertTrue(self.page.locator('#identify').is_disabled())
                 self.assertFalse(self.errors)
@@ -306,7 +306,7 @@ class BrowserTests(unittest.TestCase):
     def test_batch_continues_after_completed_writes_without_replies(self):
         self.ready_for_identify(batchTimeout=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 12)
+        self.assertEqual(len(self.writes()), 19)
         self.assertEqual(self.page.locator('#status').inner_text(), 'Connected')
         self.assertTrue(self.page.locator('#identify').is_disabled())
         self.assertIn('Drive-unit firmware: no matching reply', self.page.locator('#log').inner_text())
@@ -319,7 +319,7 @@ class BrowserTests(unittest.TestCase):
         self.assertIn('Display model: no matching reply', log)
         self.assertIn('Display firmware: no matching reply', log)
         self.assertIn('DU-E7000; firmware 4.7.1', log)
-        self.assertIn('2AF9 traffic: 4 notifications', log)
+        self.assertIn('2AF9 traffic: 11 notifications', log)
 
     def test_stalled_write_stops_even_with_matching_notification(self):
         self.ready_for_identify(stalledWrite=True)
@@ -331,7 +331,7 @@ class BrowserTests(unittest.TestCase):
     def test_short_replies_do_not_decode_but_batch_continues(self):
         self.ready_for_identify(motorMalformed=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 12)
+        self.assertEqual(len(self.writes()), 19)
         self.assertIn('Drive-unit model: short reply', self.page.locator('#log').inner_text())
         self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
         self.assertFalse(self.errors)
@@ -354,10 +354,27 @@ class BrowserTests(unittest.TestCase):
         self.assertFalse(any(x[1] == '2afe' and x[2][2] == 168 for x in self.writes()))
         self.assertIn('target US = 1', self.page.locator('#log').inner_text())
 
+    def test_extended_setup_follows_apk_order_before_destination(self):
+        self.ready_for_identify()
+        self.wait_batch()
+        packets = [x[2] for x in self.writes() if x[1] == '2afa' and x[2][1] in (3, 4, 6, 12)]
+        self.assertEqual(packets, [[0,3,0], [0,4], [0,6,0],
+            [0,12,1], [0,3,75], [0,4], [0,6,31], [0,3,0], [0,4], [0,6,0]])
+        self.assertEqual(self.page.locator('#region').inner_text(), 'EU')
+        self.assertFalse(any(x[2][1] == 136 for x in self.writes()))
+        self.assertFalse(self.errors)
+
+    def test_extended_setup_failure_stops_before_destination(self):
+        self.ready_for_identify(initReject=12)
+        self.wait_batch()
+        self.assertIn('eTuning setup 0C: response byte 1 differs', self.page.locator('#log').inner_text())
+        self.assertFalse(any(x[1] == '2afe' for x in self.writes()))
+        self.assertFalse(self.errors)
+
     def test_destination_alternate_stops_without_decoding_or_second_read(self):
         for delayed in (False, True):
             self.ready_for_identify(regionAlternate=True, regionAlternateDelayed=delayed)
-            self.page.wait_for_function("document.getElementById('log').textContent.includes('--- information batch end;')", timeout=5000)
+            self.page.wait_for_function("document.getElementById('log').textContent.includes('--- information batch end;')", timeout=12000)
             log = self.page.locator('#log').inner_text()
             self.assertIn('alternate response 00 16 AF 3A; meaning unresolved', log)
             self.assertIn('Current destination: not completed', log)

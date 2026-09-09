@@ -436,3 +436,51 @@ unknown semantics, and stops the remaining destination checks because the
 header has no verified slot identifier. Alternate payloads never enter region
 decoding. Verified model and firmware results remain visible. No new BLE
 commands or configuration writes are introduced; Copy log remains one button.
+
+## Build .13: compare the missing connection setup
+
+Build .11's live run confirmed `00 16 AF 3A 00` at 75 ms, with no other
+notification in that destination query window. It is reproducible, but still
+not a decoded region or an established authorization error.
+
+Both eTuning versions include the following controller writes at connection
+states 34–40, before their destination-read states 59/60:
+
+| State | 2AFA write | Expected reply prefix |
+| --- | --- | --- |
+| 34 | `00 0C 01` | `2C` |
+| 35 | `00 03 4B` | `23` |
+| 36 | `00 04` | `24` |
+| 37 | `00 06 1F` | `26` |
+| 38 | `00 03 00` | `23` |
+| 39 | `00 04` | `24` |
+| 40 | `00 06 00` | `26` |
+
+Source locations: old `d/a/a/a/c.java`, cases 34–40 (lines 1818–2017);
+new `Q5.java`, cases 34–40 (3996–4322), also repeated in `S0`
+(8338–8405). This establishes an ordinary connection-path sequence in both
+APKs, not its individual commands' internal semantics or sufficiency.
+
+The supplied capture's corresponding frames are 801, 806, 811, 814,
+831, 836 and 839. Frame 806 uses **4D**, whereas both APKs use **4B**.
+Frames 818/822/825/828 contain four additional controller writes beginning
+`00 88`; no matching literal was found in the examined APK Java sources.
+These differences mean the capture cannot be treated as an exact transcript
+of either supplied APK. The emitting app/version remains unverified.
+There are also intervening unit reads and controller operations before the
+first destination read at frame 1033; necessity is unresolved.
+
+Build .13 adds the seven APK steps after the already verified initial setup,
+then repeats model/firmware and destination reads. Each controller operation
+requires its matching response before continuing, with conservative pauses.
+The 4B request's `23 00` response is an expectation based on the existing
+03 response shape; it has not yet been observed live. Setup reply bytes are
+not interpreted as proof of configuration authorization. The unmatched 88
+writes are omitted. No destination setter or firmware transfer is added.
+
+Experiment interpretation: an AE destination reply would show this added
+sequence is sufficient with our preceding steps. AF/3A would show this
+sequence is insufficient; it would not establish that a downgrade is required.
+The motor identification discrepancy also remains open: repeated live results
+and the original capture agree with the APK decoder's E50X0 / 4.5.0, rather
+than the original handoff's E7000 / 4.7.1. No firmware image is selected.

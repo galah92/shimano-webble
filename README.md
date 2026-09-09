@@ -22,9 +22,11 @@ Build .4 verified both authentication stages and SC-E7000 identification on the
 real bike after the captured setup command. If authentication fails, reconnect
 before retrying.
 
-In build .11, tap **Read region and compatibility** after session verification.
-It runs the verified connection setup, reads display/motor information and both
-destination slots, and reports the current region against the US target (value 1).
+In build .13, tap **Read region and compatibility** after session verification.
+It runs the verified connection setup plus an experimental seven-step setup
+sequence found in both supplied eTuning versions. It then reads motor information
+and destination slots against the US target (value 1). Replies are required at
+every setup step; AF/3A stops destination checks with the region unknown.
 Keep Chrome foregrounded until **information batch end**, then copy the log.
 Allow up to 80 seconds if queries go unanswered.
 
