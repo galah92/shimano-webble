@@ -174,3 +174,10 @@ Offline M-transfer analysis: `python3 tools/plan_m_transfer.py path/to/M.dat`
 reports the separate M payload sizes and checksum windows. Tests:
 `python3 tests/m_transfer.py`. The tool does not schedule retries or implement
 recovery; its window calculations are for further protocol validation.
+
+Offline component selection: `python3 tools/compare_components.py D.dat M.dat`
+accepts optional `--installed-d` and `--installed-m` four-field versions. It
+compares each component separately and leaves the order unresolved if either
+installed version is unknown. Tests: `python3 tests/component_selection.py`.
+The bike still needs separate native D/M version reads; the existing drive-unit
+version display does not supply both.

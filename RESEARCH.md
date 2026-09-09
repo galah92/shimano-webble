@@ -966,3 +966,43 @@ Next implementation gates are the M reply/sequence state machine, conditional
 D/M selection and finalization in `Th.v3`, and recovery behavior. The existing
 AB/3A rejection remains the live result; no new region or firmware write was
 introduced by this offline work and no additional motor test is needed yet.
+
+## Component selection and native version reads
+
+Further inspection of 3.0.7 `Th.v3` maps its selected `Ka` objects to M (`r10`)
+and D (`r15`) at the worker calls. In normal mode, `Mh.l(target, installed)`
+compares all four version fields using `Ph.c`: major<<20, minor<<16,
+patch<<8, build. Both upgrade and downgrade comparisons select a transfer;
+equality does not. Forced rewriting and recovery have additional branches.
+An installed minor nibble F with a non-F target is a separate recovery case.
+The normal path executes selected M before selected D, and an M failure exits
+before proceeding to D. This does not yet establish the full recovery flow.
+
+`tools/compare_components.py D.dat M.dat --installed-d A.B.C.D
+--installed-m A.B.C.D` models that ordinary comparison with explicit installed
+versions. Unknown versions and recovery states produce no proposed order.
+It never treats component comparison as installation approval. Three synthetic
+tests cover independent selection, ordering, missing/recovery information and
+the fourth version field. The candidate pair cannot yet be planned for the
+real bike because separate native installed versions have not been observed.
+
+`Th.y3` reads native firmware with `Hn.n0(0, 1, 0x84, [IC], D3(slot), ...)`.
+IC=0 is labeled DCAS/D and IC=1 Renesas/M in `Q2`. `D3` maps slot zero to FF,
+forcing the ordinary motor transport for that case. `Hn.n0` constructs
+`00 01 84 IC` for this route; it is distinct from our existing `00 01 2C 00`
+version query. `Wi(18)` accepts normalized replies beginning `01 86` or
+`01 87`, with at least five bytes. `Th.Z3` identifies `01 87` as the unit
+firmware-error path. `Ph.b` parses the packed major/minor from normalized byte
+2, patch from byte 3, and build from byte 4.
+
+These replies do not echo the IC selector in the recognized prefix. A browser
+batch must therefore stop on a timeout or transport error before issuing the
+other selector; the general claim that every information query has a distinct
+prefix would be false for these new reads. No native queries have been added
+to the live app yet. Source parsing is not a live observation.
+
+`Q2` normally retries final verification up to three times with a four-second
+delay between failed attempts, re-reads both native components and compares
+their four-field versions against target metadata. However `v3` has a distinct
+post-D branch that bypasses this ordinary `Q2` call. That branch and its reset/
+reconnect behavior remain to be reconstructed before defining completion.
