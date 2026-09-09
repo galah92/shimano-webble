@@ -288,3 +288,9 @@ and ATT failure at every stage: `node tests/m_firmware_session.cjs`.
 Bootloader entry and target selection remain preconditions, not implemented
 by this operation. Paired identity validation and recovery are still needed;
 the operation has no bike-control caller.
+
+Build .31 joins D data transfer and finish with the source's one-second
+post-finish delay. Reset remains a separate bounded write whose result does
+not claim reboot or firmware verification. `node tests/d_firmware_session.cjs`
+checks ordering, checksum, failure stops and reset semantics; command tests
+cover the 3-second finish deadline. No firmware controls are enabled.

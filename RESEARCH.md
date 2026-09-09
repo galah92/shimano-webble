@@ -1686,3 +1686,25 @@ Source G0 calls Hn.s0(0) before y0; it is not implicitly performed by the
 new operation. The target selector still has to come from verified routing.
 Neither the version predicate nor a finish acknowledgement proves compatibility
 or persistence on this bike. Live update and recovery remain unvalidated.
+
+## D finish and reset semantics
+
+Rechecked C0041b7.h1 (lines 2822-2870): FINISH uses K1(39 decimal,
+original image checksum, 0), y1 timeout 3000 ms, then Thread.sleep(1000).
+The browser joins this to the full D data phase and reports D-transfer-finished
+only after the accepted finish and delay. An abort during the delay fails the
+operation, and no reset follows automatically. Existing setup reply matching
+is reused for finish; its uncorrelated response limitation still applies.
+
+C0041b7.n1 uses k0(88 hex, X1(K1(40 decimal,0,0))). It only inspects
+the write outcome, without waiting for a protocol result. The separate browser
+reset primitive therefore reports reset-write-completed, with rebootVerified
+and firmwareVerified both false. It has no automatic caller. The paired
+coordinator must first prove both transfers finished, then verify reconnect
+and component versions; ATT completion alone cannot satisfy those checks.
+
+The D operation still assumes prior j1/k1 identity checks and A1 setup.
+Synthetic integration tests validate setup/data/finish order, original-byte
+checksum despite FF padding, the one-second delay, failures at each write,
+finish rejection, abort and separate reset semantics. They do not establish
+that firmware preparation, recovery or US destination works on the bike.

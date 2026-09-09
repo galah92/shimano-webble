@@ -359,7 +359,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-09.30';
+const BUILD = '2026-09-09.31';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -852,16 +852,17 @@ function dFirmwareCommandMatch(raw) {
   return null;
 }
 function sendDFirmwareCommand({write, subscribe, signal, payload}) {
-  // Only the reviewed initial/address/bank commands are implemented here.
+  // Reviewed initial/address/bank/finish commands; reset is a separate write.
   if (!Array.isArray(payload) && !(payload instanceof Uint8Array)) throw new Error('Expected D command bytes');
   if (payload.length !== 4 || !Array.from(payload).every(b => Number.isInteger(b) && b >= 0 && b <= 255))
     throw new Error('Expected four unsigned D command bytes');
   const command = Uint8Array.from(payload);
-  if (![0x21, 0x0a, 0x24].includes(command[0])) throw new Error('Unsupported D setup command');
+  if (![0x21, 0x0a, 0x24, 0x27].includes(command[0])) throw new Error('Unsupported D setup command');
   const address = command[1] | (command[2] << 8) | (command[3] << 16);
   if (command[0] === 0x21 && (command[1] !== 0 || command[2] > 95 || command[3] !== 0) ||
       command[0] === 0x0a && (command[1] > 2 || command[2] !== 0 || command[3] !== 0) ||
-      command[0] === 0x24 && (address < 0x4000 || address > 0x33fc0 || address % 64))
+      command[0] === 0x24 && (address < 0x4000 || address > 0x33fc0 || address % 64) ||
+      command[0] === 0x27 && (command[2] !== 0 || command[3] !== 0))
     throw new Error('D setup parameters outside modeled address range');
   let match = null, closed = false;
   const status = () => ({state: !match ? 'waiting' : match.result === 49 ? 'evidence-complete' : 'failed',
@@ -873,7 +874,7 @@ function sendDFirmwareCommand({write, subscribe, signal, payload}) {
   };
   // Source Hn.i0/I uses 2AFA [88, payload]. No retries: late replies lack a command ID.
   return runFirmwareExchange({write, subscribe, signal, packet: Uint8Array.of(0x88, ...command), evidence,
-    replyTimeoutMs: command[0] === 0x21 ? 40000 : 1200});
+    replyTimeoutMs: command[0] === 0x21 ? 40000 : command[0] === 0x27 ? 3000 : 1200});
 }
 // END D FIRMWARE COMMANDS
 
@@ -903,6 +904,24 @@ async function sendDFirmwareImage({data, write, subscribe, signal}) {
     installable: false, finished: false, reset: false};
 }
 // END D FIRMWARE IMAGE WORKER
+
+// BEGIN D FIRMWARE SESSION
+// C0041b7.h1: FINISH contains the original image checksum, then waits 1 s.
+// Requires prior bootloader identity checks and A1 setup; no UI caller.
+async function transferDFirmware({data, write, subscribe, signal}) {
+  const result = await sendDFirmwareImage({data, write, subscribe, signal});
+  await sendDFirmwareCommand({write, subscribe, signal, payload: [0x27, result.checksum, 0, 0]});
+  await firmwareDelay(1000, signal);
+  return {...result, state: 'D-transfer-finished', finished: true, reset: false, installable: false};
+}
+// n1 sends RESET without a protocol-result wait. ATT completion only confirms
+// delivery at the transport layer; reconnect/version checks must prove reboot.
+// A paired coordinator must call this only after both components finish.
+async function requestDFirmwareReset({write, signal}) {
+  await firmwareDataWrite(write, Uint8Array.of(0x88, 0x28, 0, 0, 0), signal);
+  return {state: 'reset-write-completed', rebootVerified: false, firmwareVerified: false, installable: false};
+}
+// END D FIRMWARE SESSION
 
 // BEGIN FIRMWARE FILE CHECKS
 // Raw E5000 layouts: Oa.B/Ka.i. Peer minimum comparison: Th.j3/Ja.c.

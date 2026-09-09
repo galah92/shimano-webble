@@ -22,14 +22,14 @@ function fixture(payload=[10,0,0,0]) {
  for(const c of vectors){const m=f.ctx.dFirmwareCommandMatch(Uint8Array.from(Buffer.from(c.raw,'hex')));assert.equal(m?Buffer.from(m.payload).toString('hex'):null,c.match,c.raw);}
  f.emit('88310000');assert.equal(f.result,undefined);f.resolveWrite();await flush();assert.equal(f.result.state,'evidence-complete');assert.equal(f.result.commandCorrelated,false);assert.equal(f.removed,1);assert.equal(f.timers,0);assert.deepEqual(f.writes,[[136,10,0,0,0]]);
  f=fixture();f.emit('88310000');f.rejectWrite(Error('ATT failed after RX'));await flush();assert.match(f.error.message,/ATT failed/);assert.equal(f.removed,1);
- for(const command of [[10,0,0,0],[36,0,64,0],[33,0,64,0]]) {
+ for(const command of [[10,0,0,0],[36,0,64,0],[33,0,64,0],[39,69,0,0]]) {
   f=fixture(command);await f.advance(7999);f.resolveWrite();await flush();
   f.emit('88310100');f.emit('88320100');await flush();assert.equal(f.result,undefined);
-  const deadline=command[0]===33?40000:1200;await f.advance(deadline-1);assert.equal(f.error,undefined);await f.advance(1);assert.match(f.error.message,/reply timed out/);assert.equal(f.writes.length,1);assert.equal(f.timers,0);
+  const deadline=command[0]===33?40000:command[0]===39?3000:1200;await f.advance(deadline-1);assert.equal(f.error,undefined);await f.advance(1);assert.match(f.error.message,/reply timed out/);assert.equal(f.writes.length,1);assert.equal(f.timers,0);
  }
  f=fixture();f.emit('88320000');f.resolveWrite();await flush();assert.match(f.error.message,/setup command rejected/);
  f=fixture();await f.advance(8000);assert.match(f.error.message,/ATT write timed out/);f.resolveWrite();await flush();assert.equal(f.timers,0);
  f=fixture();f.controller.abort();await flush();assert.match(f.error.message,/aborted/);assert.equal(f.removed,1);
- for(const payload of [[0,0,0,0],[10,3,0,0],[33,0,96,0],[36,1,64,0],[36,0,0,0],[10,0,0,256]])assert.throws(()=>f.ctx.sendDFirmwareCommand({payload}),/Unsupported|range|unsigned/);
+ for(const payload of [[39,0,1,0],[40,0,0,0],[0,0,0,0],[10,3,0,0],[33,0,96,0],[36,1,64,0],[36,0,0,0],[10,0,0,256]])assert.throws(()=>f.ctx.sendDFirmwareCommand({payload}),/Unsupported|range|unsigned/);
  console.log('108 command fixtures, command bounds, immediate RX, ATT failure, deadlines, abort and no-retry tests passed');
 })().catch(e=>{console.error(e);process.exit(1);});
