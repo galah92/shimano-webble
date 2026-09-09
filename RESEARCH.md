@@ -1127,3 +1127,35 @@ and disconnect recovery still need validation. There is no evidence here that
 arbitrary failed writes are idempotent or that a browser may resume after power
 loss. The live application continues to perform diagnostic reads only for
 firmware; its US setter remains disabled after the observed AB/3A rejections.
+
+## Capture coverage and remaining live evidence
+
+Re-audited the supplied ATT export: 1,084 rows, SHA-256
+`e70413207f78886e05278df0d24dce65279c852c12875c2acc98c0401afa06a4`.
+For this capture's characteristic mapping, value handle 0025 (2AFA) has 60
+write requests, maximum 10 bytes; handle 002F (2AFE) has 241, maximum 7 bytes.
+There are no ATT prepare/execute-write operations in the export. None of these
+writes contains the modeled 68/71-byte M or 71-byte D data payloads. The short
+0088 setup writes are not evidence of a completed firmware transfer. This
+capture cannot validate our firmware-data reply classification, checkpoint
+correlation, retransmission or recovery behavior. This is bounded to the
+supplied export, not a conclusion about what the bike supports.
+
+The goal remains incomplete against the actual acceptance criteria:
+
+| Requirement | Current evidence |
+| --- | --- |
+| HTTPS phone connection and session authentication | Repeated successful Pixel logs through .16; .18 deployment verified |
+| Motor identification | Repeated electronic family code 22/00; descriptor all zero; native D/M readback from .18 still missing |
+| Motor authentication | E2 FF FF observed repeatedly; does not establish region-write permission |
+| US destination change | Two direct writes rejected AB/3A; later read remained EU |
+| Preparation assets | Archived E5000 D 4.3.0 / M 4.2.1 present and classified; actual eTuning preparation pair and bike compatibility unverified |
+| Firmware update/recovery | Source-derived offline models and synthetic tests; no real transfer trace or controlled update validation |
+| Fresh US readback and power-cycle persistence | Not achieved |
+| Assistance-speed behavior | Not measured; no claim made |
+
+The next bike input is the existing .18 information batch, which includes
+separate native D/M reads. Another direct US write would repeat a known failure
+and would not fill any of these gaps. Source analysis can continue, but more
+synthetic codec tests cannot substitute for those native results or evidence
+from a supported firmware update/recovery path. No flash operation is ready.
