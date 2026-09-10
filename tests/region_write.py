@@ -22,7 +22,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate('''async opts => {
           window.regionWrites = []; window.regionReads = 0;
           session.verified = session.motorEligible = session.motorAuthenticated = true;
-          // Synthetic eligible path for testing the retained setter; production never enables it yet.
+          // Synthetic eligible path for testing the retained setter; the current original firmware remains ineligible.
           session.directWriteEligible = true;
           session.currentDestination = 0;
           for (const short of ['2afe','2afd','2af9','2afb'])

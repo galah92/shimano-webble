@@ -1,4 +1,13 @@
-# Session authentication investigation
+# Shimano US-region workflow investigation
+
+Current status (2026-09-10, build .55): SC-E7000 display; motor reports
+E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. Direct US writes were
+rejected. The source-backed candidate route is preparation to D 4.3.0.0 /
+M 4.2.1.0, then authenticated destination write and independent readback.
+Firmware installation, successful US write and persistence remain unverified.
+Recovery probes are implementation diagnostics, not region-unlock commands.
+The dated entries below retain earlier hypotheses and superseded limitations.
+
 
 Updated 2026-09-09. Target: SC-E7000 + DU-E7000 firmware 4.7.1,
 using Android Web Bluetooth. Build `2026-09-09.4` verified session access on
@@ -2322,3 +2331,42 @@ identical packet bytes and timing, explicit rejection without replay, native
 failure/abort during replay, and full-probe failure/abort boundaries. The
 firmware transfer coordinator is still unwired. This test cannot establish
 recovery after erased firmware or completion of the US-region objective.
+
+## Build .55: reconnect preparation to the actual US setter
+
+Revalidated the primary published guide on 2026-09-10:
+https://etuning-app.com/downgrade.pdf (pages 1, 3 and 4, zero-based).
+It explicitly lists E5000/E5080 4.3.0 for downgrade from 4.4+, calls the
+included firmware original/unmodified, and assigns E5000 4.3.0 capability B
+(region USA), whereas 4.4+ has only capability C. This is vendor documentation
+supporting the candidate, not a live compatibility test of this bike. Its
+historical Android installation instructions are not our phone-only WebBLE
+implementation. Its claim of settings surviving a later firmware update
+also does not replace our required destination persistence check.
+
+Fresh source audit: w.z checks Gh.w and opens f91a2 when false. Gh.w/D
+permits this family at 430; executing the extracted VerifyPolicy.java again
+returned false at 450 and true at 430. The direct branch then sends
+00 16 A8 01 <destination>. The intervening ae.d0 is a UI dialog helper,
+not a BLE recovery/authorization command. In's AA handler invokes the region
+success callback; it does not establish independent readback or persistence.
+Thus there is a source/documented path from older stock firmware to the same
+setter already implemented. There is no source claim that our recovery probe
+itself enables region writes. The exact reason for device AB/3A remains
+undecoded; these findings do not prove downgrade is the only possible route.
+
+A concrete integration gap was fixed: identifyDrive previously hardcoded
+motor authentication to 4.5.0 and directWriteEligible=false for every version.
+It would therefore block the intended post-preparation step. The page now
+requires successful exact model/unit, ordinary 4.3.0, native D 4.3.0.0 and
+native M 4.2.1.0 responses plus a valid slot-1 region before marking the
+reviewed preparation pair eligible for the manual US experiment. The existing
+canSetUS additionally requires verified connection, motor authentication,
+EU value 0 and no prior attempt. The original 4.5.0 pair stays ineligible.
+Missing, truncated, device-error and mismatched responses fail the new gate.
+Eligibility is not a claim that the subsequent write will succeed.
+
+No firmware transfer is enabled. The guided recovery card says it is on hold;
+no new physical test is requested for this build. Next implementation work
+must address completing the verified preparation -> US setter -> restart
+readback workflow, rather than treating recovery diagnostics as the outcome.
