@@ -49,10 +49,17 @@ class MotorTests(unittest.TestCase):
               if(p[2]===224 && (p[3]===52 || opts.early)) {
                 if(opts.noCompletion)return;
                 send([0,22,opts.reject?227:226,255,255,0,0,0,0,0]);
+                return;
+              }
+              if(p[2]===232) {
+                if(opts.unlockTimeout)return;
+                send(opts.shortUnlock ? [0,22,234] :
+                  opts.unlockReject ? [0,22,235,70,0] : [0,22,234,0,0]);
               }
             };
             if(opts.delayed) setTimeout(emit,15); else emit();
             if(opts.writeFailure && p[2]===224 && p[3]===52) throw Error('Synthetic ATT failure');
+            if(opts.unlockWriteFailure && p[2]===232) throw Error('Synthetic unlock ATT failure');
             if(opts.stall && p[2]===216) return new Promise(()=>{});
           };
           controls();
@@ -67,7 +74,8 @@ class MotorTests(unittest.TestCase):
 
     def test_information_batch_controls_eligibility(self):
         for model,firmware,patch,expected in [(34,69,0,True),(33,71,1,False)]:
-            self.ready_for_identify(motorModel=model,motorFirmware=firmware,motorPatch=patch)
+            self.ready_for_identify(motorModel=model,motorFirmware=firmware,motorPatch=patch,
+                nativeReplies={0:[0,1,134,69,0,0],1:[0,1,134,68,8,0]})
             self.wait_batch()
             self.assertEqual(self.page.locator('#motorAuth').is_enabled(),expected)
             self.context.close()
@@ -86,8 +94,10 @@ class MotorTests(unittest.TestCase):
             self.prepare(delayed=delayed);self.wait_motor()
             packets=self.page.evaluate('motorWrites'); v=VECTORS[0];ct=v['ciphertext']
             self.assertEqual(packets,[[0,1,60,0],[0,22,216]+v['request'],
-                [0,22,224,22]+ct[:6],[0,22,224,38]+ct[6:12],[0,22,224,52]+ct[12:]+[255,255]])
-            self.assertIn('completion observed',self.page.locator('#motorStatus').inner_text())
+                [0,22,224,22]+ct[:6],[0,22,224,38]+ct[6:12],[0,22,224,52]+ct[12:]+[255,255],
+                [0,22,232]+v['request']])
+            self.assertIn('setting unlocked',self.page.locator('#motorStatus').inner_text())
+            self.assertIn('E8 regulation unlock returned EA',self.page.locator('#log').inner_text())
             saved=self.page.evaluate('exportLog()+JSON.stringify(sessionStorage)')
             for secret in (v['serial'],v['request'],v['key'],ct,list(range(16))):
                 self.assertNotIn(' '.join(f'{b:02X}' for b in secret),saved)
@@ -114,6 +124,14 @@ class MotorTests(unittest.TestCase):
                 self.assertNotIn('MILESTONE: motor authentication',self.page.locator('#log').inner_text())
                 self.assertIn('not verified',self.page.locator('#motorStatus').inner_text())
                 if flag=='early':self.assertEqual(len(self.page.evaluate('motorWrites')),3)
+                self.context.close()
+
+    def test_regulation_unlock_is_required(self):
+        for flag in ('unlockReject','shortUnlock','unlockTimeout','unlockWriteFailure'):
+            with self.subTest(flag=flag):
+                self.prepare(**{flag:True});self.wait_motor()
+                self.assertFalse(self.page.evaluate('session?.motorAuthenticated === true'))
+                self.assertNotIn('E8 regulation unlock returned EA',self.page.locator('#log').inner_text())
                 self.context.close()
 
 if __name__=='__main__':unittest.main()

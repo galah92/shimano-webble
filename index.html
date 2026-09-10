@@ -17,9 +17,9 @@ configuration protocol to support legitimate configuration workflows without
 requiring SM-PCE hardware.
 
 The historical page described below was intentionally read-only. The current
-guided candidate can install exact firmware pairs and attempt one destination
-write behind explicit identity, file, journal and readback gates. Preserve a
-staged approach:
+guided workflow uses the normal authenticated command channel and does not
+install firmware. It verifies the exact D4.5.0/M4.4.8 pair before one guarded
+destination write. Preserve a staged approach:
 1) establish BLE access,
 2) identify / validate Shimano session authentication,
 3) map authenticated configuration transport,
@@ -258,9 +258,9 @@ firmware/region workflow now implemented below.
 
 NEXT TECHNICAL MILESTONE
 ------------------------
-Run the controlled guided preparation transaction on the verified E5000 bike;
-require exact reconnect readback before the one US setter and exact restoration
-plus final readback before claiming the region goal.
+Run the controlled command-only transaction on the verified E5000 bike. Require
+an immediate US readback and a same-device readback after a physical power cycle
+before claiming that the destination change persisted.
 
 ENGINEERING PRACTICE
 --------------------
@@ -311,7 +311,7 @@ END HANDOFF NOTES
 <body>
 <h1>Shimano E5000 US-region workflow</h1>
 <div class="muted" id="build"></div>
-<p>This guided candidate workflow checks the exact motor and firmware, installs the reviewed older pair, writes US once, verifies it after a power cycle, restores the original firmware pair, and verifies US again. Every checkpoint must match; the first live preparation transfer is still unverified. Its preflight uses the ordinary loader path already completed on this bike.</p>
+<p>This guided command-only workflow checks the exact motor and firmware, unlocks Shimano's protected setting mode, preserves the lighting-time setting, writes US once, and reads the destination back. It does not install firmware or enter the bootloader.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -332,7 +332,14 @@ END HANDOFF NOTES
 </div>
 <div class="card">
 <strong>Change region to US</strong>
-<p>The files stay on this phone. Download these three files, then choose all three together once. The page identifies them by exact reviewed SHA-256 hashes.</p>
+<p>Enter the passkey, keep the bike powered on and press the button once. If US is read back, fully power-cycle the bike and press it once more to verify persistence.</p>
+<div class="row"><button id="guidedUS" disabled>Connect, verify, and set US</button></div>
+<div id="guidedUSStatus" role="status">Enter the six-digit Shimano passkey.</div>
+<div class="muted">Command-only: no firmware image, erase, bootloader, or downgrade command is sent.</div>
+</div>
+<div class="card" hidden aria-hidden="true">
+<strong>Retired firmware preparation workflow</strong>
+<p>Kept inert in this build for recovery-code regression tests. It is not part of the US-region workflow.</p>
 <div class="workflow-files">
 <div><strong>1. Download</strong><br />
   <a href="https://etuning-app.com/wp-content/uploads/2024/11/5000_430.zip" target="_blank" rel="noopener">Preparation ZIP</a> ·
@@ -356,14 +363,14 @@ END HANDOFF NOTES
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">The standalone setter is disabled. The guided workflow permits one write only after verified D4.3.0/M4.2.1 preparation and motor authentication.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">The standalone setter is disabled. The guided workflow owns the complete protected-mode sequence and permits at most one destination write.</div></div>
 </details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.64';
+const BUILD = '2026-09-10.65';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2206,6 +2213,7 @@ let busy = false;
 let connectionAttempt = 0;
 let workflowPasskey = '';
 let workflowDevice = null;
+let commandWorkflowRunning = false;
 
 function log(message) {
   logEl.textContent += `[${new Date().toISOString()}] ${message}\n`;
@@ -2245,6 +2253,7 @@ function controls() {
   const workflowPlan=currentFirmwareWorkflowPlan();
   const filesReady=!!(firmwarePairs.preparation&&firmwarePairs.restoration);
   const passkeyReady=!!session?.verified||hasWorkflowPasskey();
+  const commandRecord=probeRecord?.kind==='command-us-region'?probeRecord:null;
   $('connect').disabled = busy || connected || !navigator.bluetooth || !window.isSecureContext;
   $('disconnect').disabled = !connected;
   $('probe').disabled = busy || !connected;
@@ -2253,6 +2262,20 @@ function controls() {
   $('setUS').disabled = true;
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || session?.authenticated;
+  $('guidedUS').disabled = busy || commandWorkflowRunning || !passkeyReady ||
+    (!connected&&(!navigator.bluetooth||!window.isSecureContext)) || commandRecord?.verified===true;
+  $('guidedUS').textContent = commandRecord&&!commandRecord.verified
+    ? (connected?'Verify US after power cycle':'Connect and verify US after power cycle')
+    : (connected?'Verify bike and set US':'Connect, verify, and set US');
+  $('guidedUSStatus').textContent = commandRecord?.verified
+    ? commandRecord.outcome==='us'
+      ? 'Complete: US persisted on the same D4.5.0/M4.4.8 motor after reconnect.'
+      : 'Complete: the post-reconnect read remained non-US. No destination retry was sent.'
+    : commandRecord
+      ? 'Fully power-cycle the bike, then press once to verify US on the same motor.'
+      : !passkeyReady
+        ? 'Enter the six-digit Shimano passkey.'
+        : 'Ready. The page will use BLE setting commands only; it will not install firmware.';
   $('bootProbe').disabled = busy || firmwareWorkflowRunning || !filesReady || !passkeyReady ||
     (!connected&&(!navigator.bluetooth||!window.isSecureContext)) ||
     workflowPlan.action==='complete'||workflowPlan.action==='inspect'||
@@ -2262,7 +2285,7 @@ function controls() {
     ?'Passkey ready for required reconnects in this open tab. It is not saved or logged.'
     :'Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.';
   if(!firmwareWorkflowRunning) renderFirmwareWorkflowStatus(workflowPlan,connected,filesReady,passkeyReady);
-  if (firmwareWorkflowRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
+  if (firmwareWorkflowRunning||commandWorkflowRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
 }
 function protectedStatus(message, css = '') {
   $('protected').textContent = message;
@@ -2643,24 +2666,27 @@ function regionName(value) {
     || `Unknown/unavailable (0x${value.toString(16).padStart(2, '0')})`;
 }
 // BEGIN REGION COMPATIBILITY
-// Source Gh.w/D permits E50X0 4.3.0. Require the reviewed native pair too.
+// The D4.5.0 setter is present in firmware and gated by PC mode 4/5 plus an A0
+// staging flag. Require the exact bike pair used for the static analysis.
 function regionCompatibility(results) {
   const field=name=>results.find(r=>r.name===name && r.status==='reply received')?.fields;
   const matches=(value,expected)=>value?.length>=expected.length && expected.every((b,i)=>value[i]===b);
   const model=field('Drive-unit model'),firmware=field('Drive-unit firmware'),destination=field('Current destination');
   const identified=matches(model,[0,1,0x1e,0x22,0]) && matches(destination,[0,0x16,0xae,1]) && destination.length>=5 && destination[4]<=5;
-  const original=identified && matches(firmware,[0,1,0x2e,0x45,0]);
+  const original=identified && matches(firmware,[0,1,0x2e,0x45,0])
+    && matches(field('Native D firmware'),[0,1,0x86,0x45,0,0])
+    && matches(field('Native M firmware'),[0,1,0x86,0x44,8,0]);
   const prepared=identified && matches(firmware,[0,1,0x2e,0x43,0])
     && matches(field('Native D firmware'),[0,1,0x86,0x43,0,0])
     && matches(field('Native M firmware'),[0,1,0x86,0x42,1,0]);
-  return {motorEligible:!!(original||prepared),directWriteEligible:!!prepared};
+  return {motorEligible:!!(original||prepared),directWriteEligible:!!original,commandWriteEligible:!!original};
 }
 // END REGION COMPATIBILITY
 function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'Direct US write rejected on this firmware. eTuning routes it through preparation; that workflow is under investigation.';
+    return 'D4.5.0 command path identified: protected PC mode and a same-value lighting stage are required before the US setter.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -2751,11 +2777,11 @@ async function identifyDrive() {
     Object.assign(s,regionCompatibility(results));
     s.currentDestination = destination?.length >= 5 ? destination[4] : undefined;
     $('motorStatus').textContent = s.motorEligible
-      ? 'Ready for a motor authentication experiment. No region or firmware changes.'
-      : 'Motor authentication requires the original E50X0 firmware or the reviewed preparation pair and destination readback.';
+      ? 'Exact motor pair verified. Protected motor unlock is available; no firmware change is required.'
+      : 'Protected access requires the exact D4.5.0/M4.4.8 E50X0 pair and destination readback.';
     const readiness = results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'Reviewed preparation pair reported. Authenticate motor before a US write experiment; success is not yet verified.'
+      : s.directWriteEligible ? 'Command-only US path ready after protected motor unlock; success is not yet verified on the bike.'
       : regionReadiness(model, firmware, destination);
     $('regionStatus').textContent = readiness;
     log(readiness);
@@ -2764,7 +2790,7 @@ async function identifyDrive() {
       const failed=required.filter(name=>results.find(item=>item.name===name)?.status!=='reply received');
       if(failed.length) throw new Error(`Restart verification incomplete: ${failed.join(', ')}. No additional verification reads sent`);
     }
-    await verifyPendingBootloaderProbe(s);
+    await verifyPendingBootloaderProbe(s,results);
   } catch (e) {
     if (session === s) {
       log(`Information batch stopped: ${e.message}. Reconnect before retrying.`);
@@ -2905,10 +2931,21 @@ async function authenticateMotor() {
       });
     } finally { for (const packet of packets) packet.fill(0); }
     assertCurrent(s);
+    await motorExchange(s, 'regulation unlock',
+      [Uint8Array.of(0, 0x16, 0xe8, ...material.request)], data => {
+        if (has(data, [0, 0x16, 0xeb])) {
+          const code=data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:'';
+          throw new Error(`Motor regulation unlock rejected${code}`);
+        }
+        if (!has(data, [0, 0x16, 0xea])) return;
+        if (data.length < 4) throw new Error('Short motor regulation unlock reply');
+        return data.slice(0,4);
+      });
+    assertCurrent(s);
     s.motorAuthenticated = true;
-    log('MILESTONE: motor authentication completion marker 00 16 E2 FF FF observed. Region-write permission and persistence remain unverified.');
-    $('motorStatus').textContent = 'Motor authentication completion observed.';
-    if (s.currentDestination === 0) $('regionStatus').textContent = 'Motor authenticated; direct US write remains unavailable. Preparation workflow under investigation.';
+    log('MILESTONE: motor authentication completed and E8 regulation unlock returned EA. Region and firmware remain unchanged.');
+    $('motorStatus').textContent = 'Motor regulation setting unlocked for this connection.';
+    if (s.currentDestination === 0) $('regionStatus').textContent = 'Protected motor access unlocked. Ready for the guarded command-only US transaction.';
   } catch (error) {
     log(`Motor authentication stopped: ${error.message}. Reconnect before retrying.`);
     if (session === s) disconnect();
@@ -2921,9 +2958,119 @@ async function authenticateMotor() {
 }
 function canSetUS(s) {
   return !!(s?.verified && s.directWriteEligible === true && s.motorEligible && s.motorAuthenticated
-    && s.currentDestination === 0 && !s.regionWriteAttempted && !(probeRecord && !probeRecord.verified));
+    && s.currentDestination === 0 && !s.regionWriteAttempted &&
+    !(probeRecord && !probeRecord.verified));
 }
-// eTuning w.z sends this exact five-byte setter. In.F6 recognizes AA;
+function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength=3,timeout=8000,privatePacket=false}) {
+  assertCurrent(s);
+  return new Promise((resolve,reject)=>{
+    const rx=s.chars['2afd'];
+    let written=false,settled=false,response,responseError;
+    const finish=(error,value)=>{
+      if(settled)return;
+      settled=true;clearTimeout(timer);
+      rx.removeEventListener('characteristicvaluechanged',onValue);
+      s.controller.signal.removeEventListener('abort',onAbort);
+      if(error)reject(error);else resolve(value);
+    };
+    const onAbort=()=>finish(new Error(`Disconnected during ${label}`));
+    const onValue=event=>{
+      if(settled||response||responseError)return;
+      const data=bytes(event.target.value);
+      if(data[0]!==0||data[1]!==packet[1]||![normalOpcode,errorOpcode].includes(data[2]))return;
+      if(data[2]===errorOpcode) {
+        const code=data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:'';
+        responseError=new Error(`${label} rejected${code}`);
+        if(written)finish(responseError);
+        return;
+      }
+      if(data.length<minLength)return finish(new Error(`${label} returned a short reply`));
+      response=data.slice();
+      log(`RX ${label}: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
+      if(written)finish(null,response);
+    };
+    const timer=setTimeout(()=>finish(new Error(`${label}: ${written?'reply':'ATT write'} timed out`)),timeout);
+    rx.addEventListener('characteristicvaluechanged',onValue);
+    s.controller.signal.addEventListener('abort',onAbort,{once:true});
+    log(privatePacket?`TX ${label}: ${packet.length} bytes (payload omitted)`:`TX 2AFE ${label}: ${hex(packet)}`);
+    try {
+      s.chars['2afe'].writeValueWithResponse(packet).then(()=>{
+        if(settled)return;
+        written=true;log(`ATT write completed: ${label}`);
+        if(responseError)finish(responseError);
+        else if(response)finish(null,response);
+      },error=>finish(error instanceof Error?error:new Error(String(error))));
+    } catch(error){finish(error);}
+  });
+}
+const PC_MODE5_WORDS=Object.freeze([[0x0f,0x27],[0x55,0x11],[0xb0,0x35],[0xf3,0x03],[0x03,0x09]]);
+window.commandDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function enterPcMode5(s) {
+  assertCurrent(s);
+  return new Promise((resolve,reject)=>{
+    const rx=s.chars['2afd'];
+    let written=false,settled=false,response;
+    const finish=(error)=>{
+      if(settled)return;
+      settled=true;clearTimeout(timer);
+      rx.removeEventListener('characteristicvaluechanged',onValue);
+      s.controller.signal.removeEventListener('abort',onAbort);
+      if(error)reject(error);else resolve(response);
+    };
+    const onAbort=()=>finish(new Error('Disconnected while entering protected PC mode'));
+    const onValue=event=>{
+      if(settled||response)return;
+      const data=bytes(event.target.value);
+      if(data[0]!==0||data[1]!==0x32||![0x12,0x13].includes(data[2]))return;
+      if(data[2]===0x13)return finish(new Error(`Protected PC mode rejected${data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:''}`));
+      if(data.length<3)return finish(new Error('Protected PC mode returned a short reply'));
+      response=data.slice();
+      log(`RX protected PC mode: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
+      if(written)finish();
+    };
+    const timer=setTimeout(()=>finish(new Error(`Protected PC mode: ${written?'reply':'ATT write'} timed out`)),12000);
+    rx.addEventListener('characteristicvaluechanged',onValue);
+    s.controller.signal.addEventListener('abort',onAbort,{once:true});
+    (async()=>{
+      try {
+        log('TX 2AFE protected PC mode 5 request: 00 32 10 05 00 00 00');
+        await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x10,5,0,0,0));
+        if(settled)return;
+        assertCurrent(s);
+        await window.commandDelay(1000);
+        for(let i=0;i<PC_MODE5_WORDS.length;i++) {
+          if(i)await window.commandDelay(100);
+          assertCurrent(s);
+          const word=PC_MODE5_WORDS[i];
+          log(`TX 2AFE protected PC secure word ${i+1}/5: 7 bytes (payload omitted)`);
+          await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x30,...word,0,0));
+          if(settled)return;
+        }
+        written=true;
+        if(response)finish();
+      } catch(error){finish(error);}
+    })();
+  });
+}
+async function exitPcMode(s) {
+  await driveSettingExchange(s,{label:'Exit protected PC mode',packet:Uint8Array.of(0,0x32,0x10,0,0,0,0),
+    normalOpcode:0x12,errorOpcode:0x13,minLength:3,timeout:3000});
+  log('Protected PC mode exited.');
+}
+async function readLightingTime(s) {
+  const data=await driveSettingExchange(s,{label:'Read lighting time',packet:Uint8Array.of(0,0x16,0xa4,0),
+    normalOpcode:0xa6,errorOpcode:0xa7,minLength:5});
+  const value=data[3]|data[4]<<8;
+  log(`Lighting time read for same-value staging: ${value}.`);
+  return value;
+}
+async function stageLightingTime(s,value) {
+  if(!Number.isInteger(value)||value<0||value>0xffff)throw new Error('Lighting time outside UInt16 range');
+  await driveSettingExchange(s,{label:'Stage unchanged lighting time',
+    packet:Uint8Array.of(0,0x16,0xa0,value&255,value>>>8,0,0),normalOpcode:0xa2,errorOpcode:0xa3,minLength:3});
+  log('Unchanged lighting time staged; destination setter gate is now satisfied for one command.');
+}
+// Shimano's setting library sends A8 with four parameters. In.F6 recognizes AA;
 // readback, rather than an AA callback alone, determines the reported value.
 function writeUsDestination(s) {
   assertCurrent(s);
@@ -2957,9 +3104,9 @@ function writeUsDestination(s) {
     }, 20000);
     rx.addEventListener('characteristicvaluechanged', onValue);
     s.controller.signal.addEventListener('abort', onAbort, {once: true});
-    log('TX 2AFE Set OEM destination to US: 00 16 A8 01 01 (one attempt)');
+    log('TX 2AFE Set OEM destination to US: 00 16 A8 01 01 00 00 (one attempt)');
     try {
-      s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0, 0x16, 0xa8, 1, 1)).then(() => {
+      s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0, 0x16, 0xa8, 1, 1, 0, 0)).then(() => {
         if (settled) return;
         written = true;
         log('ATT destination write completed; checking device response and readback.');
@@ -2984,6 +3131,7 @@ async function setUS() {
     $('region').textContent = regionName(s.currentDestination);
     return s.currentDestination;
   };
+  let pcModeTouched=false,failed=false;
   try {
     const before = await readDestination('Destination before US write');
     if (before !== 0) {
@@ -2991,21 +3139,27 @@ async function setUS() {
       log($('regionStatus').textContent);
       return;
     }
-    // Store a same-motor restart expectation before the state-changing write.
-    // If storage or the fresh baseline fails, no US setter may be sent.
-    const salt=crypto.getRandomValues(new Uint8Array(16));
-    const writer=createFirmwareGattWriter(s.chars,s.controller.signal);
+    $('regionStatus').textContent = 'Entering protected PC mode…';
+    pcModeTouched=true;
+    await enterPcMode5(s);
+    assertCurrent(s);
+    log('Protected PC mode 5 accepted by the motor.');
+    const lightingTime=await readLightingTime(s);
+    assertCurrent(s);
+    await stageLightingTime(s,lightingTime);
+    assertCurrent(s);
+
+    // Save a salted same-device restart expectation after every prerequisite
+    // succeeds and immediately before the one state-changing destination write.
+    const salt=crypto.getRandomValues(new Uint8Array(16)),saltHex=hex(salt).replaceAll(' ','').toLowerCase();
     try {
-      const baseline=await readFirmwareBaseline({write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal,identitySalt:salt});
-      assertCurrent(s);
-      if(baseline.family!==34 || baseline.unit!==0 || baseline.dVersion!=='4.3.0.0' || baseline.mVersion!=='4.2.1.0' || baseline.destination!==0)
-        throw new Error('Fresh US-write baseline differs from the reviewed preparation pair');
-      const record={version:1,kind:'us-region',connection:s.probeToken,salt:hex(salt).replaceAll(' ','').toLowerCase(),
-        expected:{...baseline,destination:1},verified:false};
+      const record={version:2,kind:'command-us-region',connection:s.probeToken,salt:saltHex,
+        deviceBinding:await firmwareDeviceBinding(s.device.id,saltHex),
+        expected:{family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:1},verified:false};
       sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(record));
       probeRecord=record;
-      log('US restart expectation saved for this motor; US write and persistence still unverified.');
-    } finally {writer.close();salt.fill(0);}
+      log('US restart expectation saved for this browser-selected motor; US write and persistence still unverified.');
+    } finally {salt.fill(0);}
     // From here, failures cannot establish whether the stored value changed.
     s.currentDestination = undefined;
     $('region').textContent = 'Write in progress; value unverified';
@@ -3028,12 +3182,20 @@ async function setUS() {
       log($('regionStatus').textContent);
     }
   } catch (error) {
+    failed=true;
     log(`US-region attempt stopped: ${error.message}. Do not infer success from ATT acknowledgement.`);
-    if (session === s) disconnect();
     $('regionStatus').textContent = 'US change not verified. Reconnect and read region; see log.';
   } finally {
+    if(pcModeTouched&&session===s) {
+      try {await exitPcMode(s);}
+      catch(error) {
+        failed=true;
+        log(`Protected PC mode exit could not be verified: ${error.message}. Disconnecting to end the privileged session.`);
+      }
+    }
     log('--- US-region attempt end; copy log now ---');
-    if (session === s) { busy = false; controls(); }
+    if(failed&&session===s)disconnect();
+    else if (session === s) { busy = false; controls(); }
   }
 }
 $('setUS').onclick = setUS;
@@ -3043,6 +3205,62 @@ $('connect').onclick = ()=>connect();
 $('probe').onclick = runProbe;
 $('disconnect').onclick = disconnect;
 $('authenticate').onclick = authenticate;
+async function continueCommandWorkflow() {
+  if(busy||commandWorkflowRunning)return;
+  if(!session?.verified&&!rememberWorkflowPasskey()) {
+    $('guidedUSStatus').textContent='Enter the six-digit Shimano passkey first.';
+    $('passkey').focus();controls();return;
+  }
+  commandWorkflowRunning=true;controls();
+  log('--- guided command-only US workflow start; firmware and bootloader writes disabled ---');
+  try {
+    if(!session?.device.gatt.connected) {
+      $('guidedUSStatus').textContent='Connecting to the bike…';
+      await connect(workflowDevice);
+    }
+    let s=session;
+    if(!s?.device.gatt.connected)throw new Error('Bike connection did not complete');
+    if(!s.verified) {
+      $('guidedUSStatus').textContent='Authenticating the BLE session…';
+      await authenticate();
+      s=session;
+      if(!s?.verified)throw new Error('BLE session authentication did not complete');
+    }
+    if(!s.batchDone) {
+      $('guidedUSStatus').textContent='Checking the exact motor, firmware and region…';
+      await identifyDrive();
+      s=session;
+      if(!s?.device.gatt.connected||!s.batchDone)throw new Error('Bike information check did not complete');
+    }
+    if(probeRecord?.kind==='command-us-region') {
+      if(probeRecord.verified)return;
+      $('guidedUSStatus').textContent='US persistence was not verified. No destination retry was sent; copy the log.';
+      return;
+    }
+    if(s.currentDestination===1) {
+      $('guidedUSStatus').textContent='The bike already reports US. No destination write was sent.';
+      return;
+    }
+    if(!s.commandWriteEligible||!s.motorEligible||s.currentDestination!==0)
+      throw new Error('Exact D4.5.0/M4.4.8 EU baseline was not verified');
+    if(!s.motorAuthenticated) {
+      $('guidedUSStatus').textContent='Unlocking protected motor settings…';
+      await authenticateMotor();
+      s=session;
+      if(!s?.motorAuthenticated)throw new Error('Protected motor unlock did not complete');
+    }
+    if(!canSetUS(s))throw new Error('Guarded US transaction is not ready');
+    $('guidedUSStatus').textContent='Preserving settings and applying US once…';
+    await setUS();
+  } catch(error) {
+    log(`Guided command-only US workflow stopped: ${error.message}`);
+    $('guidedUSStatus').textContent=`Stopped: ${error.message}. Copy the log.`;
+  } finally {
+    log('--- guided command-only US workflow end ---');
+    commandWorkflowRunning=false;controls();
+  }
+}
+$('guidedUS').onclick=continueCommandWorkflow;
 function exportLog() {
   let snapshot = logEl.textContent;
   const starts = [...snapshot.matchAll(/^\[[^\]\n]+\] Connected;.*$/gm)];
@@ -3140,7 +3358,11 @@ async function clearCachedFirmwareBundle() {
 }
 try {
   const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)||'null');
-  if(record?.version===1 && /^[a-f0-9]{32}$/.test(record.salt) && typeof record.connection==='string' && record.expected) probeRecord=record;
+  const common=record&&/^[a-f0-9]{32}$/.test(record.salt||'')&&typeof record.connection==='string'&&record.expected;
+  const legacy=common&&record.version===1;
+  const command=common&&record.version===2&&record.kind==='command-us-region'&&
+    /^[a-f0-9]{64}$/.test(record.deviceBinding||'')&&typeof record.verified==='boolean';
+  if(legacy||command)probeRecord=record;
 } catch {}
 function saveProbeRecord() { try {sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(probeRecord));} catch {} }
 function probeSubscription(s) {
@@ -3167,7 +3389,35 @@ function reusableLegacyIdentityReference() {
   return {version:1,verified:true,expected:{identity:expected.identity},salt:probeRecord.salt,
     bootloaderIdentity:{...probeRecord.bootloaderIdentity}};
 }
-async function verifyPendingBootloaderProbe() {}
+async function verifyPendingBootloaderProbe(s,results=[]) {
+  const record=probeRecord;
+  if(record?.kind!=='command-us-region'||record.verified||record.connection===s.probeToken)return;
+  if(record.version!==2||!/^[a-f0-9]{32}$/.test(record.salt||'')||!/^[a-f0-9]{64}$/.test(record.deviceBinding||''))
+    throw new Error('Stored command-only US verification record is invalid');
+  const binding=await firmwareDeviceBinding(s.device.id,record.salt);
+  if(binding!==record.deviceBinding)throw new Error('US persistence check selected a different Bluetooth device');
+  const field=name=>results.find(result=>result.name===name&&result.status==='reply received')?.fields;
+  const matches=(value,expected)=>value?.length>=expected.length&&expected.every((byte,index)=>value[index]===byte);
+  const samePair=matches(field('Drive-unit model'),[0,1,0x1e,0x22,0])&&
+    matches(field('Drive-unit firmware'),[0,1,0x2e,0x45,0])&&
+    matches(field('Native D firmware'),[0,1,0x86,0x45,0,0])&&
+    matches(field('Native M firmware'),[0,1,0x86,0x44,8,0]);
+  if(!samePair)throw new Error('US persistence check did not match the original D4.5.0/M4.4.8 motor pair');
+  const destination=field('Current destination');
+  if(!matches(destination,[0,0x16,0xae,1])||destination.length<5||destination[4]>5)
+    throw new Error('US persistence destination readback is unavailable');
+  if(destination[4]!==1) {
+    record.verified=true;record.outcome='not-us';record.verifiedConnection=s.probeToken;saveProbeRecord();
+    workflowPasskey='';
+    $('regionStatus').textContent=`${regionName(destination[4])} read back after reconnect; US did not persist. No retry sent.`;
+    log($('regionStatus').textContent);
+    return;
+  }
+  record.verified=true;record.outcome='us';record.verifiedConnection=s.probeToken;saveProbeRecord();
+  workflowPasskey='';
+  $('regionStatus').textContent='US persisted on the same D4.5.0/M4.4.8 motor after reconnect.';
+  log('MILESTONE: US destination persisted after reconnect on the same original D4.5.0/M4.4.8 motor. Assistance speed remains unmeasured.');
+}
 function optionalFirmwareJournal() {
   firmwareJournalProblem='';
   try {
@@ -3444,7 +3694,6 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-restoreCachedFirmwareSelection();
 $('build').textContent = `Build ${BUILD} · guided US-region workflow`;
 log(`Ready. Build ${BUILD}.`);
 </script>

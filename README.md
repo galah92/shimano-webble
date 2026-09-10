@@ -1,53 +1,52 @@
 # Shimano WebBLE
 
 A single-file Web Bluetooth guided candidate workflow for Shimano STEPS. It
-checks the exact tested E5000 motor and original firmware, installs a reviewed
-preparation pair, attempts one authenticated US-destination write, verifies it
-after a physical power cycle, restores the original firmware pair, and verifies
-US again. The firmware transfer is exhaustively simulated but has not yet run on
-the bike, so the workflow stops unless every identity, version, region and
-reconnect checkpoint matches.
+checks the exact tested E5000 motor and D4.5.0/M4.4.8 firmware, completes the
+protected setting sequence found by decompiling D4.5.0 and Shimano's desktop
+library, attempts one US-destination write, and verifies it again after a power
+cycle. The primary workflow sends no firmware, erase, bootloader, or downgrade
+command.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .64)
+## Current next step (build .65)
 
-The tested D4.5.0/M4.4.8 EU pair rejects the exact destination setter with AB/3A.
-The source-backed candidate route uses D4.3.0/M4.2.1, for which the newer app
-enables its destination-setting path. Build .64 exposes that route as one guided
-button and durable recovery journal. Its first-use preflight follows the ordinary
-loader-entry and identity sequence already completed by this bike in build .45;
-direct recovery entry is used only when a journal records an interrupted transfer.
-It accepts the exact reviewed preparation ZIP directly, but requires both exact
-original restoration files before it will send firmware data.
+Decompilation explains the earlier `00 16 AB 3A 00` result. The D4.5.0
+destination setter is present and has no firmware-version gate. It returns
+`3A` when protected PC mode 4/5 and the one-shot setting stage are absent. The
+earlier live attempts omitted both states and sent a shortened destination
+packet.
 
-Reload build .64. The exact bundle verified by build .63 should load from local
-browser storage; choose the preparation ZIP and original D4.5.0/M4.4.8 files
-again only if the page says the bundle is unavailable. Enter the six-digit
-Shimano passkey once, accept the firmware warning, and use the single workflow
-button; it opens the Bluetooth chooser when a connection is needed.
-After each reset, physically turn the bike off and on and press the explicitly
-worded **I power-cycled** action. The passkey stays only in memory in that open
-tab until completion. The page rechecks the same salted motor identity, exact
-native D/M versions, and destination at every transition. Interrupted component
-work uses the locally cached exact files; if that cache is unavailable, the page
-requires the same files again. Recovery always replays the source-derived
-complete pair sequence.
+Build .65 follows Shimano's complete desktop sequence: regulation unlock,
+protected PC mode 5, secure words, read and same-value stage of lighting time,
+the full `00 16 A8 01 01 00 00` destination command, immediate readback, and a
+protected-mode exit on every path. It stores a salted same-device verification
+record immediately before the one destination write. A later tap after fully
+power-cycling the bike performs readback only and never retries the setter.
 
-Build .63 stopped during direct D-recovery stage 1 after four silent attempts,
-before creating a journal or sending firmware data. This is ready for the first
-controlled live preparation test, not yet a proven
-region-change procedure. A successful final state requires the original
-D4.5.0/M4.4.8 pair and US value 1 after the final restart. Assistance speed must
-be measured separately. Shimano's direct restoration links may return HTTP 403
-on some networks; if either download is unavailable, the page stays locked and
-the test must not begin.
+Open the live site, enter the six-digit Shimano passkey, and press **Connect,
+verify, and set US**. If the page reports immediate US readback, fully power the
+bike off and on and press the same button once more. Success requires the same
+D4.5.0/M4.4.8 motor pair and US value `1` in that different BLE session.
+Assistance speed must be measured separately.
+
+This is a statically supported candidate and is fully exercised against a
+synthetic BLE device. The new regulation-unlock, PC-mode, staged destination,
+and persistence replies still require one controlled bike run. The retired
+firmware preparation implementation remains hidden and inert for regression and
+recovery reference; it is not used by the primary workflow.
 
 ## Use
 
 Open the site in Chrome on Android, enable Bluetooth, make the Shimano endpoint
-discoverable, and tap **Connect Shimano**. The page subscribes to 2AF3 indications
-and probes 2AF4, 2AF6, and 2AF7 without application writes.
+discoverable, enter the six-digit passkey, and tap **Connect, verify, and set
+US**. That is the only control needed for the command-only workflow. It connects,
+authenticates, verifies the exact baseline, completes the protected motor
+sequence, sends at most one destination write, and reports the readback.
+
+The controls under **Advanced diagnostics** expose those stages individually
+for investigation. The initial connection subscribes to 2AF3 indications and
+probes 2AF4, 2AF6, and 2AF7 without application writes.
 
 To test session access, enter the six-digit passkey configured in E-TUBE and tap
 **Authenticate session**. This sends the two reconstructed authentication
@@ -68,13 +67,13 @@ every setup step; AF/3A stops destination checks with the region unknown.
 Keep Chrome foregrounded until **information batch end**, then copy the log.
 Allow up to 80 seconds if queries go unanswered.
 
-Build .7 confirmed motor communication and reported E50X0 / 4.5.0. The newer
-APK's direct-region gate routes that combination through preparation; 4.3.0
-is the concrete preparation lead under investigation. Builds .15 and .16 both
-received AB/3A rejection after motor authentication. The .15 reconnect confirmed EU;
-the .16 pre-write read also reported EU. Build .17 disables direct writes,
-including after successful authentication. Firmware transfer remains unavailable in the UI.
-The US-region goal remains incomplete.
+Build .7 confirmed motor communication and reported E50X0 / 4.5.0. Builds .15
+and .16 received AB/3A after an incomplete motor/setting sequence, and the next
+connection still reported EU. Later D4.5.0 decompilation established that `3A`
+is the setter's missing-state branch. Build .65 enables the complete guarded
+command path on the exact D4.5.0/M4.4.8 baseline. The US-region goal remains
+incomplete until the bike reports US after the write and again after a power
+cycle.
 
 Build .16 returned seven zero model-descriptor bytes. Together with series 22
 and unit 00, this matches the base DU-E5000 entry in the older desktop model
@@ -132,49 +131,47 @@ decoded as a region or treated as permission to change configuration.
 **Clear log** clears the visible and saved log history. It leaves the Bluetooth
 connection and bike state unchanged; subsequent messages continue logging normally.
 
-## Motor authentication experiment
+## Protected motor authorization
 
-After a successful information batch reporting E50X0 / 4.5.0 and a valid
-destination, tap **Authenticate motor** once. It privately reads the serial,
-requests the motor challenge, validates all three fragments, computes the AES
-response and waits for the APK completion marker `00 16 E2 FF FF`.
-Copy the log after **motor authentication end**. This is an experiment; the
-marker does not establish permission to change region. DB replies stop the run; the APK's E8
-fallback is not implemented. An older Shimano library identifies E8 as an
-authentication-lock release request; its applicability to this bike still
-needs verification.
+The guided workflow privately reads the motor serial, requests the challenge,
+validates all three fragments, computes the AES response, and requires the
+`00 16 E2 FF FF` completion marker. It then sends Shimano's separate `E8`
+regulation-unlock request using the same serial-derived request and requires a
+normal `EA` reply. Only then can the destination transaction continue. Serial,
+challenge, keys, ciphertext, secure PC words, and passkey are omitted from logs.
 
 The user's build .14 log verified motor authentication on the real bike, with
 the three DA challenge fragments and E2 FF FF completion after the third E0.
 
-## US destination experiment (build .15)
+## Command-only US destination candidate (build .65)
 
-**Live result:** this exact experiment was rejected with `AB 3A` after
-successful motor authentication. A separate connection read EU (0) again.
-Do not repeat the same write sequence; the next investigation is the app's
-preparation workflow. Firmware 4.3.0 is a candidate from its source, not a
-verified downgrade prescription.
+The D4.5.0 `A8` handler at `0x2537c` accepts the write only while PC mode is 4
+or 5 and a one-shot flag set by the `A0` handler is active. There is no version
+check in that handler. Shimano's desktop library supplies the missing mode-5
+secure sequence, reads lighting time, writes the same value with `A0`, and sends
+four destination parameters. This explains why the earlier shortened
+`00 16 A8 01 01` call reached `AB 3A`.
 
-As of build .17, **Set region to US** remains disabled after authentication.
-No production path currently grants direct-write eligibility. The retained
-experimental implementation is tested using synthetic eligible sessions:
-It first reads the current destination again; only EU (0) permits the write.
-It sends `00 16 A8 01 01` once, watches for AA or AB, and reads back the
-current destination after AA or an acknowledgement timeout with completed ATT.
-US (1) readback is the value check. An acknowledgement alone is never success.
-Rejections, write failures and unverified readback stop the attempt. There is
-no automatic retry, downgrade, factory-slot write or separate speed setter.
+Build .65 first reads current destination again; only EU (0) permits progress.
+It enters PC mode 5, requires its completion reply, reads lighting time, stages
+the identical value, saves a durable reconnect expectation, then sends the full
+`00 16 A8 01 01 00 00` packet once. It accepts only `AA` as the setter's normal
+reply and immediately reads destination slot 1. It always requests PC-mode exit.
+An acknowledgement alone is never success, and a later connection performs
+readback only. There is no automatic retry, downgrade, factory-slot write, or
+separate speed setter.
 
-For a future validated write workflow, if US is read back, disconnect,
+If US is read back, disconnect,
 turn the bike fully off and on, reconnect, authenticate the session, and run
 **Read region and compatibility** again. Copy that second log and report that
 the bike was power-cycled. The app cannot detect a physical power cycle; a US
 value in one session does not prove persistence or an assistance-speed outcome.
 
 The shared goal is a verified phone-only US-destination workflow with readback
-and persistence checks. Current baseline: session setup, EU readback and motor
-authentication work. Region-write compatibility, persistence and actual speed
-behavior remain unverified. Firmware preparation is a separate open task.
+and persistence checks. Current baseline: session setup, exact D4.5.0/M4.4.8
+identity, EU readback, and the challenge-response portion of motor authentication
+work on the bike. The added `E8`, protected PC mode, staged setter, persistence,
+and actual speed behavior remain to be verified live.
 
 Synthetic write/readback tests: `python tests/region_write.py`.
 

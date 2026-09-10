@@ -9,7 +9,10 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('https://shimano.test/', lambda route: route.fulfill(body=html, content_type='text/html'))
     page.goto('https://shimano.test/')
-    expect(page.locator('#build')).to_contain_text('2026-09-10.64')
+    expect(page.locator('#build')).to_contain_text('2026-09-10.65')
+    expect(page.locator('#guidedUS')).to_be_visible()
+    expect(page.locator('#guidedUSStatus')).to_contain_text('six-digit Shimano passkey')
+    expect(page.locator('#firmwareFiles')).to_be_hidden()
     expect(page.locator('#setUS')).to_be_disabled()
     expect(page.locator('#bootProbe')).to_be_disabled()
     page.locator('#firmwareFiles').set_input_files([
@@ -17,7 +20,7 @@ with sync_playwright() as p:
         {'name': 'M.dat', 'mimeType': 'application/octet-stream', 'buffer': bytes(256)},
         {'name': 'restore.dat', 'mimeType': 'application/octet-stream', 'buffer': bytes(256)}])
     expect(page.locator('#firmwareStatus')).to_contain_text('Files not accepted: A selected file does not match')
-    page.locator('#firmwareConsent').check()
+    page.evaluate("document.getElementById('firmwareConsent').checked=true;controls()")
     expect(page.locator('#bootProbeStatus')).to_contain_text('Choose the preparation ZIP')
     assert page.locator('#firmwareFiles').get_attribute('accept') == '.zip,.dat'
     assert page.locator('#firmwareFiles').count() == 1

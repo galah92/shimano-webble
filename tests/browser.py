@@ -125,6 +125,7 @@ class Characteristic extends EventTarget {
 }
 window.stage = 0;
 window.bike = new EventTarget();
+bike.id = 'synthetic-bike-id';
 bike.name = 'SCE7000 test';
 bike.gatt = {
   connected: false,
@@ -449,21 +450,21 @@ class BrowserTests(unittest.TestCase):
             self.assertIn('not verified', self.page.locator('#regionStatus').inner_text())
             self.context.close()
 
-    def test_known_rejected_firmware_cannot_write_after_authentication(self):
-        self.ready_for_identify(motorModel=34, motorFirmware=69, motorPatch=0)
+    def test_exact_original_pair_enables_only_the_guided_command_path(self):
+        self.ready_for_identify(motorModel=34, motorFirmware=69, motorPatch=0,
+            nativeReplies={0:[0,1,134,69,0,0],1:[0,1,134,68,8,0]})
         self.wait_batch()
         self.page.evaluate('session.motorAuthenticated=true; controls();')
         self.assertTrue(self.page.locator('#setUS').is_disabled())
-        self.assertFalse(self.page.evaluate('canSetUS(session)'))
-        self.assertIn('Direct US write rejected', self.page.locator('#regionStatus').inner_text())
-        before = self.writes()
-        self.page.evaluate('setUS()')
-        self.assertEqual(self.writes(), before)
+        self.assertTrue(self.page.evaluate('canSetUS(session)'))
+        self.assertTrue(self.page.evaluate('session.commandWriteEligible'))
+        self.assertIn('Command-only US path ready', self.page.locator('#regionStatus').inner_text())
 
-    def test_reported_motor_firmware_requires_preparation_in_app_policy(self):
+    def test_reported_motor_firmware_describes_the_protected_command_path(self):
         self.open()
         result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
-        self.assertIn('through preparation', result)
+        self.assertIn('protected PC mode', result)
+        self.assertIn('same-value lighting stage', result)
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
 

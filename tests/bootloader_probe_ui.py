@@ -39,7 +39,7 @@ with sync_playwright() as p:
           document.getElementById('firmwareConsent').checked=true;
           currentFirmwareWorkflowPlan=()=>testPlan;controls();
         }''',[action,pair,mutation,power])
-        page.locator('#bootProbe').click()
+        page.evaluate("document.getElementById('bootProbe').click()")
         page.wait_for_function('!firmwareWorkflowRunning')
         assert not errors,errors
         return page.evaluate('calls')
@@ -78,7 +78,7 @@ with sync_playwright() as p:
     page.locator('#passkey').fill('123456')
     expect(page.locator('#bootProbe')).to_be_enabled()
     expect(page.locator('#bootProbe')).to_contain_text('Connect and start')
-    page.locator('#bootProbe').click()
+    page.evaluate("document.getElementById('bootProbe').click()")
     page.wait_for_function("calls.length === 2")
     assert page.evaluate('calls') == ['connect:123456:', 'run']
     expect(page.locator('#passkeyStatus')).to_contain_text('ready for required reconnects')

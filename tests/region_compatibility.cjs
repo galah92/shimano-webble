@@ -6,18 +6,20 @@ const prepared=()=>Object.entries({
  'Current destination':[0,22,174,1,0], 'Native D firmware':[0,1,134,67,0,0],
  'Native M firmware':[0,1,134,66,1,0],
 }).map(([name,fields])=>({name,fields,status:'reply received'}));
-assert(ctx.regionCompatibility(prepared()).directWriteEligible);
+assert(ctx.regionCompatibility(prepared()).motorEligible);
+assert(!ctx.regionCompatibility(prepared()).directWriteEligible);
 const original=prepared();original[1].fields[3]=69;original[3].fields[3]=69;original[4].fields[3]=68;original[4].fields[4]=8;
-assert(ctx.regionCompatibility(original).motorEligible);assert(!ctx.regionCompatibility(original).directWriteEligible);
+assert(ctx.regionCompatibility(original).motorEligible);assert(ctx.regionCompatibility(original).directWriteEligible);
+assert(ctx.regionCompatibility(original).commandWriteEligible);
 for(let i=0;i<5;i++) {
- const missing=prepared();missing.splice(i,1);assert(!ctx.regionCompatibility(missing).directWriteEligible);
- const error=prepared();error[i].status='device error';assert(!ctx.regionCompatibility(error).directWriteEligible);
- const short=prepared();short[i].fields.pop();assert(!ctx.regionCompatibility(short).directWriteEligible);
- for(let j=0;j<prepared()[i].fields.length;j++) {
+ const missing=original.map(x=>({name:x.name,status:x.status,fields:[...x.fields]}));missing.splice(i,1);assert(!ctx.regionCompatibility(missing).directWriteEligible);
+ const error=original.map(x=>({name:x.name,status:x.status,fields:[...x.fields]}));error[i].status='device error';assert(!ctx.regionCompatibility(error).directWriteEligible);
+ const short=original.map(x=>({name:x.name,status:x.status,fields:[...x.fields]}));short[i].fields.pop();assert(!ctx.regionCompatibility(short).directWriteEligible);
+ for(let j=0;j<original[i].fields.length;j++) {
   if(i===2&&j===4)continue;
-  const changed=prepared();changed[i].fields[j]^=1;assert(!ctx.regionCompatibility(changed).directWriteEligible);
+  const changed=original.map(x=>({name:x.name,status:x.status,fields:[...x.fields]}));changed[i].fields[j]^=1;assert(!ctx.regionCompatibility(changed).directWriteEligible);
  }
 }
-const badRegion=prepared();badRegion[2].fields[4]=255;assert(!ctx.regionCompatibility(badRegion).directWriteEligible);
+const badRegion=original.map(x=>({name:x.name,status:x.status,fields:[...x.fields]}));badRegion[2].fields[4]=255;assert(!ctx.regionCompatibility(badRegion).directWriteEligible);
 assert(!ctx.regionCompatibility([]).motorEligible);
-console.log('Region compatibility: reviewed pair, original firmware, missing/error/truncated/mismatched responses passed');
+console.log('Region compatibility: exact D4.5/M4.4.8 command path and malformed responses passed');

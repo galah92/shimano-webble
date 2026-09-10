@@ -1,13 +1,13 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .63): SC-E7000 display; motor reports
-E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. Direct US writes were
-rejected. The source-backed candidate route is preparation to D 4.3.0.0 /
-M 4.2.1.0, then authenticated destination write and independent readback.
-The complete guided transaction and reconnect recovery are now exposed after
-offline simulation and exact-file checks. Firmware installation, successful US
-write, persistence, restoration and the assistance-speed result remain live
-verification gates.
+Current status (2026-09-10, build .65): SC-E7000 display; motor reports
+E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation now
+explains the earlier `AB 3A` response: its destination setter is present, has no
+version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
+flag. The earlier live attempts supplied neither state and used a shortened
+setter packet. Build .65 exposes the complete command-only candidate with no
+firmware or bootloader operation. Successful US write, persistence and the
+assistance-speed result remain live verification gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2664,3 +2664,55 @@ firmware transfer. Offline simulation covers all 38 preflight writes, failures
 before and after each write, aborts, phase timeouts, identity and baseline gates,
 the reset gate and command allowlist. Preparation transfer and the resulting
 region change remain unverified on the bike.
+
+## Build .65: D4.5.0 decompilation replaces firmware preparation
+
+The unwrapped E5000 D4.5.0 image was loaded as little-endian ARM Thumb at
+`0x10000`. Its category-16 command table dispatches `A0` to `FUN_000252a8` at
+`0x252a8`, `A4` to `FUN_0002541c` at `0x2541c`, and `A8` to
+`FUN_0002537c` at `0x2537c`. The `A8` handler contains no firmware-version
+comparison. It accepts the record only when current PC mode is 4 or 5 and the
+one-shot flag written by `A0` is 1; otherwise it constructs error `3A`. On the
+accepted branch it copies the destination fields, clears the flag and invokes
+the persistent-record helper at `0x25516`.
+
+The PC-mode handler `FUN_0002721c` at `0x2721c` stages modes 4/5. Secure-code
+handler `FUN_00027430` at `0x27430` promotes the staged mode after five matching
+16-bit values and routes the category-32 opcode-12 completion to the requesting
+application slot. Mode 0 clears the privileged state. These branches explain a
+specific missing-state result and do not depend on the newer app's policy of
+routing D4.5.0 through firmware preparation.
+
+Shimano's desktop `EtubeDataLinks` library supplies the matching wire sequence:
+
+1. `00 32 10 05 00 00 00`, wait 1000 ms with the battery present;
+2. five category-32 opcode-30 secure words, 100 ms apart, then require
+   category-32 opcode-12 completion;
+3. read lighting time with `00 16 A4 00`;
+4. stage that identical little-endian value with
+   `00 16 A0 <low> <high> 00 00`;
+5. send destination with `00 16 A8 01 01 00 00`; and
+6. exit with `00 32 10 00 00 00 00`.
+
+The desktop authorization caller also invokes `UnlockRegulationSetAuth` after
+the already reconstructed challenge-response. It regenerates the seven-byte
+serial-derived request and sends category 16 opcode `E8`; build .65 requires
+its normal `EA` reply before entering PC mode. This is a conservative upstream
+authorization gate. The `A8` handler's local `3A` branch directly checks PC mode
+and the `A0` flag.
+
+Build .65 performs a fresh EU read, the complete authorization/mode/staging
+sequence, one full seven-byte destination write, immediate readback, and a
+mode-0 exit on success or failure. A salted same-device record is durably saved
+immediately before `A8`. After a physical power cycle, the same button verifies
+the same D4.5.0/M4.4.8 pair and destination in a different BLE session; it does
+not repeat `A8`. The firmware preparation UI is hidden and its cache is no longer
+loaded at startup.
+
+Synthetic browser tests cover exact packet order and values, same-value lighting
+preservation, early and delayed replies, ATT failures that race replies, every
+prerequisite gate, at-most-once `A8`, mandatory PC-mode exit, durable record
+reload, same-device pairing, and terminal persistence outcomes. Live validation
+still has to establish `E8/EA`, PC-mode completion, `A8/AA`, US readback and
+post-power-cycle persistence on the bike. No speed outcome is inferred from a
+region reply.
