@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.53';
+const BUILD = '2026-09-10.54';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -986,7 +986,19 @@ async function enterDBootloader({write, subscribe, signal, mode, targetSelector,
       // or second bridge-mode change. Bound this to one attempt.
       await firmwareDelay(100, signal);
       await recoveryStep('slot',()=>slot(0));
-      for (let stage = 1; stage <= 4; stage++) await recoveryStep('stage-'+stage,()=>sendStage(stage,true));
+      // Source B1 permits four attempts. Bound replay to the initial
+      // identical handshake packet after a completed ATT write and silence.
+      // A late reply can establish stage 1, but not which attempt elicited it.
+      await recoveryStep('stage-1',async()=>{
+        for(let attempt=1;attempt<=4;attempt++) {
+          try {await sendStage(1,true);return;}
+          catch(error) {
+            if(signal?.aborted || error?.message!=='Firmware query reply timed out' || attempt===4) throw error;
+            onDiagnostic?.({step:'D-recovery-stage-1',event:'retry-same-stage',reason:`reply-timeout; attempt ${attempt+1}/4`});
+          }
+        }
+      });
+      for (let stage = 2; stage <= 4; stage++) await recoveryStep('stage-'+stage,()=>sendStage(stage,true));
       await recoveryStep('stage-5-write',()=>sendStage(5,false));
       await firmwareDelay(150, signal);
       await recoveryStep('stage-5-reply',()=>sendStage(5,true));

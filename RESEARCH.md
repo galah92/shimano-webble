@@ -2297,3 +2297,28 @@ abort, phase timeouts, FIRMUP rejection, identity and record failures, and
 blocked commands. Success on hardware would establish the direct handoff
 from an intact application, not recovery after erase or interrupted M data.
 Firmware transfer remains unwired, and the US-region goal remains unmet.
+
+### Build .54: bounded unanswered stage-1 replay
+
+The .53 application-start probe reached recovery mode and slot but stage 1
+hit its two-second reply deadline. No recognized acknowledgement or rejection
+was observed; this does not prove the bike sent no other traffic. At
+2026-09-10 04:36:04.834, readback matched the same original motor, D 4.5.0.0,
+M 4.4.8.0 and EU. Neither tested starting state has completed recovery.
+
+Rechecked Th.v3/d3, C0041b7.x1/w1/o1/v1 and B1: the recovery worker directly
+uses its handoff, while B1 permits four attempts when no successful transport
+result arrives (lines 1609-1720). Our single-attempt experiment was stricter.
+The next probe repeats only the identical stage-1 packet, at most four times,
+and only after ATT completed followed by the reply timeout. Explicit FIRMUP
+rejection, wrong stage, disconnection, ATT errors and later-stage timeouts
+still stop. No extra mode changes or downstream commands run during replay.
+A delayed stage-1 acknowledgement is evidence of that stage, not attribution
+to a particular attempt; the remaining handshake and loader identity are
+still required. Success path remains 20 writes; maximum with replay is 23.
+
+Local tests cover success after 1/2/3 silent attempts, four-attempt exhaustion,
+identical packet bytes and timing, explicit rejection without replay, native
+failure/abort during replay, and full-probe failure/abort boundaries. The
+firmware transfer coordinator is still unwired. This test cannot establish
+recovery after erased firmware or completion of the US-region objective.
