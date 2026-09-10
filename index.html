@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.58';
+const BUILD = '2026-09-10.59';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -401,6 +401,25 @@ function firmwareBlock(data, component, offset, sequence) {
   } else if (checkpoint) {
     packet[68] = firmwareSum(data.subarray(windowStart, end));
   }
+  return packet;
+}
+// C0776xk.T0/j1 partial-window payload only; no transport or retry policy.
+// The failure offset selects the window, whose checksum start must be retained.
+function firmwareMRewriteBlock(data, failedOffset, offset, sequence) {
+  firmwareBlock(data, 'M', 0, sequence); // Validate image range and sequence.
+  if (!Number.isInteger(failedOffset) || failedOffset < 0 || failedOffset >= data.length)
+    throw new Error('Expected a failure offset within the image');
+  const start = Math.floor(failedOffset / 1024) * 1024;
+  const end = Math.min(data.length, start + 1024);
+  const restart = Math.max(start, Math.min(failedOffset, end - 64));
+  if (!Number.isInteger(offset) || offset < restart || offset >= end || (offset - restart) % 64)
+    throw new Error('Offset outside the partial-window rewrite sequence');
+  const blockEnd = Math.min(data.length, offset + 64);
+  const checkpoint = offset + 64 >= data.length || (offset + 64) % 1024 === 0;
+  const packet = new Uint8Array(checkpoint ? 71 : 68);
+  packet.set([0x0b, sequence, checkpoint ? 0x12 : 0x11, 0]);
+  packet.set(data.subarray(offset, blockEnd), 4);
+  if (checkpoint) packet[68] = firmwareSum(data.subarray(start, blockEnd));
   return packet;
 }
 function firmwareTransferGeometry(data, component) {

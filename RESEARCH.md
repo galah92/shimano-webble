@@ -2475,3 +2475,24 @@ Query tests cover zero/02/05/0A/FF, missing error bytes, conflicting observation
 before ATT completion, and no extra writes. M reply, block/image and shared D
 query tests pass. Firmware transfer remains disconnected from page controls.
 No new physical test is requested.
+
+## Build .59: partial-window M packet encoding
+
+Raw j1 (M-transfer-debug.java 12229 onward) copies up to 64 real bytes into a
+zero-initialized block. A checkpoint occurs when offset+64 reaches image end
+or a 1024-byte boundary; its checksum starts at the caller's retained window
+start. T0's clamp can make the final retry unaligned: for 116320 bytes and
+failure offset116288, restart is116256, address FDC620, checksum start115712.
+The restoration M image's 16-byte final window instead clamps to its start.
+Extracted Java helpers a()/d() both produced 000000 for window/initial checksum
+clear payloads. This does not establish their effect on an interrupted motor.
+
+firmwareMRewriteBlock encodes only offsets in that explicit partial-window
+sequence. It leaves ordinary firmwareBlock alignment checks intact and has no
+transport caller. Six synthetic fixtures use extracted M0/Q9 Java methods;
+the harness supplies the chunk/checksum following the inspected raw j1 rules,
+so these are payload/geometry checks, not execution of the entire Java worker.
+They cover the reviewed image lengths, an unaligned 65-byte case, a complete
+window, final zero padding and full-window checksum. Tests also reject offsets
+outside the derived sequence. No retry state machine, reconnect recovery or
+firmware writes were enabled. No new bike test is requested.
