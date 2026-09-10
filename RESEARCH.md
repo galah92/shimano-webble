@@ -2370,3 +2370,32 @@ No firmware transfer is enabled. The guided recovery card says it is on hold;
 no new physical test is requested for this build. Next implementation work
 must address completing the verified preparation -> US setter -> restart
 readback workflow, rather than treating recovery diagnostics as the outcome.
+
+## Build .56: same-motor US readback after reconnect
+
+The US setter now obtains a fresh five-query application baseline after its
+EU preflight, requires the reviewed prepared pair, and saves a salted motor
+identity plus expected US destination in the existing session-storage restart
+record before sending A8. Storage failure or baseline mismatch prevents the
+setter. Only the salted hash is saved, not raw serial or passkey. The record
+also remains pending after a rejected or uncertain write, so the next action
+is verification rather than another setter. Pending restart verification
+blocks new US attempts.
+
+The existing Verify after restart button reads the same motor identity,
+native D/M versions and US destination in a distinct connection. It never
+falls through into motor authentication or the recovery probe during that
+verification click. An EU or identity/firmware mismatch remains unverified;
+no retry or repair writes follow. Logs distinguish post-region evidence from
+post-probe restoration. Immediate US readback does not mark the restart
+record verified. Page reload in the same tab preserves the expectation;
+sessionStorage does not promise retention after closing the tab/browser.
+
+Eight setter browser tests pass, including baseline/storage failures,
+pre-write record creation and reload, rejection/uncertain delivery and
+unchanged destination. Guided UI tests cover matching and mismatching US
+verification with read-only dispatch. The existing physical baseline tests
+cover identity/version/region mismatches, all read errors and the distinct
+connection requirement. Reconnect is not independent proof of a power cycle:
+physical restart persistence and a real US change remain unverified. No
+firmware transfer was enabled and no new bike test is requested.

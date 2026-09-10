@@ -49,6 +49,25 @@ with sync_playwright() as p:
     assert page.evaluate('calls')==['session','read']
     assert page.evaluate('probeRecord.verified')
     assert page.evaluate("probeRecord.bootloaderIdentity.identity==='b'.repeat(64)")
+    # US verification uses the same button but must not claim original EU or restart a probe.
+    page.evaluate("window.originalProbeRecord=JSON.stringify(probeRecord)")
+    for matches in (False, True):
+        page.evaluate('''matches=>{
+          calls=[];session=fakeSession();
+          probeRecord={version:1,kind:'us-region',connection:'previous',salt:'07'.repeat(16),expected:{identity:'a'.repeat(64),family:34,unit:0,dVersion:'4.3.0.0',mVersion:'4.2.1.0',destination:1},verified:false};
+          verifyFirmwareAfterReconnect=async opts=>{
+            if(opts.expected.destination!==1)throw Error('Wrong US expectation');
+            return {state:matches?'reconnected-readback-matches':'reconnected-readback-mismatch',identityMatches:matches,dVersion:'4.3.0.0',mVersion:'4.2.1.0',destination:matches?1:0};
+          };controls();
+        }''',matches)
+        page.locator('#passkey').fill('123456')
+        page.locator('#bootProbe').click()
+        page.wait_for_function('!guidedTestRunning')
+        assert page.evaluate('calls')==['session','read']
+        assert page.evaluate('probeRecord.verified')==matches
+        expect(page.locator('#log')).to_contain_text('Post-region readback:')
+        assert 'Post-region readback:' in page.evaluate('exportLog()')
+    page.evaluate("probeRecord=JSON.parse(originalProbeRecord);saveProbeRecord()")
     # A failed prerequisite must never reach the probe.
     for failure,expected in [('session',['session']),('read',['session','read']),('motor',['session','read','motor'])]:
         page.evaluate('''failure=>{

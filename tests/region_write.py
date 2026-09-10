@@ -21,6 +21,8 @@ class RegionWriteTests(unittest.TestCase):
         self.assertTrue(self.page.locator('#setUS').is_disabled())
         self.page.evaluate('''async opts => {
           window.regionWrites = []; window.regionReads = 0;
+          readFirmwareBaseline=async()=>({family:34,unit:0,identity:'a'.repeat(64),dVersion:opts.wrongBaseline?'4.5.0.0':'4.3.0.0',mVersion:'4.2.1.0',destination:0});
+          if(opts.storageFailure){const original=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='shimano-probe-readback-v1')throw Error('Storage blocked');return original.call(this,k,v);};}
           session.verified = session.motorEligible = session.motorAuthenticated = true;
           // Synthetic eligible path for testing the retained setter; the current original firmware remains ineligible.
           session.directWriteEligible = true;
@@ -43,6 +45,8 @@ class RegionWriteTests(unittest.TestCase):
               return;
             }
             if (p[2] !== 168) throw Error('Unexpected write');
+            const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY));
+            if(record?.kind!=='us-region'||record.expected.destination!==1||record.verified)throw Error('Missing pending restart record before setter');
             if (opts.disconnect) { bike.gatt.disconnect();return; }
             const reply = () => {
               emit([0,22,32,79,0]); // Background telemetry is not a write result.
@@ -82,6 +86,24 @@ class RegionWriteTests(unittest.TestCase):
             self.assertIn('MILESTONE: US (1) read back', self.page.locator('#log').inner_text())
             self.assertIn('Persistence and assistance speed remain unverified',self.page.locator('#log').inner_text())
             self.context.close()
+
+    def test_baseline_or_storage_failure_never_writes(self):
+        for opts in ({'wrongBaseline':True},{'storageFailure':True}):
+            self.prepare(**opts);self.run_attempt()
+            self.assertEqual(self.packets(),[[0,22,172,1]])
+            self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
+            self.context.close()
+
+    def test_restart_expectation_is_saved_before_write_and_survives_reload(self):
+        self.prepare();self.run_attempt()
+        record=self.page.evaluate("JSON.parse(sessionStorage.getItem('shimano-probe-readback-v1'))")
+        self.assertEqual(record['kind'],'us-region')
+        self.assertEqual(record['expected']['destination'],1)
+        self.assertEqual(record['expected']['identity'],'a'*64)
+        self.assertFalse(record['verified'])
+        self.page.reload()
+        self.assertEqual(self.page.evaluate('probeRecord.kind'),'us-region')
+        self.assertFalse(self.page.evaluate('probeRecord.verified'))
 
     def test_changed_or_short_preflight_never_writes(self):
         for opts in ({'before':1},{'before':2},{'shortBefore':True}):

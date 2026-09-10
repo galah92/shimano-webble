@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.55';
+const BUILD = '2026-09-10.56';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2224,7 +2224,7 @@ async function authenticateMotor() {
 }
 function canSetUS(s) {
   return !!(s?.verified && s.directWriteEligible === true && s.motorEligible && s.motorAuthenticated
-    && s.currentDestination === 0 && !s.regionWriteAttempted);
+    && s.currentDestination === 0 && !s.regionWriteAttempted && !(probeRecord && !probeRecord.verified));
 }
 // eTuning w.z sends this exact five-byte setter. In.F6 recognizes AA;
 // readback, rather than an AA callback alone, determines the reported value.
@@ -2294,6 +2294,21 @@ async function setUS() {
       log($('regionStatus').textContent);
       return;
     }
+    // Store a same-motor restart expectation before the state-changing write.
+    // If storage or the fresh baseline fails, no US setter may be sent.
+    const salt=crypto.getRandomValues(new Uint8Array(16));
+    const writer=createFirmwareGattWriter(s.chars,s.controller.signal);
+    try {
+      const baseline=await readFirmwareBaseline({write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal,identitySalt:salt});
+      assertCurrent(s);
+      if(baseline.family!==34 || baseline.unit!==0 || baseline.dVersion!=='4.3.0.0' || baseline.mVersion!=='4.2.1.0' || baseline.destination!==0)
+        throw new Error('Fresh US-write baseline differs from the reviewed preparation pair');
+      const record={version:1,kind:'us-region',connection:s.probeToken,salt:hex(salt).replaceAll(' ','').toLowerCase(),
+        expected:{...baseline,destination:1},verified:false};
+      sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(record));
+      probeRecord=record;
+      log('US restart expectation saved for this motor; US write and persistence still unverified.');
+    } finally {writer.close();salt.fill(0);}
     // From here, failures cannot establish whether the stored value changed.
     s.currentDestination = undefined;
     $('region').textContent = 'Write in progress; value unverified';
@@ -2396,12 +2411,14 @@ async function verifyPendingBootloaderProbe(s) {
   const salt=Uint8Array.from(record.salt.match(/../g),x=>parseInt(x,16));
   const writer=createFirmwareGattWriter(s.chars,s.controller.signal);
   try {
-    log('Checking original motor identity, native firmware and region after the probe.');
+    log(record.kind==='us-region'?'Checking the same motor and US destination after reconnect.':'Checking original motor identity, native firmware and region after the probe.');
     const result=await verifyFirmwareAfterReconnect({expected:record.expected,previousConnection:record.connection,connection:s.probeToken,
       identitySalt:salt,write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal});
     assertCurrent(s);
     record.verified=result.state==='reconnected-readback-matches';saveProbeRecord();
-    const message=`Post-probe readback: same motor ${result.identityMatches?'yes':'NO'}; D ${result.dVersion}; M ${result.mVersion}; region ${regionName(result.destination)}; original configuration ${record.verified?'matches':'DOES NOT MATCH'}.`;
+    const message=record.kind==='us-region'
+      ? `Post-region readback: same motor ${result.identityMatches?'yes':'NO'}; D ${result.dVersion}; M ${result.mVersion}; region ${regionName(result.destination)}; US expectation ${record.verified?'matches':'DOES NOT MATCH'}. Reconnect observed; physical power cycle and speed not independently verified.`
+      : `Post-probe readback: same motor ${result.identityMatches?'yes':'NO'}; D ${result.dVersion}; M ${result.mVersion}; region ${regionName(result.destination)}; original configuration ${record.verified?'matches':'DOES NOT MATCH'}.`;
     log(message);$('bootProbeStatus').textContent=message;
   } finally {writer.close();salt.fill(0);}
 }
@@ -2452,8 +2469,10 @@ async function runGuidedBikeTest() {
     }
     if (verifying) {
       // This click is verification only, even if readback clears the pending record.
-      if (!probeRecord?.verified) throw new Error('Original configuration could not be verified. Copy the log.');
-      $('bootProbeStatus').textContent = 'Original motor, firmware and region match. Test finished — tap Copy log.';
+      if (!probeRecord?.verified) throw new Error('Expected motor, firmware and region could not be verified. Copy the log.');
+      $('bootProbeStatus').textContent = probeRecord.kind==='us-region'
+        ? 'Same motor, preparation firmware and US match after reconnect. Copy log. A power cycle is not independently verified.'
+        : 'Original motor, firmware and region match. Test finished — tap Copy log.';
       return;
     }
     if (!s.motorEligible) throw new Error('Bike compatibility was not verified. Copy the log.');
