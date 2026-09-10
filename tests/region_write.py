@@ -23,6 +23,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate('''async opts => {
           window.commandDelay=async()=>{};
           window.regionWrites=[];window.regionReads=0;window.secureWords=0;
+          window.secureWordsByMode={1:0,5:0};window.currentPcMode=0;
           if(opts.storageFailure){
             const original=Storage.prototype.setItem;
             Storage.prototype.setItem=function(k,v){
@@ -43,8 +44,15 @@ class RegionWriteTests(unittest.TestCase):
           session.chars['2afe'].writeValueWithResponse=async packet=>{
             const p=[...packet];regionWrites.push(p);
             if(p[1]===0x32&&p[2]===0x10) {
+              if(p[3]===1) {
+                currentPcMode=1;
+                if(opts.mode1RequestFailure)throw Error('Normal PC-link request ATT failure');
+                if(opts.mode1PreKeyStatus)emit([0,0x32,0x12,1]);
+                return;
+              }
               if(p[3]===5) {
-                if(opts.modeRequestFailure)throw Error('PC mode request ATT failure');
+                currentPcMode=5;
+                if(opts.modeRequestFailure||opts.mode5RequestFailure)throw Error('Protected PC mode request ATT failure');
                 return;
               }
               if(p[3]===0) {
@@ -56,7 +64,15 @@ class RegionWriteTests(unittest.TestCase):
             if(p[1]===0x32&&p[2]===0x30) {
               secureWords++;
               if(opts.secureWriteFailure===secureWords)throw Error('Secure word ATT failure');
-              if(secureWords===5)emit([0,0x32,opts.pcReject?0x13:0x12,opts.pcReject?0x3a:0]);
+              secureWordsByMode[currentPcMode]++;
+              if(currentPcMode===1)emit([0,0x32,0x30,p[3],p[4]]);
+              if(secureWordsByMode[currentPcMode]===5) {
+                const reject=currentPcMode===1?opts.mode1Reject:opts.pcReject;
+                const target=opts.completionRoute||'2afd';
+                const targetRx=session.chars[target];
+                targetRx.value=new DataView(Uint8Array.from([0,0x32,reject?0x13:0x12,reject?0x3a:0]).buffer);
+                targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
+              }
               return;
             }
             if(p[1]!==0x16)throw Error('Unexpected command category');
@@ -121,6 +137,12 @@ class RegionWriteTests(unittest.TestCase):
         self.prepare();self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
+            [0,0x32,0x10,1,0,0,0],
+            [0,0x32,0x30,0xa2,0x2b,0,0],
+            [0,0x32,0x30,0x30,0x0e,0,0],
+            [0,0x32,0x30,0x7a,0x4d,0,0],
+            [0,0x32,0x30,0x62,0x2b,0,0],
+            [0,0x32,0x30,0x85,0xb4,0,0],
             [0,0x32,0x10,5,0,0,0],
             [0,0x32,0x30,0x27,0x0f,0,0],
             [0,0x32,0x30,0x11,0x55,0,0],
@@ -158,7 +180,8 @@ class RegionWriteTests(unittest.TestCase):
 
     def test_each_prerequisite_failure_prevents_destination_write_and_exits_mode(self):
         failures=(
-            {'modeRequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
+            {'mode1RequestFailure':True}, {'mode1Reject':True},
+            {'mode5RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
             {'lightingReadWriteFailure':True}, {'lightingReadReject':True},
             {'stageWriteFailure':True}, {'stageReject':True}, {'storageFailure':True},
         )
@@ -170,6 +193,22 @@ class RegionWriteTests(unittest.TestCase):
                 self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
                 self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
                 self.context.close()
+
+    def test_mode_completion_can_arrive_on_any_subscribed_reply_route(self):
+        for route in ('2af9','2afb','2afd'):
+            with self.subTest(route=route):
+                self.prepare(completionRoute=route);self.run_attempt()
+                self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
+                log=self.page.locator('#log').inner_text()
+                self.assertIn(f'completion via {route.upper()}',log)
+                self.context.close()
+
+    def test_mode1_pre_key_status_does_not_unlock_the_transaction(self):
+        self.prepare(mode1PreKeyStatus=True);self.run_attempt()
+        packets=self.packets()
+        self.assertEqual(sum(p[2]==0xa8 for p in packets),1)
+        self.assertEqual(sum(p[:4]==[0,0x32,0x30,0xa2] for p in packets),1)
+        self.assertIn('pre-key status',self.page.locator('#log').inner_text())
 
     def test_destination_and_readback_failures_never_retry_and_always_exit(self):
         failures=({'destinationReject':0x3a},{'destinationWriteFailure':True},

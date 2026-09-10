@@ -370,7 +370,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.66';
+const BUILD = '2026-09-10.67';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -3003,48 +3003,67 @@ function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength
     } catch(error){finish(error);}
   });
 }
-// The desktop table stores each UInt16 as [high, low], then transmits column 1
-// before column 0. D4.5.0 parses those two wire bytes as little-endian.
+// The desktop opens ordinary PC-link mode 1 before its inspection UI can enter
+// mode 5. Its tables store each UInt16 as [high, low], then its transmit loop
+// sends column 1 before column 0. D4.5.0 parses the wire pair little-endian.
+const PC_MODE1_WORDS=Object.freeze([[0xa2,0x2b],[0x30,0x0e],[0x7a,0x4d],[0x62,0x2b],[0x85,0xb4]]);
 const PC_MODE5_WORDS=Object.freeze([[0x27,0x0f],[0x11,0x55],[0x35,0xb0],[0x03,0xf3],[0x09,0x03]]);
 window.commandDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function enterPcMode5(s) {
+function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
   assertCurrent(s);
   return new Promise((resolve,reject)=>{
-    const rx=s.chars['2afd'];
-    let written=false,settled=false,response;
+    const routes=['2af9','2afb','2afd'].map(short=>[short,s.chars[short]]).filter(([,ch])=>ch);
+    let written=false,settled=false,response,wordsSent=0,secureEchoes=0;
     const finish=(error)=>{
       if(settled)return;
       settled=true;clearTimeout(timer);
-      rx.removeEventListener('characteristicvaluechanged',onValue);
+      for(const [short,ch]of routes)ch.removeEventListener('characteristicvaluechanged',listeners.get(short));
       s.controller.signal.removeEventListener('abort',onAbort);
       if(error)reject(error);else resolve(response);
     };
-    const onAbort=()=>finish(new Error('Disconnected while entering protected PC mode'));
-    const onValue=event=>{
+    const onAbort=()=>finish(new Error(`Disconnected while entering ${label}`));
+    const onValue=(short,event)=>{
       if(settled||response)return;
       const data=bytes(event.target.value);
-      if(data[0]!==0||data[1]!==0x32||![0x12,0x13].includes(data[2]))return;
-      if(data[2]===0x13)return finish(new Error(`Protected PC mode rejected${data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:''}`));
-      if(data.length<3)return finish(new Error('Protected PC mode returned a short reply'));
+      if(data[0]!==0||data[1]!==0x32)return;
+      if(data[2]===0x30) {
+        secureEchoes++;
+        log(`RX ${label} secure echo ${secureEchoes} via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
+        return;
+      }
+      if(![0x12,0x13].includes(data[2]))return;
+      // Mode 1 emits an immediate mode-status message before the secure words.
+      // Only a completion/error after the fifth word can satisfy this gate.
+      if(wordsSent<words.length) {
+        log(`RX ${label} pre-key status via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))}; waiting for secure completion.`);
+        return;
+      }
+      if(data[2]===0x13)return finish(new Error(`${label} rejected${data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:''}`));
+      if(data.length<3)return finish(new Error(`${label} returned a short reply`));
       response=data.slice();
-      log(`RX protected PC mode: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
+      log(`RX ${label} completion via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
       if(written)finish();
     };
-    const timer=setTimeout(()=>finish(new Error(`Protected PC mode: ${written?'reply':'ATT write'} timed out`)),12000);
-    rx.addEventListener('characteristicvaluechanged',onValue);
+    const listeners=new Map(routes.map(([short,ch])=>{
+      const listener=event=>onValue(short,event);
+      ch.addEventListener('characteristicvaluechanged',listener);
+      return [short,listener];
+    }));
+    const timer=setTimeout(()=>finish(new Error(`${label}: ${written?'completion reply':'ATT write'} timed out; ${secureEchoes} secure echoes observed`)),timeout);
     s.controller.signal.addEventListener('abort',onAbort,{once:true});
     (async()=>{
       try {
-        log('TX 2AFE protected PC mode 5 request: 00 32 10 05 00 00 00');
-        await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x10,5,0,0,0));
+        log(`TX 2AFE ${label} request: 00 32 10 ${mode.toString(16).padStart(2,'0').toUpperCase()} 00 00 00`);
+        await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x10,mode,0,0,0));
         if(settled)return;
         assertCurrent(s);
-        await window.commandDelay(1000);
-        for(let i=0;i<PC_MODE5_WORDS.length;i++) {
+        if(initialDelay)await window.commandDelay(initialDelay);
+        for(let i=0;i<words.length;i++) {
           if(i)await window.commandDelay(100);
           assertCurrent(s);
-          const word=PC_MODE5_WORDS[i];
-          log(`TX 2AFE protected PC secure word ${i+1}/5: 7 bytes (payload omitted)`);
+          const word=words[i];
+          wordsSent=i+1;
+          log(`TX 2AFE ${label} secure word ${i+1}/5: 7 bytes (payload omitted)`);
           await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x30,...word,0,0));
           if(settled)return;
         }
@@ -3054,9 +3073,16 @@ function enterPcMode5(s) {
     })();
   });
 }
+async function enterPcMode1(s) {
+  const response=await enterPcMode(s,{mode:1,words:PC_MODE1_WORDS,label:'normal PC-link mode 1'});
+  log('MILESTONE: normal PC-link mode 1 accepted; entering protected inspection mode next.');
+  return response;
+}
+async function enterPcMode5(s) {
+  return enterPcMode(s,{mode:5,words:PC_MODE5_WORDS,label:'protected PC mode 5'});
+}
 async function exitPcMode(s) {
-  await driveSettingExchange(s,{label:'Exit protected PC mode',packet:Uint8Array.of(0,0x32,0x10,0,0,0,0),
-    normalOpcode:0x12,errorOpcode:0x13,minLength:3,timeout:3000});
+  await enterPcMode(s,{mode:0,words:[],label:'exit PC mode',initialDelay:0,timeout:3000});
   log('Protected PC mode exited.');
 }
 async function readLightingTime(s) {
@@ -3141,8 +3167,11 @@ async function setUS() {
       log($('regionStatus').textContent);
       return;
     }
-    $('regionStatus').textContent = 'Entering protected PC mode…';
+    $('regionStatus').textContent = 'Establishing normal PC link…';
     pcModeTouched=true;
+    await enterPcMode1(s);
+    assertCurrent(s);
+    $('regionStatus').textContent = 'Entering protected PC mode…';
     await enterPcMode5(s);
     assertCurrent(s);
     log('Protected PC mode 5 accepted by the motor.');
@@ -3271,7 +3300,7 @@ function exportLog() {
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
   const lines = snapshot.split('\n').filter(Boolean);
   // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.
-  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|^Entry |^Bootloader |^Post-probe )/i;
+  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|PC-link mode|protected PC mode|secure echo|pre-key status|^Entry |^Bootloader |^Post-probe )/i;
   const routine = /^(?:TX |RX |ATT |READ |RESULT |QUERY TRAFFIC |--- |(?:Captured setup|eTuning setup|Restore setup) |2AF[9BD] traffic:|2AF[9BD] notifications enabled|Motor serial received|Log copied)/;
   const useful = lines.filter(line => {
     const message = line.replace(/^\[[^\]]+\] /,'');

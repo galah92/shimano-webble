@@ -9,7 +9,7 @@ command.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .66)
+## Current next step (build .67)
 
 Decompilation explains the earlier `00 16 AB 3A 00` result. The D4.5.0
 destination setter is present and has no firmware-version gate. It returns
@@ -18,10 +18,13 @@ earlier live attempts omitted both states and sent a shortened destination
 packet.
 
 The build .65 bike test verified the regulation unlock with a normal `EA`
-reply, then stopped before any setting command because its five PC-mode words
-were byte-swapped. Build .66 follows the desktop transmit loop's actual
-little-endian wire order: regulation unlock, protected PC mode 5, secure words,
-read and same-value stage of lighting time,
+reply. Builds .65 and .66 both stopped before any setting command because mode
+5 never returned its completion message; correcting the byte order alone did
+not resolve it. Static analysis of the desktop workflow shows that its normal
+connection establishes PC-link mode 1 before the inspection UI enters mode 5.
+Build .67 reproduces that complete lifecycle and listens for the category-32
+completion on every subscribed reply route. It requires mode 1 completion,
+then mode 5 completion, before it can read and same-value stage lighting time,
 the full `00 16 A8 01 01 00 00` destination command, immediate readback, and a
 protected-mode exit on every path. It stores a salted same-device verification
 record immediately before the one destination write. A later tap after fully
@@ -34,8 +37,8 @@ D4.5.0/M4.4.8 motor pair and US value `1` in that different BLE session.
 Assistance speed must be measured separately.
 
 This is a statically supported candidate and is fully exercised against a
-synthetic BLE device. The corrected PC-mode, staged destination, and persistence
-replies still require one controlled bike run. The retired
+synthetic BLE device. The two-stage PC-mode lifecycle, staged destination, and
+persistence replies still require one controlled bike run. The retired
 firmware preparation implementation remains hidden and inert for regression and
 recovery reference; it is not used by the primary workflow.
 
@@ -146,7 +149,7 @@ challenge, keys, ciphertext, secure PC words, and passkey are omitted from logs.
 The user's build .14 log verified motor authentication on the real bike, with
 the three DA challenge fragments and E2 FF FF completion after the third E0.
 
-## Command-only US destination candidate (build .66)
+## Command-only US destination candidate (build .67)
 
 The D4.5.0 `A8` handler at `0x2537c` accepts the write only while PC mode is 4
 or 5 and a one-shot flag set by the `A0` handler is active. There is no version
@@ -155,8 +158,10 @@ secure sequence, reads lighting time, writes the same value with `A0`, and sends
 four destination parameters. This explains why the earlier shortened
 `00 16 A8 01 01` call reached `AB 3A`.
 
-Build .66 first reads current destination again; only EU (0) permits progress.
-It enters PC mode 5, requires its completion reply, reads lighting time, stages
+Build .67 first reads current destination again; only EU (0) permits progress.
+It establishes the desktop's ordinary PC-link mode 1, then enters inspection
+mode 5 and requires a completion reply after each five-word sequence. It reads
+lighting time, stages
 the identical value, saves a durable reconnect expectation, then sends the full
 `00 16 A8 01 01 00 00` packet once. It accepts only `AA` as the setter's normal
 reply and immediately reads destination slot 1. It always requests PC-mode exit.

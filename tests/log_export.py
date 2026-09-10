@@ -59,6 +59,19 @@ class LogExportTests(unittest.TestCase):
         self.assertNotIn('QUERY TRAFFIC',copied)
         self.assertIn('END SHIMANO LOG',copied)
 
+    def test_report_preserves_pc_mode_route_and_echo_evidence(self):
+        source='[one] Connected; test\n'
+        source+='[one] RX normal PC-link mode 1 secure echo 1 via 2AFB: 00 32 30 A2 2B\n'
+        source+='[one] RX normal PC-link mode 1 completion via 2AFB: 00 32 12 01\n'
+        source+='[one] MILESTONE: normal PC-link mode 1 accepted; entering protected inspection mode next.\n'
+        source+='[one] US-region attempt stopped: protected PC mode 5: completion reply timed out; 0 secure echoes observed.\n'
+        self.set_log(source)
+        self.page.locator('#copyLog').click()
+        copied=self.page.evaluate('window.copied')
+        self.assertIn('secure echo 1 via 2AFB',copied)
+        self.assertIn('completion via 2AFB',copied)
+        self.assertIn('protected PC mode 5: completion reply timed out',copied)
+
     def test_copy_failure_offers_manual_copy(self):
         self.page.evaluate('window.failCopy = true')
         self.page.locator('#copyLog').click()

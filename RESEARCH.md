@@ -1,15 +1,18 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .66): SC-E7000 display; motor reports
+Current status (2026-09-10, build .67): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation now
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
 flag. The earlier live attempts supplied neither state and used a shortened
-setter packet. The .65 bike test verified the `E8`/`EA` regulation unlock but
-exposed byte-swapped mode-5 secure words. Build .66 corrects those ten wire
-bytes and otherwise preserves the command-only candidate with no firmware or
-bootloader operation. Successful PC-mode entry, US write, persistence and the
-assistance-speed result remain live verification gates.
+setter packet. The .65 bike test verified the `E8`/`EA` regulation unlock.
+Builds .65 and .66 both stopped before any setting command because mode 5 did
+not return its completion message. Build .67 adds the normal mode-1 PC-link
+transition that the desktop establishes before entering its inspection UI and
+observes category-32 replies on all subscribed routes. It otherwise preserves
+the command-only candidate with no firmware or bootloader operation. Successful
+two-stage PC-mode entry, US write, persistence and the assistance-speed result
+remain live verification gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2734,3 +2737,18 @@ the mode-5 table extracted directly from the exact D4.5.0 image. The mode,
 application slot, spacing, prerequisite, and no-write-on-failure boundaries are
 unchanged. The corrected mode completion and destination transaction still
 require live validation.
+
+## Build .67: reproduce the desktop PC-link lifecycle
+
+The production desktop method `SendSetPCLinkModeStart` establishes ordinary
+mode 1 before connected-unit operations; its inspection method later enters
+mode 5. Build .67 reproduces both transitions. It sends mode-1 words `A2 2B`,
+`30 0E`, `7A 4D`, `62 2B`, and `85 B4`, requires category-32 opcode-12
+completion, and only then sends the corrected mode-5 sequence. The destination
+path stays closed unless both completions arrive.
+
+Mode 1 broadcasts a secure echo for each received word, which provides a
+framing checkpoint before the completion gate. The page listens for these
+responses on 2AF9, 2AFB, and 2AFD and logs the characteristic that carried
+them. A mode-status response received before the fifth word cannot satisfy the
+gate. Any failure requests mode 0 and disconnects without sending `A0` or `A8`.
