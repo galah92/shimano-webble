@@ -1,12 +1,14 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .65): SC-E7000 display; motor reports
+Current status (2026-09-10, build .66): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation now
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
 flag. The earlier live attempts supplied neither state and used a shortened
-setter packet. Build .65 exposes the complete command-only candidate with no
-firmware or bootloader operation. Successful US write, persistence and the
+setter packet. The .65 bike test verified the `E8`/`EA` regulation unlock but
+exposed byte-swapped mode-5 secure words. Build .66 corrects those ten wire
+bytes and otherwise preserves the command-only candidate with no firmware or
+bootloader operation. Successful PC-mode entry, US write, persistence and the
 assistance-speed result remain live verification gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
@@ -2686,7 +2688,7 @@ routing D4.5.0 through firmware preparation.
 Shimano's desktop `EtubeDataLinks` library supplies the matching wire sequence:
 
 1. `00 32 10 05 00 00 00`, wait 1000 ms with the battery present;
-2. five category-32 opcode-30 secure words, 100 ms apart, then require
+2. five little-endian category-32 opcode-30 secure words, 100 ms apart, then require
    category-32 opcode-12 completion;
 3. read lighting time with `00 16 A4 00`;
 4. stage that identical little-endian value with
@@ -2716,3 +2718,19 @@ reload, same-device pairing, and terminal persistence outcomes. Live validation
 still has to establish `E8/EA`, PC-mode completion, `A8/AA`, US readback and
 post-power-cycle persistence on the bike. No speed outcome is inferred from a
 region reply.
+
+## Build .66: correct mode-5 secure-word byte order
+
+The build .65 bike test completed motor authentication and received the normal
+`EA` response to the `E8` regulation unlock. It then timed out waiting for the
+mode-5 completion response, before any lighting or destination command ran.
+
+Reviewing the exact desktop transmit loop exposed a byte-order error in .65.
+The embedded 5x2 table is stored as high byte followed by low byte, while the
+loop sends column 1 and then column 0. D4.5.0's `FUN_0002c25a` parser constructs
+the 16-bit value from the received pair as little-endian. Build .66 therefore
+sends `27 0F`, `11 55`, `35 B0`, `03 F3`, and `09 03`. These values also match
+the mode-5 table extracted directly from the exact D4.5.0 image. The mode,
+application slot, spacing, prerequisite, and no-write-on-failure boundaries are
+unchanged. The corrected mode completion and destination transaction still
+require live validation.

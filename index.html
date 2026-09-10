@@ -370,7 +370,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.65';
+const BUILD = '2026-09-10.66';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -3003,7 +3003,9 @@ function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength
     } catch(error){finish(error);}
   });
 }
-const PC_MODE5_WORDS=Object.freeze([[0x0f,0x27],[0x55,0x11],[0xb0,0x35],[0xf3,0x03],[0x03,0x09]]);
+// The desktop table stores each UInt16 as [high, low], then transmits column 1
+// before column 0. D4.5.0 parses those two wire bytes as little-endian.
+const PC_MODE5_WORDS=Object.freeze([[0x27,0x0f],[0x11,0x55],[0x35,0xb0],[0x03,0xf3],[0x09,0x03]]);
 window.commandDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function enterPcMode5(s) {
   assertCurrent(s);

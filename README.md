@@ -9,7 +9,7 @@ command.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .65)
+## Current next step (build .66)
 
 Decompilation explains the earlier `00 16 AB 3A 00` result. The D4.5.0
 destination setter is present and has no firmware-version gate. It returns
@@ -17,8 +17,11 @@ destination setter is present and has no firmware-version gate. It returns
 earlier live attempts omitted both states and sent a shortened destination
 packet.
 
-Build .65 follows Shimano's complete desktop sequence: regulation unlock,
-protected PC mode 5, secure words, read and same-value stage of lighting time,
+The build .65 bike test verified the regulation unlock with a normal `EA`
+reply, then stopped before any setting command because its five PC-mode words
+were byte-swapped. Build .66 follows the desktop transmit loop's actual
+little-endian wire order: regulation unlock, protected PC mode 5, secure words,
+read and same-value stage of lighting time,
 the full `00 16 A8 01 01 00 00` destination command, immediate readback, and a
 protected-mode exit on every path. It stores a salted same-device verification
 record immediately before the one destination write. A later tap after fully
@@ -31,8 +34,8 @@ D4.5.0/M4.4.8 motor pair and US value `1` in that different BLE session.
 Assistance speed must be measured separately.
 
 This is a statically supported candidate and is fully exercised against a
-synthetic BLE device. The new regulation-unlock, PC-mode, staged destination,
-and persistence replies still require one controlled bike run. The retired
+synthetic BLE device. The corrected PC-mode, staged destination, and persistence
+replies still require one controlled bike run. The retired
 firmware preparation implementation remains hidden and inert for regression and
 recovery reference; it is not used by the primary workflow.
 
@@ -143,7 +146,7 @@ challenge, keys, ciphertext, secure PC words, and passkey are omitted from logs.
 The user's build .14 log verified motor authentication on the real bike, with
 the three DA challenge fragments and E2 FF FF completion after the third E0.
 
-## Command-only US destination candidate (build .65)
+## Command-only US destination candidate (build .66)
 
 The D4.5.0 `A8` handler at `0x2537c` accepts the write only while PC mode is 4
 or 5 and a one-shot flag set by the `A0` handler is active. There is no version
@@ -152,7 +155,7 @@ secure sequence, reads lighting time, writes the same value with `A0`, and sends
 four destination parameters. This explains why the earlier shortened
 `00 16 A8 01 01` call reached `AB 3A`.
 
-Build .65 first reads current destination again; only EU (0) permits progress.
+Build .66 first reads current destination again; only EU (0) permits progress.
 It enters PC mode 5, requires its completion reply, reads lighting time, stages
 the identical value, saves a durable reconnect expectation, then sends the full
 `00 16 A8 01 01 00 00` packet once. It accepts only `AA` as the setter's normal
@@ -170,8 +173,9 @@ value in one session does not prove persistence or an assistance-speed outcome.
 The shared goal is a verified phone-only US-destination workflow with readback
 and persistence checks. Current baseline: session setup, exact D4.5.0/M4.4.8
 identity, EU readback, and the challenge-response portion of motor authentication
-work on the bike. The added `E8`, protected PC mode, staged setter, persistence,
-and actual speed behavior remain to be verified live.
+work on the bike. The `E8` regulation unlock is also verified live. The corrected
+protected PC mode, staged setter, persistence, and actual speed behavior remain
+to be verified live.
 
 Synthetic write/readback tests: `python tests/region_write.py`.
 
