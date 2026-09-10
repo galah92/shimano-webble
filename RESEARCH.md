@@ -2270,3 +2270,30 @@ At 18:21:26.914 the subsequent .51 readback matched the same motor,
 D 4.5.0.0, M 4.4.8.0 and EU. Recovery re-entry from the intact loader has
 not passed; recovery after erased/interrupted firmware is still unproven.
 No firmware transfer or US configuration was achieved by this run.
+
+### Build .53: recovery handoff from the application baseline
+
+The .52 live report explicitly received FIRMUP 12 at recovery stage 1,
+90 ms after the request. Subsequent readback at 2026-09-10 04:31:01.152
+matched the original motor, D 4.5.0.0, M 4.4.8.0 and EU. No images were sent.
+This establishes rejection in the tested already-in-loader state; it does
+not establish that the same handoff fails from the running application.
+
+Source Th.d3 directly invokes the recovery worker; C0041b7.v1 labels its
+stage-5 transition "working-du handoff". The previous combined probe inserted
+normal M and D loader entry before this path. A starting-state mismatch is
+a hypothesis, not a decoded explanation of FIRMUP 12.
+
+The guided probe now performs baseline -> direct recovery entry -> D loader
+identity -> reset. It has 20 physical writes rather than 52. The restricted
+writer no longer permits PCA requests, M loader queries, ordinary mode
+selection or slot31. Full identity read and private fingerprint storage must
+finish before reset is allowed. The next reconnect still verifies original
+application identity, both versions and destination. Loader identity capture
+alone is not a comparison to the application's differently encoded serial.
+
+Local tests cover every physical write failing before/after acknowledgement,
+abort, phase timeouts, FIRMUP rejection, identity and record failures, and
+blocked commands. Success on hardware would establish the direct handoff
+from an intact application, not recovery after erase or interrupted M data.
+Firmware transfer remains unwired, and the US-region goal remains unmet.
