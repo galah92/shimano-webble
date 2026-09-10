@@ -2450,3 +2450,28 @@ route impossible. No purchase is proposed and no additional motor test or
 firmware write is enabled. Required new evidence is a source-backed E5000 M
 interruption/reconnect restoration sequence or a known-working corresponding
 trace; repeating intact D-entry diagnostics does not supply that evidence.
+
+## Build .58: retain M rejection codes needed for window recovery
+
+C0776xk.X0 scans for F2 00 32 followed by an unsigned error byte. Y0 parses
+that error from a diagnostic string. Q0 selects codes 02, 05 and 0A; P0
+recognizes 05. An extracted Java harness confirmed those predicates, including
+unknown/malformed input. These codes are distinct from transfer query status 01.
+The M reply accumulator previously discarded the error byte and retained only
+checksum-rejected. It now preserves observed codes through the failed query
+exception. A missing byte remains unknown, not zero; distinct observations are
+retained rather than silently choosing one. Checksum markers remain uncorrelated.
+No retry selection is enabled by this evidence and existing failure stops remain.
+
+Further raw E0 control-flow inspection locates an at-most-three partial-window
+loop (M-transfer-debug.java 2790-2813, 3148, 3830-3862), selected by Q0, and a
+subsequent at-most-five full-window loop (3899-3910, 4827, 4929-4961,
+5780-5805). The full-window path sets the address, clears checksum, and invokes
+j1 in 64-byte steps. Complete success/exit and error escalation still need
+validation before translating that state machine. Both are same-session logic;
+this is not evidence of reconnect or power-loss recovery.
+
+Query tests cover zero/02/05/0A/FF, missing error bytes, conflicting observations
+before ATT completion, and no extra writes. M reply, block/image and shared D
+query tests pass. Firmware transfer remains disconnected from page controls.
+No new physical test is requested.

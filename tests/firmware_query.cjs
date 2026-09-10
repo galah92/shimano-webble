@@ -35,6 +35,16 @@ function fixture(writeMode='resolve',checkpoint=false) {
  f=fixture('resolve',true);await flush();f.emit([11,0,192,7]);await flush();assert.equal(f.result,null);
  f.emit([242,0,49]);await flush();assert.equal(f.result.state,'evidence-complete');assert.equal(f.result.checksumCorrelated,false);
  f=fixture('resolve',true);await flush();f.emit([11,0,192,7,242,0,50]);await flush();assert.match(f.error.message,/checksum-rejected/);
+ for(const code of [0,2,5,10,255]) {
+  f=fixture('resolve',true);await flush();f.emit([242,0,50,code]);await flush();
+  assert.match(f.error.message,/checksum-rejected/);
+  assert.deepEqual(Array.from(f.error.checksumErrorCodes),[code]);
+  assert.equal(f.writes.length,1,'diagnostic code cannot trigger another query');
+ }
+ f=fixture('resolve',true);await flush();f.emit([242,0,50]);await flush();
+ assert.deepEqual(Array.from(f.error.checksumErrorCodes),[],'missing byte is not code zero');
+ f=fixture('pending',true);f.emit([242,0,50,2]);f.emit([242,0,50,5]);f.resolveWrite();await flush();
+ assert.deepEqual(Array.from(f.error.checksumErrorCodes),[2,5],'retain conflicting uncorrelated observations');
  f=fixture('pending');f.emit([11,0,192,7]);f.emit([11,0,131,8,1]);f.resolveWrite();await flush();assert.match(f.error.message,/query-status-1/);
  f=fixture();await flush();f.emit([11,0,145,7]);f.emit([11,0,192,8]);await flush();assert.equal(f.result,null);
  f.controller.abort();await flush();assert.match(f.error.message,/aborted/);assert.equal(f.timers,0);assert.equal(f.removed,1);
