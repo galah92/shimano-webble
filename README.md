@@ -10,19 +10,22 @@ reconnect checkpoint matches.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .63)
+## Current next step (build .64)
 
 The tested D4.5.0/M4.4.8 EU pair rejects the exact destination setter with AB/3A.
 The source-backed candidate route uses D4.3.0/M4.2.1, for which the newer app
-enables its destination-setting path. Build .63 exposes that route as one guided
-button and durable recovery journal. It accepts the exact reviewed preparation
-ZIP directly, but requires both exact original restoration files before it will
-send firmware data.
+enables its destination-setting path. Build .64 exposes that route as one guided
+button and durable recovery journal. Its first-use preflight follows the ordinary
+loader-entry and identity sequence already completed by this bike in build .45;
+direct recovery entry is used only when a journal records an interrupted transfer.
+It accepts the exact reviewed preparation ZIP directly, but requires both exact
+original restoration files before it will send firmware data.
 
-Download the preparation ZIP plus the original D4.5.0 and M4.4.8 restoration
-files, then choose all three in the page's single file picker. Enter the
-six-digit Shimano passkey once, accept the firmware warning, and use the single
-workflow button; it opens the Bluetooth chooser when a connection is needed.
+Reload build .64. The exact bundle verified by build .63 should load from local
+browser storage; choose the preparation ZIP and original D4.5.0/M4.4.8 files
+again only if the page says the bundle is unavailable. Enter the six-digit
+Shimano passkey once, accept the firmware warning, and use the single workflow
+button; it opens the Bluetooth chooser when a connection is needed.
 After each reset, physically turn the bike off and on and press the explicitly
 worded **I power-cycled** action. The passkey stays only in memory in that open
 tab until completion. The page rechecks the same salted motor identity, exact
@@ -31,7 +34,9 @@ work uses the locally cached exact files; if that cache is unavailable, the page
 requires the same files again. Recovery always replays the source-derived
 complete pair sequence.
 
-This is ready for the first controlled live preparation test, not yet a proven
+Build .63 stopped during direct D-recovery stage 1 after four silent attempts,
+before creating a journal or sending firmware data. This is ready for the first
+controlled live preparation test, not yet a proven
 region-change procedure. A successful final state requires the original
 D4.5.0/M4.4.8 pair and US value 1 after the final restart. Assistance speed must
 be measured separately. Shimano's direct restoration links may return HTTP 403

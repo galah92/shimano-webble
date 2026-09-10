@@ -9,7 +9,7 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('https://shimano.test/', lambda route: route.fulfill(body=html, content_type='text/html'))
     page.goto('https://shimano.test/')
-    expect(page.locator('#build')).to_contain_text('2026-09-10.63')
+    expect(page.locator('#build')).to_contain_text('2026-09-10.64')
     expect(page.locator('#setUS')).to_be_disabled()
     expect(page.locator('#bootProbe')).to_be_disabled()
     page.locator('#firmwareFiles').set_input_files([

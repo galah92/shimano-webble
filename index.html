@@ -311,7 +311,7 @@ END HANDOFF NOTES
 <body>
 <h1>Shimano E5000 US-region workflow</h1>
 <div class="muted" id="build"></div>
-<p>This guided candidate workflow checks the exact motor and firmware, installs the reviewed older pair, writes US once, verifies it after a power cycle, restores the original firmware pair, and verifies US again. Every checkpoint must match; the first live preparation transfer is still unverified.</p>
+<p>This guided candidate workflow checks the exact motor and firmware, installs the reviewed older pair, writes US once, verifies it after a power cycle, restores the original firmware pair, and verifies US again. Every checkpoint must match; the first live preparation transfer is still unverified. Its preflight uses the ordinary loader path already completed on this bike.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -363,7 +363,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.63';
+const BUILD = '2026-09-10.64';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2130,7 +2130,12 @@ function createBootloaderProbeWriter(characteristics, credentials, signal) {
   const signatures = new Set();
   const key = (name,p) => name + ':' + Array.from(p).join(',');
   const allow = (name,p) => signatures.add(key(name,p));
-  for (const p of [[4],[6,0],[3,96]]) allow('2afa',p);
+  for (const p of [[4],[6,0],[6,31],[3,0],[3,32],[3,96]]) allow('2afa',p);
+  for (let selector=0;selector<32;selector++) allow('2afa',[3,64|selector]);
+  for (const name of ['2afa','2afe']) {
+    const first = name === '2afa' ? 19 : 0;
+    allow(name,[first,50,32,1]);allow(name,[first,240,0,65,0,0,0]);
+  }
   for (const p of [[0,1,28,0],[0,1,60,0],[0,1,132,0],[0,1,132,1],[0,22,172,1]]) allow('2afe',p);
   for (let n=1;n<=5;n++) allow('2afa',[136,n,...credentials.slice((n-1)*3,n*3)]);
   for (const command of [46,47,48,41,42]) allow('2afa',[136,command,0,0,0]);
@@ -2161,10 +2166,18 @@ async function probeBootloaderRoundTrip({characteristics,subscribe,signal,creden
     if (baseline.dVersion!=='4.5.0.0'||baseline.mVersion!=='4.4.8.0'||baseline.destination!==0)
       throw new Error('Probe baseline differs from the verified original EU pair');
     onBaseline?.(baseline);
-    // Th.d3 -> C0041b7.v1 uses a working-DU handoff. Test it from
-    // the verified application baseline, not after ordinary loader entry.
-    advance('D-recovery-entry');
-    await enterDBootloader({...transport,mode:32,targetSelector:0,credentials:profile,recoveryInstall:true});
+    // First-use preparation follows the ordinary entry sequence already
+    // completed on this bike. Direct recovery entry is reserved for resuming
+    // a transfer whose durable journal proves that an install was interrupted.
+    advance('M-update-entry');
+    const mEntry=await enterFirmwareUpdateSession(transport);
+    await selectMFirmwareSlot(transport);
+    advance('M-bootloader-version');
+    const mBoot=await queryMBootloaderVersion({...transport,targetSelector:mEntry.targetSelector});
+    advance('D-update-entry');
+    const dEntry=await enterFirmwareUpdateSession(transport);
+    advance('D-bootloader-entry');
+    await enterDBootloader({...transport,...dEntry,credentials:profile});
     advance('D-bootloader-identity');
     const dBoot=await queryDBootloaderIdentity({...transport,write:p=>writer.write('2afa',p)});
     if(dBoot.family!==34||dBoot.unit!==0) throw new Error('Unexpected D bootloader family/unit');
@@ -2175,8 +2188,8 @@ async function probeBootloaderRoundTrip({characteristics,subscribe,signal,creden
     advance('reset-request');
     writer.allowReset();resetRequested=true;
     await requestDFirmwareReset({write:p=>writer.write('2afa',p),signal});
-    return {state:'probe-reset-requested',family:dBoot.family,unit:dBoot.unit,
-      bootloaderIdentity,recoveryEntryAcknowledged:true,resetRequested,firmwareDataSent:false,rebootVerified:false};
+    return {state:'probe-reset-requested',mBootloaderVersion:mBoot.version,family:dBoot.family,unit:dBoot.unit,
+      bootloaderIdentity,resetRequested,firmwareDataSent:false,rebootVerified:false};
   } catch(cause) {
     const error=new Error(`Bootloader probe stopped during ${stage}; reconnect and verify the original pair`);
     Object.assign(error,{stage,resetRequested,firmwareDataSent:false});throw error;

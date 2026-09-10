@@ -2638,3 +2638,29 @@ The remaining evidence is a controlled bike run. It must first establish that
 the preparation pair transfers, resets and reads back exactly; only then may the
 same transaction attempt US. The final readback is the region result. Higher
 assistance speed is a separate physical observation.
+
+## Build .64: first-use preflight returns to the bike-validated entry path
+
+The build .63 live run verified the complete preparation/restoration bundle,
+the original D4.5.0.0/M4.4.8.0 EU baseline and motor authentication. Its direct
+D-recovery preflight accepted recovery mode and slot, then received no reply to
+recovery stage 1 in four bounded attempts. It stopped before creating a recovery
+journal, sending a firmware image, or writing the destination. Firmware and
+region therefore remained unchanged by that run.
+
+Using direct recovery as the first-use gate was inconsistent with the bike
+evidence. Build .45 already completed the ordinary M entry, M loader-version
+read, ordinary D entry, D loader identity and reset sequence on this exact bike.
+Build .64 restores that sequence for the preparation preflight. The restricted
+writer permits only the application baseline reads, ordinary entry commands,
+loader version/identity reads and the final reset; it continues to block image
+data, erase commands and destination writes.
+
+Direct recovery entry remains available only after the durable journal proves
+that a firmware transfer started and was interrupted. A successful .64 preflight
+records the application and D-loader identities, requests reset and stops. The
+page then requires an explicit physical power cycle before it enables the first
+firmware transfer. Offline simulation covers all 38 preflight writes, failures
+before and after each write, aborts, phase timeouts, identity and baseline gates,
+the reset gate and command allowlist. Preparation transfer and the resulting
+region change remain unverified on the bike.
