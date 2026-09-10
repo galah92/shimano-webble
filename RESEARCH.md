@@ -2496,3 +2496,32 @@ They cover the reviewed image lengths, an unaligned 65-byte case, a complete
 window, final zero padding and full-window checksum. Tests also reject offsets
 outside the derived sequence. No retry state machine, reconnect recovery or
 firmware writes were enabled. No new bike test is requested.
+
+## M checksum freshness: timeout and explicit rejection are different cases
+
+Inspected 3.0.7 C0644tk.a (52-145): query/data acknowledgements compare
+sequence fields, while the checkpoint branch (117-141) records F2 00 31/32
+without comparing a sequence or window address. F0 registers that listener
+before issuing its query and waits for the acknowledgement/checksum
+(M-transfer-debug.java 7004-7100). AbstractC0812yn.b/e add/remove listeners;
+its c method forwards newly received bytes to current listeners. Registration
+does not replay its history, but neither registration nor removal establishes
+a device queue flush. These inspected paths provide no freshness barrier.
+
+A hypothetical checksum arriving after a timeout and a subsequent attempt's
+data acknowledgement could therefore be mistaken for that subsequent attempt's
+checksum. This is a protocol-correlation limit, not an observed bike failure.
+It does not establish ambiguity for every explicit-rejection retry: in that
+case a terminal rejection was already observed, rather than still outstanding.
+The inspected source selects rejection codes 02/05/0A for partial recovery;
+its same-session rewrite logic and device ordering assumptions remain distinct
+from recovery after timeout, disconnect or power loss. An arbitrary delay is
+not evidence that outstanding device replies have been drained.
+
+The current block worker stops on a checkpoint timeout. The worker regression
+now exercises a checkpoint data ACK with no checksum, verifies no retransmission,
+then invokes a saved callback with a late checksum to model an already queued
+notification. The settled failure stays failed, with no writes or timers added.
+This validates host cleanup only; it does not qualify firmware installation.
+Next implementation work should keep explicit-rejection recovery separate from
+uncertain transport outcomes, rather than enable a general retry-on-failure path.
