@@ -11,13 +11,13 @@ function images(dLength,mLength){
  d.fill(255,0,16);d.set([0x43,0,0],16);d.set([34,0,4],40);d.set([0x42,0,0],47);
  m.set([255,255,34,0],12);m.set([0x42,1,0],8);m.set([0x42,0,0],16);return {d,m};
 }
-async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wrongIdentity=false,wrongSerial=false,baselineMismatch=false,dropPhase=null}={}){
+async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wrongIdentity=false,wrongSerial=false,baselineMismatch=false,dropPhase=null,recovery=false}={}){
  const {d,m}=images(dLength,mLength),hash=b=>createHash('sha256').update(b).digest('hex');
  const code=source.replace('const FIRMWARE_IMAGES = Object.freeze({',`const FIRMWARE_IMAGES = Object.freeze({'${hash(d)}':'preparation','${hash(m)}':'preparation',`);
- let now=0,id=0,listener=null,result,error,stage='',selector=13,status=141,fragments=null,fragmentIndex=0,pending=null;
+ let now=0,id=0,listener=null,result,error,stage='',selector=recovery?0:13,status=recovery?160:141,fragments=null,fragmentIndex=0,pending=null;
  let nativeCount=0,mBlocks=0,dBlocks=0,checkpoints=0,deviceError=null,mFinished=false,dFinished=false;
  const timers=new Map(),stages=[],commands=[],controller=new AbortController();
- const ctx=vm.createContext({Uint8Array,Error,AbortController,crypto:webcrypto,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});
+ const ctx=vm.createContext({Uint8Array,TextEncoder,Error,AbortController,crypto:webcrypto,setTimeout(fn,ms){const key=++id;timers.set(key,{fn,at:now+ms});return key;},clearTimeout(key){timers.delete(key);}});
  vm.runInContext(code,ctx);
  const rx=(...bytes)=>{if(stage!==dropPhase&&listener)listener(Uint8Array.from(bytes));};
  function logical(name,p){
@@ -92,11 +92,19 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  }
  const characteristic=name=>({async writeValueWithResponse(p){native(name,false,p);},async writeValueWithoutResponse(p){native(name,true,p);}});
  const file=data=>({size:data.length,arrayBuffer:async()=>data.slice().buffer});
- const promise=ctx.transferFirmwarePair({files:[file(m),file(d)],identityReference:identityReference(),baseline:{identity:createHash('sha256').update(Uint8Array.of(...new Uint8Array(16).fill(7),1,2,3,4,5,6)).digest('hex'),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:0},credentials:Uint8Array.from({length:15},(_,i)=>i+1),
-  characteristics:{'2afa':characteristic('2afa'),'2afe':characteristic('2afe')},signal:controller.signal,
+ const values=new Map(),journalStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};
+ const files=[file(m),file(d)],baseline={identity:createHash('sha256').update(Uint8Array.of(...new Uint8Array(16).fill(7),1,2,3,4,5,6)).digest('hex'),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:0};
+ if(recovery){
+  const pair=await ctx.loadFirmwarePair(files),reference=identityReference();
+  let journal=await ctx.createFirmwareRecoveryJournal({deviceId:'bike-a',pair,baseline,identityReference:reference});
+  journal={...journal,revision:1,stage:'stopped',lastStage:'D-update-entry',completed:{m:true,d:false}};
+  ctx.writeFirmwareRecoveryJournal(journalStorage,journal);
+ }
+ const options={files,identityReference:identityReference(),baseline,credentials:Uint8Array.from({length:15},(_,i)=>i+1),
+  deviceId:'bike-a',journalStorage,characteristics:{'2afa':characteristic('2afa'),'2afe':characteristic('2afe')},signal:controller.signal,
   subscribe(fn){assert.equal(listener,null);listener=fn;return()=>listener=null;},
-  onStage(value){stage=value;stages.push(value);if(value==='D-update-entry'){assert(mFinished);selector=0;status=128;}}
- }).then(r=>result=r,e=>error=e);
+  onStage(value){stage=value;stages.push(value);if(value==='D-update-entry'){assert(mFinished);selector=0;status=recovery?160:128;}}};
+ const promise=(recovery?ctx.recoverFirmwarePair(options):ctx.transferFirmwarePair(options)).then(r=>result=r,e=>error=e);
  for(let i=0;i<30000&&!result&&!error;i++){
   await flush();await new Promise(setImmediate);if(result||error)break;
   if(!timers.size){await new Promise(setImmediate);continue;} // Real SHA-256 completion.
@@ -105,10 +113,11 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  }
  await promise;if(deviceError)throw deviceError;
  assert.equal(listener,null);assert.equal(timers.size,0);
- return {result,error,nativeCount,mBlocks,dBlocks,checkpoints,stages,commands,mFinished,dFinished};
+ return {result,error,nativeCount,mBlocks,dBlocks,checkpoints,stages,commands,mFinished,dFinished,journal:values.get('shimano-firmware-recovery-v1')};
 }
 (async()=>{
  const first=await run();assert(!first.error);assert(first.result.mFinished&&first.result.dFinished);assert.equal(first.result.reset,false);
+ assert.equal(JSON.parse(first.journal).stage,'paired-transfer-finished');
  assert.equal(first.result.firmwareVerified,false);assert(first.mFinished&&first.dFinished);
  let uncertainFinishes=0;
  for(const lateFail of [false,true])for(let fail=0;fail<first.nativeCount;fail++){
@@ -117,7 +126,9 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  }
  assert(uncertainFinishes>=2, 'post-reply ATT failures must not claim components unchanged');
  for(let abortAt=0;abortAt<first.nativeCount;abortAt++){const r=await run({abortAt});assert(r.error);assert.equal(r.nativeCount,abortAt+1);}
- for(const dropPhase of first.stages.slice(1)){const r=await run({dropPhase});assert(r.error);assert.equal(r.error.stage,dropPhase);}
+ for(const dropPhase of first.stages.filter(stage=>!['file-validation','M-finished','paired-transfer-finished'].includes(stage))){
+  const r=await run({dropPhase});assert(r.error);assert.equal(r.error.stage,dropPhase);
+ }
  const mismatch=await run({wrongIdentity:true});assert(mismatch.error);assert.equal(mismatch.error.mFinished,true);assert.equal(mismatch.dBlocks,0);
  const stale=await run({baselineMismatch:true});assert(stale.error);assert.equal(stale.error.stage,'baseline-verification');assert.equal(stale.nativeCount,5);assert.equal(stale.mBlocks,0);assert.equal(stale.dBlocks,0);
  const wrongMotor=await run({wrongSerial:true});assert(wrongMotor.error);assert(wrongMotor.error.mFinished);assert.equal(wrongMotor.dBlocks,0);assert.equal(wrongMotor.error.reset,false);
@@ -125,5 +136,11 @@ async function run({dLength=256,mLength=256,fail=-1,lateFail=false,abortAt=-1,wr
  for(const [dLength,mLength]of [[65537,1025],[132072,116320],[138072,119824]]){
   const r=await run({dLength,mLength});assert(!r.error, r.error?.message);assert.equal(r.dBlocks,Math.ceil(dLength/64));assert.equal(r.mBlocks,Math.ceil(mLength/64));assert.equal(r.checkpoints,Math.ceil(mLength/1024));
  }
- console.log(`Full paired wire simulation passed: ${first.nativeCount}-write small pair, failure-before/after and abort at every write, phase timeouts, wrong identity, bank/checkpoint boundaries and both reviewed pair sizes`);
+ for(const [dLength,mLength]of [[256,256],[132072,116320],[138072,119824]]){
+  const r=await run({dLength,mLength,recovery:true});assert(!r.error,r.error?.message);
+  assert.equal(r.dBlocks,Math.ceil(dLength/64));assert.equal(r.mBlocks,Math.ceil(mLength/64));
+  assert.equal(r.checkpoints,Math.ceil(mLength/1024));assert(!r.stages.includes('baseline-verification'));
+  assert.equal(JSON.parse(r.journal).attempt,1);
+ }
+ console.log(`Full paired wire simulation passed: ${first.nativeCount}-write small pair, failure-before/after and abort at every write, phase timeouts, wrong identity, bank/checkpoint boundaries, both reviewed pair sizes and full reconnect recovery replay`);
 })().catch(e=>{console.error(e);process.exit(1);});

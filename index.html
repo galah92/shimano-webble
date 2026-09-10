@@ -16,8 +16,10 @@ STEPS system. The practical end goal is to understand enough of Shimano's BLE
 configuration protocol to support legitimate configuration workflows without
 requiring SM-PCE hardware.
 
-This current HTML is intentionally READ-ONLY. It performs no configuration
-writes. Preserve a staged approach:
+The historical page described below was intentionally read-only. The current
+guided candidate can install exact firmware pairs and attempt one destination
+write behind explicit identity, file, journal and readback gates. Preserve a
+staged approach:
 1) establish BLE access,
 2) identify / validate Shimano session authentication,
 3) map authenticated configuration transport,
@@ -250,31 +252,15 @@ Likely GitHub Pages URL after Pages is enabled:
 
 CURRENT HTML BEHAVIOR
 ---------------------
-This file:
-- requests an SCE* Shimano device / 18FF service
-- connects over GATT
-- gets service 18FF
-- gets 2AF3, 2AF4, 2AF6, 2AF7, 2AF8
-- enables indications/notifications on 2AF3
-- reads 2AF4 challenge
-- optionally tries read-only protected reads on 2AF6/7/8
-- logs everything as hex + ASCII
-- performs NO writes
+See README.md and RESEARCH.md. This imported section predates the authenticated
+application transport, observed E5000 identity, recovery journal and guarded
+firmware/region workflow now implemented below.
 
-NEXT TECHNICAL MILESTONES
--------------------------
-1) Deploy this read-only page over HTTPS and confirm WebBLE behavior matches
-   nRF Connect.
-2) Extract application/session auth from eTuning 3.0.7 and compare with 1.0.32.
-3) Correlate auth packets with the Android HCI snoop capture.
-4) Add authenticated-session support only after algorithm validation against
-   known-good captured traffic.
-5) Verify protected reads become available after authentication.
-6) Map configuration transport and readback/inspection commands.
-7) Determine whether DU-E7000 4.7.1 supports the intended operation directly
-   or requires legacy firmware preparation.
-8) If firmware preparation is required, reverse engineer that workflow before
-   attempting anything destructive.
+NEXT TECHNICAL MILESTONE
+------------------------
+Run the controlled guided preparation transaction on the verified E5000 bike;
+require exact reconnect readback before the one US setter and exact restoration
+plus final readback before claiming the region goal.
 
 ENGINEERING PRACTICE
 --------------------
@@ -297,7 +283,7 @@ END HANDOFF NOTES
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Shimano BLE Diagnostic</title>
+<title>Shimano E5000 US-region workflow</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; }
   body { margin: 0; padding: 16px; max-width: 760px; margin-inline: auto; }
@@ -315,12 +301,17 @@ END HANDOFF NOTES
   .bad { color: #d9480f; }
   input { padding:10px; max-width:100%; box-sizing:border-box; }
   .warn { color: #e67700; }
+  .workflow-files { display:grid; gap:10px; }
+  .workflow-files label { display:grid; gap:5px; }
+  .check { display:flex; gap:8px; align-items:flex-start; margin:10px 0; }
+  .check input { margin-top:4px; }
+  a { overflow-wrap:anywhere; }
 </style>
 </head>
 <body>
-<h1>Shimano BLE Diagnostic</h1>
+<h1>Shimano E5000 US-region workflow</h1>
 <div class="muted" id="build"></div>
-<p>Connect, enter your passkey, and tap Check region. US-region configuration is not ready yet.</p>
+<p>This guided candidate workflow checks the exact motor and firmware, installs the reviewed older pair, writes US once, verifies it after a power cycle, restores the original firmware pair, and verifies US again. Every checkpoint must match; the first live preparation transfer is still unverified.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -346,29 +337,39 @@ END HANDOFF NOTES
 <div class="muted">Use the passkey configured in E-TUBE. It is used locally and is not saved or logged.</div>
 </div>
 <div class="card">
-<strong>US-region readiness</strong>
-<p>Check the current region and firmware. Firmware preparation remains under investigation; this check does not enter recovery mode or change the region.</p>
-<div class="row"><button id="bootProbe" disabled>Check region</button></div>
-<div id="bootProbeStatus" role="status">Connect, enter your passkey, then tap Check region. Setup runs automatically.</div>
+<strong>Change region to US</strong>
+<p>The files stay on this phone. Download the reviewed preparation ZIP and the two original restoration files, then select them below. The page accepts only exact reviewed SHA-256 hashes.</p>
+<div class="workflow-files">
+<label>Preparation pair — D 4.3.0 and M 4.2.1
+  <span><a href="https://etuning-app.com/wp-content/uploads/2024/11/5000_430.zip" target="_blank" rel="noopener">Download reviewed preparation ZIP</a></span>
+  <input id="preparationFiles" type="file" accept=".zip,.dat" multiple aria-label="Select preparation ZIP or D and M firmware files" />
+</label>
+<div id="preparationStatus" role="status">Select the preparation ZIP.</div>
+<label>Restoration pair — D 4.5.0 and M 4.4.8
+  <span><a href="https://api.shimano.com/etube/public/data/upload/published/DUE5000-D.4.5.0.dat" target="_blank" rel="noopener">DUE5000-D.4.5.0.dat</a> · <a href="https://api.shimano.com/etube/public/data/upload/published/DUE5000-M.4.4.8.dat" target="_blank" rel="noopener">DUE5000-M.4.4.8.dat</a></span>
+  <input id="restorationFiles" type="file" accept=".dat" multiple aria-label="Select restoration D and M firmware files" />
+</label>
+<div id="restorationStatus" role="status">Select both restoration files.</div>
+<div class="muted">If Shimano blocks either restoration download, stop here. The workflow will remain disabled and will not install the preparation pair without both verified restoration files.</div>
+</div>
+<label class="check"><input id="firmwareConsent" type="checkbox" /> <span>I understand that this installs firmware. I will keep the bike charged, Chrome open, and the phone close until the page asks for a power cycle.</span></label>
+<label class="check"><input id="powerCycled" type="checkbox" /> <span>I fully turned the bike off and back on after the page’s last reset/write instruction.</span></label>
+<div class="row"><button id="bootProbe" disabled>Continue US workflow</button></div>
+<div id="bootProbeStatus" role="status">Select the preparation ZIP and both restoration files, connect, enter your passkey, then continue.</div>
 </div>
 <details class="card"><summary>Advanced diagnostics</summary>
 <div class="row"><button id="probe" disabled>Run read-only probe</button><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">The original 4.5.0 firmware rejected US writes. A US write experiment requires verified 4.3.0 / 4.2.1 preparation firmware and motor authentication. Preparation is not yet available here.</div></div>
-<details class="card"><summary>Check preparation files</summary>
-<p>Select the two extracted DAT files. This checks their contents locally; it does not install firmware or connect to the bike.</p>
-<input id="firmwareFiles" type="file" accept=".dat" multiple aria-label="Select D and M firmware files" />
-<div id="firmwareStatus" role="status">Choose both files from the same package.</div>
-</details>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">The standalone setter is disabled. The guided workflow permits one write only after verified D4.3.0/M4.2.1 preparation and motor authentication.</div></div>
 </details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.59';
+const BUILD = '2026-09-10.62';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1323,6 +1324,99 @@ const FIRMWARE_IMAGES = Object.freeze({
   '44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb': 'restoration',
   '9ea350e988345a9d9fb41c1363562ca190f1a8d5e1cc8a38c6373f69b877f033': 'restoration',
 });
+// The current official D4.5.0 download is a container. Accept only this exact
+// reviewed container, decrypt it locally, then require the reviewed raw hash.
+// The bytes never leave the browser and the container itself is never flashed.
+const FIRMWARE_WRAPPERS = Object.freeze({
+  '363a43fc6997d384e0d723fa241b034146365e7c48f1fc8cfda027a948c5a6a7': {
+    source:'restoration',rawHash:'44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb',
+    size:138072,digest:'7192cb7a0286798c7511d9237ef2a302'},
+});
+// This is the exact public E5000 preparation archive reviewed against the
+// archived Shimano desktop files. ZIP parsing is intentionally narrow: the
+// archive hash, entry metadata and extracted raw hashes must all match.
+const FIRMWARE_ARCHIVES = Object.freeze({
+  '4dee4d75ee83c22e951114cbf57332709c15be637ec2a8171bd82f9345adb137': {
+    source:'preparation',size:146098,entries:[
+      {name:'DUE5000-D.5.3.0.dat',offset:0,compressedSize:73150,size:132072,crc:0x4dbb81f0,
+        hash:'3d3df4dfe3de333062f445b6719fa5033f93dc9d384448134ee6041d216c6af0'},
+      {name:'DUE5000-M.5.2.1.dat',offset:73199,compressedSize:72626,size:116320,crc:0x8a118077,
+        hash:'10190fd78e6527908c0e43405184c414b612bc4becce9ca5483612665ced6b56'},
+    ],
+  },
+});
+function firmwareHex(data) {
+  return Array.from(data,b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function firmwareSha256(data) {
+  return firmwareHex(new Uint8Array(await crypto.subtle.digest('SHA-256',data)));
+}
+function firmwareWrapperKey(digest) {
+  if(!(digest instanceof Uint8Array)||digest.length!==16) throw new Error('Invalid firmware container digest');
+  const a=digest[0]|digest[1]<<8,b=digest[2]|digest[3]<<8,c=digest[4]|digest[5]<<8;
+  let x=(123456789^(((a<<16)|b)>>>0))>>>0,y=362436069,z=521288629,
+    w=(88675123^(((b<<16)|c)>>>0))>>>0;
+  const step=()=>{const t=(x^(x<<11))>>>0;x=y;y=z;z=w;w=(w^(w>>>19)^t^(t>>>8))>>>0;return w;};
+  for(let i=0;i<(a>>>8);i++)step();
+  const key=new Uint8Array(16),view=new DataView(key.buffer);
+  for(let i=0;i<4;i++)view.setUint32(i*4,step(),true);
+  return key;
+}
+async function unwrapReviewedFirmwareContainer(container,review) {
+  if(!(container instanceof Uint8Array)||container.length<68||(container.length-52)%16!==0||
+      !review||!Number.isInteger(review.size)||typeof review.digest!=='string'||
+      typeof review.rawHash!=='string') throw new Error('Invalid reviewed firmware container');
+  const digest=container.slice(-36,-20),declared=new DataView(container.buffer,container.byteOffset+container.length-20,4).getUint32(0,true);
+  if(declared!==review.size||firmwareHex(digest)!==review.digest)
+    throw new Error('Firmware container metadata does not match the reviewed image');
+  const iv=container.slice(0,16),ciphertext=container.slice(16,-36),key=firmwareWrapperKey(digest);
+  try {
+    const cryptoKey=await crypto.subtle.importKey('raw',key,{name:'AES-CBC'},false,['decrypt']);
+    const raw=new Uint8Array(await crypto.subtle.decrypt({name:'AES-CBC',iv},cryptoKey,ciphertext));
+    if(raw.length!==review.size||await firmwareSha256(raw)!==review.rawHash)
+      throw new Error('Decrypted firmware does not match the reviewed image');
+    return raw;
+  } catch(cause) {
+    if(cause instanceof Error&&cause.message==='Decrypted firmware does not match the reviewed image') throw cause;
+    throw new Error('Reviewed firmware container could not be decrypted');
+  } finally {key.fill(0);iv.fill(0);digest.fill(0);ciphertext.fill(0);}
+}
+async function inflateReviewedZipEntry(archive,entry,archiveHash) {
+  if(typeof DecompressionStream!=='function') throw new Error('This browser cannot open the reviewed ZIP; extract it and select both DAT files');
+  const view=new DataView(archive.buffer,archive.byteOffset,archive.byteLength),offset=entry.offset;
+  if(offset<0||offset+30>archive.length||view.getUint32(offset,true)!==0x04034b50||
+      view.getUint16(offset+6,true)!==0||view.getUint16(offset+8,true)!==8||
+      view.getUint32(offset+14,true)!==entry.crc||view.getUint32(offset+18,true)!==entry.compressedSize||
+      view.getUint32(offset+22,true)!==entry.size)
+    throw new Error('Reviewed ZIP entry metadata mismatch');
+  const nameLength=view.getUint16(offset+26,true),extraLength=view.getUint16(offset+28,true);
+  const dataOffset=offset+30+nameLength+extraLength,end=dataOffset+entry.compressedSize;
+  if(end>archive.length||new TextDecoder().decode(archive.subarray(offset+30,offset+30+nameLength))!==entry.name)
+    throw new Error('Reviewed ZIP entry layout mismatch');
+  const compressed=archive.slice(dataOffset,end);
+  try {
+    const stream=new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const data=new Uint8Array(await new Response(stream).arrayBuffer());
+    if(data.length!==entry.size||await firmwareSha256(data)!==entry.hash)
+      throw new Error('Extracted firmware does not match the reviewed image');
+    return {name:entry.name,data,archiveHash};
+  } catch(cause) {
+    if(cause instanceof Error&&cause.message==='Extracted firmware does not match the reviewed image') throw cause;
+    throw new Error('Reviewed preparation ZIP could not be extracted');
+  } finally {compressed.fill(0);}
+}
+async function loadReviewedFirmwareArchive(file) {
+  if(file.size<256||file.size>32*1024*1024) throw new Error('File size outside supported archive range');
+  const archive=new Uint8Array(await file.arrayBuffer()).slice(),hash=await firmwareSha256(archive);
+  const review=FIRMWARE_ARCHIVES[hash];
+  if(!review||archive.length!==review.size) {archive.fill(0);throw new Error('ZIP does not match the reviewed preparation archive');}
+  try {
+    const entries=[];
+    for(const entry of review.entries) entries.push(await inflateReviewedZipEntry(archive,entry,hash));
+    return entries;
+  }
+  finally {archive.fill(0);}
+}
 function firmwareVersion(data, offset) {
   const [packed, patch, build] = data.slice(offset, offset + 3);
   if (packed >> 4 !== 4 || (packed & 15) > 9 || patch === 255 || build === 255) return null;
@@ -1346,17 +1440,21 @@ function firmwarePairRequirements(d, m) {
   return rank(m.version) >= rank(d.minimum) && rank(d.version) >= rank(m.minimum);
 }
 async function loadFirmwarePair(files) {
-  if (files.length !== 2) throw new Error('Select exactly two DAT files: one D and one M');
+  if(files.length!==1&&files.length!==2) throw new Error('Select one reviewed ZIP or exactly two DAT files');
+  const inputs=files.length===1?await loadReviewedFirmwareArchive(files[0]):files;
   const headers = [];
-  for (const file of files) {
-    if (file.size < 256 || file.size > 32 * 1024 * 1024) throw new Error('File size outside supported DAT range');
-    const data = new Uint8Array(await file.arrayBuffer()).slice();
+  for (const file of inputs) {
+    if (file.data===undefined&&(file.size < 256 || file.size > 32 * 1024 * 1024)) throw new Error('File size outside supported DAT range');
+    let data = file.data instanceof Uint8Array?file.data.slice():new Uint8Array(await file.arrayBuffer()).slice();
+    const containerHash=await firmwareSha256(data),wrapper=FIRMWARE_WRAPPERS[containerHash];
+    if(wrapper) data=await unwrapReviewedFirmwareContainer(data,wrapper);
     const header = firmwareHeader(data);
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
-    const hash = Array.from(digest, b => b.toString(16).padStart(2, '0')).join('');
+    const hash=await firmwareSha256(data);
     const source = FIRMWARE_IMAGES[hash];
     if (!source) throw new Error('File does not match a reviewed preparation or restoration image');
-    headers.push({...header, source, data, geometry: firmwareTransferGeometry(data, header.component)});
+    if(wrapper&&wrapper.source!==source) throw new Error('Firmware container source mismatch');
+    headers.push({...header,source,hash,containerHash:wrapper?containerHash:null,archiveHash:file.archiveHash||null,data,
+      geometry:firmwareTransferGeometry(data,header.component)});
   }
   const d = headers.find(h => h.component === 'D'), m = headers.find(h => h.component === 'M');
   if (!d || !m) throw new Error('A pair needs one D and one M image');
@@ -1369,42 +1467,199 @@ async function checkFirmwarePair(files) {
   return {source: d.source, dVersion: d.version.join('.'), mVersion: m.version.join('.'), dGeometry: d.geometry, mGeometry: m.geometry, installable: false};
 }
 
-// No UI caller. Authenticated E5000 transport, private credentials and a
-// recovery plan remain external preconditions. Baseline is reread before entry.
+const FIRMWARE_RECOVERY_JOURNAL_KEY = 'shimano-firmware-recovery-v1';
+const FIRMWARE_JOURNAL_STAGES = new Set(['ready','M-update-entry','M-slot-selection','M-transfer','M-finished',
+  'D-update-entry','D-bootloader-entry','D-identity-and-transfer','paired-transfer-finished',
+  'reset-request','reset-write-completed','prepared-readback-verification','prepared-readback-verified',
+  'US-write-ready','US-write-attempt','US-readback-verified','US-persistence-verification',
+  'US-persistence-verified','restoration-readback-verification','restoration-readback-verified','stopped']);
+function firmwareJournalStorage(storage) {
+  if (!storage || typeof storage.getItem!=='function' || typeof storage.setItem!=='function' ||
+      typeof storage.removeItem!=='function') throw new Error('Durable firmware recovery storage is required');
+  return storage;
+}
+function validFirmwareJournalComponent(value, component) {
+  return value?.component===component && typeof value.hash==='string' && /^[a-f0-9]{64}$/.test(value.hash) &&
+    typeof value.version==='string' && /^4\.\d\.\d{1,3}\.\d{1,3}$/.test(value.version) &&
+    Number.isInteger(value.size) && value.size>=256 && value.size<=32*1024*1024;
+}
+function validateFirmwareRecoveryJournal(value) {
+  const sourceVersions={preparation:['4.3.0.0','4.2.1.0'],restoration:['4.5.0.0','4.4.8.0']};
+  const versions=sourceVersions[value?.pair?.source];
+  const baselinePair=`${value?.baseline?.dVersion}/${value?.baseline?.mVersion}`;
+  const usStages=['US-write-ready','US-write-attempt','US-readback-verified','US-persistence-verification',
+    'US-persistence-verified'];
+  const hasUsStage=usStages.includes(value?.stage)||(value?.stage==='stopped'&&usStages.includes(value?.lastStage));
+  const validUs=value?.us && typeof value.us.writeConnection==='string' && /^[a-f0-9]{64}$/.test(value.us.writeConnection);
+  const resetStages=['reset-request','reset-write-completed','prepared-readback-verification',
+    'prepared-readback-verified',...usStages,'restoration-readback-verification','restoration-readback-verified'];
+  const hasResetStage=resetStages.includes(value?.stage)||(value?.stage==='stopped'&&resetStages.includes(value?.lastStage));
+  const validResetConnection=typeof value?.resetConnection==='string'&&/^[a-f0-9]{64}$/.test(value.resetConnection);
+  const expectedBaseline=value?.pair?.source==='preparation'?'4.5.0.0/4.4.8.0/0':'4.3.0.0/4.2.1.0/1';
+  if (value?.version!==1 || !Number.isInteger(value.revision) || value.revision<0 ||
+      !Number.isInteger(value.attempt) || value.attempt<0 ||
+      typeof value.deviceBinding!=='string' || !/^[a-f0-9]{64}$/.test(value.deviceBinding) ||
+      !FIRMWARE_JOURNAL_STAGES.has(value.stage) ||
+      value.lastStage!==null && !FIRMWARE_JOURNAL_STAGES.has(value.lastStage) ||
+      (value.stage==='stopped')!==(value.lastStage!==null) || value.lastStage==='stopped' ||
+      !validFirmwareJournalComponent(value.pair?.d,'D') || !validFirmwareJournalComponent(value.pair?.m,'M') ||
+      !versions || value.pair.d.version!==versions[0] || value.pair.m.version!==versions[1] ||
+      !value.baseline || value.baseline.family!==34 || value.baseline.unit!==0 ||
+      ![0,1].includes(value.baseline.destination) || !/^[a-f0-9]{64}$/.test(value.baseline.identity||'') ||
+      `${baselinePair}/${value.baseline.destination}`!==expectedBaseline ||
+      typeof value.identitySalt!=='string' || !/^[a-f0-9]{32}$/.test(value.identitySalt) ||
+      !validBootloaderFingerprint(value.bootloaderIdentity) ||
+      typeof value.completed?.m!=='boolean' || typeof value.completed?.d!=='boolean' ||
+      value.completed.d && !value.completed.m ||
+      value.stage==='M-finished' && !value.completed.m ||
+      ['paired-transfer-finished','reset-request','reset-write-completed','prepared-readback-verification',
+        'prepared-readback-verified','restoration-readback-verification','restoration-readback-verified',
+        ...usStages].includes(value.stage) && (!value.completed.m || !value.completed.d) ||
+      ['prepared-readback-verified',...usStages].includes(value.stage) && value.pair.source!=='preparation' ||
+      ['restoration-readback-verification','restoration-readback-verified'].includes(value.stage) &&
+        value.pair.source!=='restoration' ||
+      hasResetStage&&!validResetConnection || value.resetConnection!==undefined&&!validResetConnection ||
+      hasUsStage && !validUs || value.us!==undefined && !validUs)
+    throw new Error('Invalid firmware recovery journal');
+  return value;
+}
+async function firmwareDeviceBinding(deviceId, identitySalt) {
+  if (typeof deviceId!=='string' || !deviceId || deviceId.length>1024 ||
+      typeof identitySalt!=='string' || !/^[a-f0-9]{32}$/.test(identitySalt))
+    throw new Error('A selected Web Bluetooth device and identity salt are required');
+  const encoded=new TextEncoder().encode(deviceId),salt=Uint8Array.from(identitySalt.match(/../g),b=>parseInt(b,16));
+  const input=Uint8Array.of(87,66,74,49,...salt,...encoded);
+  try {
+    const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',input));
+    return Array.from(digest,b=>b.toString(16).padStart(2,'0')).join('');
+  } finally {input.fill(0);salt.fill(0);encoded.fill(0);}
+}
+function firmwareJournalPair(pair) {
+  return {source:pair.source,
+    d:{component:'D',hash:pair.d.hash,version:pair.d.version.join('.'),size:pair.d.data.length},
+    m:{component:'M',hash:pair.m.hash,version:pair.m.version.join('.'),size:pair.m.data.length}};
+}
+async function createFirmwareRecoveryJournal({deviceId,pair,baseline,identityReference}) {
+  const expected={identity:baseline.identity,family:baseline.family,unit:baseline.unit,dVersion:baseline.dVersion,
+    mVersion:baseline.mVersion,destination:baseline.destination};
+  const journal={version:1,revision:0,attempt:0,
+    deviceBinding:await firmwareDeviceBinding(deviceId,identityReference.salt),stage:'ready',lastStage:null,
+    pair:firmwareJournalPair(pair),baseline:expected,identitySalt:identityReference.salt,
+    bootloaderIdentity:{...identityReference.bootloaderIdentity},completed:{m:false,d:false}};
+  return validateFirmwareRecoveryJournal(journal);
+}
+function writeFirmwareRecoveryJournal(storage,value) {
+  const target=firmwareJournalStorage(storage),journal=validateFirmwareRecoveryJournal(value);
+  const encoded=JSON.stringify(journal);
+  target.setItem(FIRMWARE_RECOVERY_JOURNAL_KEY,encoded);
+  if(target.getItem(FIRMWARE_RECOVERY_JOURNAL_KEY)!==encoded) throw new Error('Firmware recovery journal did not persist');
+  return journal;
+}
+function readFirmwareRecoveryJournal(storage) {
+  const encoded=firmwareJournalStorage(storage).getItem(FIRMWARE_RECOVERY_JOURNAL_KEY);
+  if(typeof encoded!=='string' || !encoded) throw new Error('No firmware recovery journal is available');
+  let value;
+  try {value=JSON.parse(encoded);} catch {throw new Error('Invalid firmware recovery journal');}
+  return validateFirmwareRecoveryJournal(value);
+}
+function advanceFirmwareRecoveryJournal(storage,journal,stage,
+  {m=journal.completed.m,d=journal.completed.d,lastStage=null,us=journal.us}={}) {
+  const next={...journal,revision:journal.revision+1,stage,lastStage,completed:{m,d},...(us===undefined?{}:{us})};
+  writeFirmwareRecoveryJournal(storage,next);
+  return next;
+}
+async function firmwareConnectionBinding(connection,identitySalt) {
+  if(typeof connection!=='string'||!connection||connection.length>1024||
+      typeof identitySalt!=='string'||!/^[a-f0-9]{32}$/.test(identitySalt))
+    throw new Error('A connection token and identity salt are required');
+  const encoded=new TextEncoder().encode(connection),salt=Uint8Array.from(identitySalt.match(/../g),b=>parseInt(b,16));
+  const input=Uint8Array.of(87,66,74,50,...salt,...encoded);
+  try {
+    const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',input));
+    return Array.from(digest,b=>b.toString(16).padStart(2,'0')).join('');
+  } finally {input.fill(0);salt.fill(0);encoded.fill(0);}
+}
+async function verifyFirmwareRecoveryInputs({storage,deviceId,pair}) {
+  const journal=readFirmwareRecoveryJournal(storage);
+  const binding=await firmwareDeviceBinding(deviceId,journal.identitySalt),actual=firmwareJournalPair(pair);
+  if(binding!==journal.deviceBinding) throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  if(JSON.stringify(actual)!==JSON.stringify(journal.pair)) throw new Error('Selected firmware files do not match the recovery journal');
+  return journal;
+}
+
+function validFirmwareIdentityReference(identityReference,baseline) {
+  return identityReference?.version===1&&identityReference.verified===true&&
+    typeof baseline?.identity==='string'&&/^[a-f0-9]{64}$/.test(baseline.identity)&&
+    identityReference.expected?.identity===baseline.identity&&
+    typeof identityReference.salt==='string'&&/^[a-f0-9]{32}$/.test(identityReference.salt)&&
+    validBootloaderFingerprint(identityReference.bootloaderIdentity);
+}
+// Preparation starts only from the observed stock EU pair. Restoration starts
+// only after this journal has proved US through a separate physical-power-cycle
+// readback. This function runs before any update-mode write.
+async function authorizeFirmwarePairTransfer({pair,baseline,identityReference,deviceId,journalStorage}) {
+  if(pair.source==='preparation') {
+    if(`${baseline.dVersion}/${baseline.mVersion}/${baseline.destination}`!=='4.5.0.0/4.4.8.0/0')
+      throw new Error('Preparation requires the reviewed original D4.5.0/M4.4.8 EU baseline');
+    if(!validFirmwareIdentityReference(identityReference,baseline))
+      throw new Error('Paired transfer requires a verified bootloader reference for the baseline motor');
+    return identityReference;
+  }
+  if(pair.source!=='restoration'||
+      `${baseline.dVersion}/${baseline.mVersion}/${baseline.destination}`!=='4.3.0.0/4.2.1.0/1')
+    throw new Error('Restoration requires the verified prepared D4.3.0/M4.2.1 US baseline');
+  const previous=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,previous.identitySalt)!==previous.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  if(previous.stage!=='US-persistence-verified'||previous.pair.source!=='preparation'||
+      previous.baseline.identity!==baseline.identity)
+    throw new Error('Restoration requires the journaled US power-cycle verification');
+  return {version:1,verified:true,expected:{identity:baseline.identity},salt:previous.identitySalt,
+    bootloaderIdentity:{...previous.bootloaderIdentity}};
+}
+
+// No UI caller. Authenticated E5000 transport, private credentials and an
+// exact, durable recovery journal are required. Baseline is reread before entry.
 const firmwarePairTransports = new WeakSet();
-async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage, identityReference}) {
+async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage,
+  identityReference,deviceId,journalStorage}) {
   const knownVersions = ['4.5.0.0/4.4.8.0', '4.3.0.0/4.2.1.0'];
   if (!baseline || baseline.family !== 34 || baseline.unit !== 0 || ![0,1].includes(baseline.destination) ||
       !knownVersions.includes(`${baseline.dVersion}/${baseline.mVersion}`))
     throw new Error('Paired transfer requires a fresh reviewed E5000 component baseline');
-  if (!identityReference || identityReference.version!==1 || identityReference.verified!==true ||
-      typeof baseline.identity!=='string' || !/^[a-f0-9]{64}$/.test(baseline.identity) ||
-      identityReference.expected?.identity!==baseline.identity ||
-      typeof identityReference.salt!=='string' || !/^[a-f0-9]{32}$/.test(identityReference.salt) ||
-      !validBootloaderFingerprint(identityReference.bootloaderIdentity))
-    throw new Error('Paired transfer requires a verified bootloader reference for the baseline motor');
   if (!(credentials instanceof Uint8Array) || credentials.length !== 15 || typeof subscribe !== 'function' ||
       onStage !== undefined && typeof onStage !== 'function') throw new Error('Incomplete paired transport inputs');
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string' || !deviceId) throw new Error('Paired transfer requires the selected Web Bluetooth device ID');
   for (const [name, method] of [['2afa', 'writeValueWithResponse'], ['2afa', 'writeValueWithoutResponse'], ['2afe', 'writeValueWithResponse']])
     if (typeof characteristics?.[name]?.[method] !== 'function') throw new Error(`Missing ${name} ${method}`);
   const owner = characteristics['2afa'];
   if (firmwarePairTransports.has(owner)) throw new Error('Paired firmware workflow already active on this transport');
   firmwarePairTransports.add(owner);
   const expectedBaseline={...baseline};
-  const keys = credentials.slice(),expectedBootloaderIdentity={...identityReference.bootloaderIdentity};
-  const identitySalt=Uint8Array.from(identityReference.salt.match(/../g),b=>parseInt(b,16));
-  let writer, stage = 'file-validation', mFinished = false, dFinished = false;
-  const advance = name => { stage = name; if (signal?.aborted) throw new Error('Aborted'); onStage?.(name); };
+  const keys=credentials.slice();
+  let identitySalt,expectedBootloaderIdentity;
+  let writer, journal=null, stage = 'file-validation', mFinished = false, dFinished = false;
+  const advance = name => {
+    stage = name; if (signal?.aborted) throw new Error('Aborted'); onStage?.(name);
+    if(journal) journal=advanceFirmwareRecoveryJournal(journalStorage,journal,name,{m:mFinished,d:dFinished});
+  };
   try {
     advance('file-validation');
     // Hash and peer-check both actual snapshots before the first bike write.
     const {d, m, source} = await loadFirmwarePair(files);
+    const reference=await authorizeFirmwarePairTransfer({pair:{d,m,source},baseline:expectedBaseline,
+      identityReference,deviceId,journalStorage});
+    expectedBootloaderIdentity={...reference.bootloaderIdentity};
+    identitySalt=Uint8Array.from(reference.salt.match(/../g),b=>parseInt(b,16));
     writer = createFirmwareGattWriter(characteristics, signal);
     const transport = {write: writer.write, subscribe, signal};
     advance('baseline-verification');
     const current=await readFirmwareBaseline({...transport,identitySalt});
     if (['family','unit','identity','dVersion','mVersion','destination'].some(key=>current[key]!==expectedBaseline[key]))
       throw new Error('Live motor baseline differs from the planned transfer');
+    journal=await createFirmwareRecoveryJournal({deviceId,pair:{d,m,source},baseline:expectedBaseline,identityReference:reference});
+    writeFirmwareRecoveryJournal(journalStorage,journal); // Must succeed before the first update-mode write.
     advance('M-update-entry');
     const mEntry = await enterFirmwareUpdateSession(transport);
     advance('M-slot-selection');
@@ -1414,6 +1669,7 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
     await transferMFirmware({...transport, data: m.data, targetSelector: mEntry.targetSelector,
       nextSequence: () => sequence++ & 255});
     mFinished = true;
+    advance('M-finished');
     // Ordinary Th.p3 Sh has no special cleanup resources. Re-negotiate the
     // session for D; do not reset M or reuse the old selector across handover.
     advance('D-update-entry');
@@ -1423,17 +1679,355 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
     advance('D-identity-and-transfer');
     await transferDComponent({...transport, data: d.data, expectedBootloaderIdentity,identitySalt,write: packet => writer.write('2afa', packet)});
     dFinished = true;
+    advance('paired-transfer-finished');
     return {state: 'paired-transfer-finished', source, dVersion: d.version.join('.'), mVersion: m.version.join('.'),
       mFinished, dFinished, reset: false, firmwareVerified: false, regionVerified: false, recoveryVerified: false, installable: false};
   } catch (cause) {
+    let journalPersisted=false;
+    if(journal) try {
+      journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{m:mFinished,d:dFinished,lastStage:stage});
+      journalPersisted=true;
+    } catch {}
     // Do not log arbitrary native errors or private command payloads.
     const error = new Error(`Paired firmware workflow stopped during ${stage}; no automatic reset or recovery`);
     // These booleans mean confirmed worker completion, not proof of unchanged
     // device state after an uncertain ATT result.
     Object.assign(error, {stage, mFinished, dFinished, deviceStateUnknown: stage !== 'file-validation',
-      reset: false, recoveryVerified: false});
+      journalPersisted,reset: false, recoveryVerified: false});
     throw error;
-  } finally { writer?.close(); keys.fill(0); identitySalt.fill(0); firmwarePairTransports.delete(owner); }
+  } finally { writer?.close(); keys.fill(0); identitySalt?.fill(0); firmwarePairTransports.delete(owner); }
+}
+
+// Source Th.q4 recovery_install replays the complete M worker, renegotiates
+// p3, then runs the ordinary paired D worker. It does not resume at a saved
+// byte offset. This coordinator models that order and requires the exact
+// journaled device, images and bootloader fingerprint. It has no UI caller.
+async function recoverFirmwarePair({files,credentials,characteristics,subscribe,signal,onStage,deviceId,journalStorage}) {
+  if (!(credentials instanceof Uint8Array) || credentials.length!==15 || typeof subscribe!=='function' ||
+      onStage!==undefined && typeof onStage!=='function') throw new Error('Incomplete recovery transport inputs');
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId) throw new Error('Recovery requires the selected Web Bluetooth device ID');
+  for (const [name,method] of [['2afa','writeValueWithResponse'],['2afa','writeValueWithoutResponse'],['2afe','writeValueWithResponse']])
+    if(typeof characteristics?.[name]?.[method]!=='function') throw new Error(`Missing ${name} ${method}`);
+  const pair=await loadFirmwarePair(files),owner=characteristics['2afa'];
+  let journal=await verifyFirmwareRecoveryInputs({storage:journalStorage,deviceId,pair});
+  if(journal.stage==='paired-transfer-finished'&&journal.completed.m&&journal.completed.d)
+    return {state:'paired-transfer-finished',source:pair.source,dVersion:pair.d.version.join('.'),mVersion:pair.m.version.join('.'),
+      mFinished:true,dFinished:true,reset:false,firmwareVerified:false,regionVerified:false,recoveryVerified:false,installable:false};
+  const replayStages=['ready','M-update-entry','M-slot-selection','M-transfer','M-finished','D-update-entry',
+    'D-bootloader-entry','D-identity-and-transfer'];
+  if(!replayStages.includes(journal.stage)&&
+      !(journal.stage==='stopped'&&replayStages.includes(journal.lastStage)))
+    throw new Error('Recovery replay is unavailable after firmware transfer completion');
+  if(firmwarePairTransports.has(owner)) throw new Error('Paired firmware workflow already active on this transport');
+  firmwarePairTransports.add(owner);
+  const keys=credentials.slice(),salt=Uint8Array.from(journal.identitySalt.match(/../g),b=>parseInt(b,16));
+  const expectedBootloaderIdentity={...journal.bootloaderIdentity};
+  let writer,stage='recovery-validation',mFinished=false,dFinished=false;
+  const advance=name=>{
+    stage=name;if(signal?.aborted)throw new Error('Aborted');onStage?.(name);
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,name,{m:mFinished,d:dFinished});
+  };
+  try {
+    journal={...journal,revision:journal.revision+1,attempt:journal.attempt+1};writeFirmwareRecoveryJournal(journalStorage,journal);
+    writer=createFirmwareGattWriter(characteristics,signal);
+    const transport={write:writer.write,subscribe,signal};
+    advance('M-update-entry');
+    const mEntry=await enterFirmwareUpdateSession({...transport,recoveryInstall:true});
+    advance('M-slot-selection');
+    await selectMFirmwareSlot(transport);
+    advance('M-transfer');
+    let sequence=0;
+    await transferMFirmware({...transport,data:pair.m.data,targetSelector:mEntry.targetSelector,nextSequence:()=>sequence++&255});
+    mFinished=true;advance('M-finished');
+    advance('D-update-entry');
+    const dEntry=await enterFirmwareUpdateSession({...transport,recoveryInstall:true});
+    advance('D-bootloader-entry');
+    await enterDBootloader({...transport,...dEntry,credentials:keys});
+    advance('D-identity-and-transfer');
+    await transferDComponent({...transport,data:pair.d.data,expectedBootloaderIdentity,identitySalt:salt,
+      write:packet=>writer.write('2afa',packet)});
+    dFinished=true;advance('paired-transfer-finished');
+    return {state:'paired-transfer-finished',source:pair.source,dVersion:pair.d.version.join('.'),mVersion:pair.m.version.join('.'),
+      mFinished,dFinished,reset:false,firmwareVerified:false,regionVerified:false,recoveryVerified:false,installable:false};
+  } catch(cause) {
+    let journalPersisted=false;
+    try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{m:mFinished,d:dFinished,lastStage:stage});journalPersisted=true;} catch {}
+    const error=new Error(`Firmware recovery replay stopped during ${stage}; reconnect and replay the complete pair`);
+    Object.assign(error,{stage,mFinished,dFinished,deviceStateUnknown:stage!=='recovery-validation',journalPersisted,reset:false,recoveryVerified:false});
+    throw error;
+  } finally {writer?.close();keys.fill(0);salt.fill(0);firmwarePairTransports.delete(owner);}
+}
+
+// Reset and readback are separate transactions. The reset write is permitted
+// only after both paired workers completed and the journal has persisted that
+// fact. A later authenticated connection must prove the exact prepared pair.
+async function requestFirmwarePairReset({characteristics,signal,deviceId,connection,journalStorage,onStage}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      onStage!==undefined&&typeof onStage!=='function')
+    throw new Error('Reset requires the selected Web Bluetooth device ID and connection token');
+  for(const [name,method] of [['2afa','writeValueWithResponse'],['2afa','writeValueWithoutResponse']])
+    if(typeof characteristics?.[name]?.[method]!=='function') throw new Error(`Missing ${name} ${method}`);
+  let journal=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  if(journal.stage!=='paired-transfer-finished'||!journal.completed.m||!journal.completed.d)
+    throw new Error('Reset requires a journaled completed firmware pair');
+  const resetConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  const owner=characteristics['2afa'];
+  if(firmwarePairTransports.has(owner)) throw new Error('Paired firmware workflow already active on this transport');
+  firmwarePairTransports.add(owner);
+  let writer,stage='reset-request',resetAttempted=false;
+  try {
+    journal={...journal,resetConnection};
+    onStage?.(stage);journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage);
+    writer=createFirmwareGattWriter(characteristics,signal);
+    resetAttempted=true;
+    await requestDFirmwareReset({write:packet=>writer.write('2afa',packet),signal});
+    stage='reset-write-completed';onStage?.(stage);
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage);
+    return {state:stage,reset:true,rebootVerified:false,firmwareVerified:false,regionVerified:false,installable:false};
+  } catch(cause) {
+    let journalPersisted=false;
+    try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});journalPersisted=true;} catch {}
+    const error=new Error(`Firmware reset stopped during ${stage}; reconnect and inspect the journal`);
+    Object.assign(error,{stage,journalPersisted,deviceStateUnknown:resetAttempted,reset:false,rebootVerified:false});throw error;
+  } finally {writer?.close();firmwarePairTransports.delete(owner);}
+}
+async function verifyPreparedFirmwareAfterReconnect({journalStorage,deviceId,connection,...transport}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId) throw new Error('Verification requires the selected Web Bluetooth device ID');
+  let journal=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  const retryableReadback=journal.stage==='prepared-readback-verification'||
+    journal.stage==='stopped'&&['reset-request','prepared-readback-verification'].includes(journal.lastStage);
+  if(journal.pair.source!=='preparation'||(journal.stage!=='reset-write-completed'&&!retryableReadback)||
+      !journal.completed.m||!journal.completed.d)
+    throw new Error('Prepared readback requires a completed preparation reset');
+  const expected={identity:journal.baseline.identity,dVersion:journal.pair.d.version,
+    mVersion:journal.pair.m.version,destination:journal.baseline.destination};
+  const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  if(currentConnection===journal.resetConnection) throw new Error('Prepared readback requires a different BLE session');
+  let stage='prepared-readback-verification';
+  const salt=Uint8Array.from(journal.identitySalt.match(/../g),b=>parseInt(b,16));
+  try {
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage);
+    const result=await verifyFirmwareAfterReconnect({expected,connection:currentConnection,previousConnection:journal.resetConnection,...transport,
+      identitySalt:salt});
+    if(result.state!=='reconnected-readback-matches') {
+      journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});
+      return {...result,state:'prepared-readback-mismatch',preparationVerified:false,journalRetained:true};
+    }
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'prepared-readback-verified');
+    return {...result,state:'prepared-readback-verified',preparationVerified:true,journalRetained:true};
+  } catch(cause) {
+    try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});} catch {}
+    throw new Error('Prepared firmware readback failed; journal retained for recovery');
+  } finally {salt.fill(0);}
+}
+
+// Restoration is complete only when a later authenticated connection proves
+// the same motor, the exact original pair and the already persistent US value.
+async function verifyRestoredFirmwareAfterReconnect({journalStorage,deviceId,connection,...transport}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId) throw new Error('Verification requires the selected Web Bluetooth device ID');
+  let journal=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  const retryable=journal.stage==='restoration-readback-verification'||
+    (journal.stage==='stopped'&&['reset-request','restoration-readback-verification'].includes(journal.lastStage));
+  if(journal.pair.source!=='restoration'||(journal.stage!=='reset-write-completed'&&!retryable)||
+      !journal.completed.m||!journal.completed.d||journal.baseline.destination!==1)
+    throw new Error('Restoration readback requires a completed US-preserving restoration reset');
+  const expected={identity:journal.baseline.identity,dVersion:journal.pair.d.version,
+    mVersion:journal.pair.m.version,destination:1};
+  const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  if(currentConnection===journal.resetConnection) throw new Error('Restoration readback requires a different BLE session');
+  const stage='restoration-readback-verification';
+  const salt=Uint8Array.from(journal.identitySalt.match(/../g),b=>parseInt(b,16));
+  try {
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage);
+    const result=await verifyFirmwareAfterReconnect({expected,connection:currentConnection,previousConnection:journal.resetConnection,...transport,
+      identitySalt:salt});
+    if(result.state!=='reconnected-readback-matches') {
+      journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});
+      return {...result,state:'restoration-readback-mismatch',restorationVerified:false,
+        regionVerified:false,goalVerified:false,journalRetained:true};
+    }
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'restoration-readback-verified');
+    return {...result,state:'restoration-readback-verified',restorationVerified:true,
+      regionVerified:true,goalVerified:true,journalRetained:true};
+  } catch(cause) {
+    try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});} catch {}
+    throw new Error('Restored firmware readback failed; journal retained for recovery');
+  } finally {salt.fill(0);}
+}
+
+function preparedUsBaselineMatches(journal,baseline,destination) {
+  return !!baseline && baseline.family===34 && baseline.unit===0 &&
+    baseline.identity===journal.baseline.identity && baseline.dVersion===journal.pair.d.version &&
+    baseline.mVersion===journal.pair.m.version && baseline.destination===destination;
+}
+// No UI caller. This transaction is valid only after the preparation pair was
+// installed, reset and independently read back. It persists the uncertain-write
+// state before the one allowed destination mutation; readback remains decisive.
+async function runPreparedUsWriteTransaction({journalStorage,deviceId,connection,readBaseline,writeDestination}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      typeof readBaseline!=='function'||typeof writeDestination!=='function')
+    throw new Error('US write requires device, connection, read and write transports');
+  let journal=readFirmwareRecoveryJournal(journalStorage),stage='US-write-validation';
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  if(journal.stage!=='prepared-readback-verified'||journal.pair.source!=='preparation'||
+      !journal.completed.m||!journal.completed.d)
+    throw new Error('US write requires verified preparation firmware');
+  const before=await readBaseline();
+  if(!preparedUsBaselineMatches(journal,before,0))
+    throw new Error('Fresh US-write baseline differs from the verified preparation state');
+  const writeConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  const us={writeConnection};
+  journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'US-write-ready',{us});
+  try {
+    stage='US-write-attempt';
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage,{us});
+    const reply=await writeDestination();
+    if(!reply||typeof reply.acknowledged!=='boolean'||
+        reply.errorCode!==undefined&&(!Number.isInteger(reply.errorCode)||reply.errorCode<0||reply.errorCode>255))
+      throw new Error('Destination write returned an invalid result');
+    if(reply.errorCode!==undefined)
+      throw new Error(`Destination write rejected with device status ${reply.errorCode.toString(16).padStart(2,'0').toUpperCase()}`);
+    const after=await readBaseline();
+    if(!preparedUsBaselineMatches(journal,after,1)) {
+      journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage,us});
+      return {state:'US-readback-mismatch',acknowledged:reply.acknowledged,regionVerified:false,
+        persistenceVerified:false,journalRetained:true};
+    }
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'US-readback-verified',{us});
+    return {state:'US-readback-verified',acknowledged:reply.acknowledged,regionVerified:true,
+      persistenceVerified:false,journalRetained:true};
+  } catch(cause) {
+    try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage,us});} catch {}
+    const error=new Error(`US write stopped during ${stage}; reconnect and read the region before another mutation`);
+    Object.assign(error,{stage,deviceStateUnknown:stage==='US-write-attempt',journalRetained:true});throw error;
+  }
+}
+
+// Persistence is only claimed after the user confirms a physical power cycle
+// and a different BLE session reads the same prepared motor and US destination.
+async function verifyUsPersistenceAfterPowerCycle({journalStorage,deviceId,connection,powerCycleConfirmed,...transport}) {
+  firmwareJournalStorage(journalStorage);
+  if(powerCycleConfirmed!==true) throw new Error('Explicit physical power-cycle confirmation is required');
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection)
+    throw new Error('Persistence verification requires the selected device and connection token');
+  let journal=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  const retryable=journal.stage==='US-persistence-verification'||
+    journal.stage==='stopped'&&journal.lastStage==='US-persistence-verification';
+  if(journal.stage!=='US-readback-verified'&&!retryable)
+    throw new Error('Persistence verification requires a verified US write readback');
+  const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  if(currentConnection===journal.us.writeConnection)
+    throw new Error('Persistence verification requires a different BLE session');
+  const expected={identity:journal.baseline.identity,dVersion:journal.pair.d.version,
+    mVersion:journal.pair.m.version,destination:1};
+  const salt=Uint8Array.from(journal.identitySalt.match(/../g),b=>parseInt(b,16));
+  const stage='US-persistence-verification';
+  try {
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage);
+    const result=await verifyFirmwareAfterReconnect({expected,previousConnection:journal.us.writeConnection,
+      connection:currentConnection,...transport,identitySalt:salt});
+    if(result.state!=='reconnected-readback-matches') {
+      journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});
+      return {...result,state:'US-persistence-mismatch',powerCycleConfirmed:true,persistenceVerified:false,journalRetained:true};
+    }
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'US-persistence-verified');
+    return {...result,state:'US-persistence-verified',powerCycleConfirmed:true,persistenceVerified:true,journalRetained:true};
+  } catch(cause) {
+    try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});} catch {}
+    throw new Error('US persistence readback failed; journal retained for another read-only verification');
+  } finally {salt.fill(0);}
+}
+
+// If transport failed after the setter was dispatched, a later connection may
+// only inspect the result. It never repeats the destination mutation. A US
+// value can rejoin the ordinary persistence gate; any other value stays stopped.
+async function resolveUncertainUsWriteAfterReconnect({journalStorage,deviceId,connection,readBaseline}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||typeof readBaseline!=='function')
+    throw new Error('Uncertain US write resolution requires device, connection and read transport');
+  let journal=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  if(journal.stage!=='stopped'||journal.lastStage!=='US-write-attempt'||journal.pair.source!=='preparation')
+    throw new Error('No uncertain US write is available for read-only resolution');
+  const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  if(currentConnection===journal.us.writeConnection)
+    throw new Error('US write resolution requires a different BLE session');
+  const actual=await readBaseline();
+  if(preparedUsBaselineMatches(journal,actual,1)) {
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'US-readback-verified');
+    return {state:'US-readback-verified',destination:1,regionVerified:true,persistenceVerified:false,
+      mutationRetried:false,journalRetained:true};
+  }
+  if(preparedUsBaselineMatches(journal,actual,0))
+    return {state:'US-write-not-applied',destination:0,regionVerified:false,persistenceVerified:false,
+      mutationRetried:false,journalRetained:true};
+  return {state:'US-write-outcome-mismatch',destination:actual?.destination,regionVerified:false,
+    persistenceVerified:false,mutationRetried:false,journalRetained:true};
+}
+
+// First-use preflight records the application identity and D-loader identity,
+// requests the already-tested reset, and only then creates the durable journal.
+// It sends no firmware bytes and no destination setter.
+async function createPreparationPreflightJournal({files,credentials,characteristics,subscribe,signal,
+  deviceId,journalStorage,identitySalt,onStage,onDiagnostic}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId) throw new Error('Preparation preflight requires the selected device');
+  const pair=await loadFirmwarePair(files);
+  if(pair.source!=='preparation') throw new Error('Preparation preflight requires the reviewed D4.3.0/M4.2.1 pair');
+  const salt=identitySalt instanceof Uint8Array?identitySalt.slice():crypto.getRandomValues(new Uint8Array(16));
+  if(salt.length!==16) throw new Error('Preparation preflight requires a 16-byte identity salt');
+  let baseline,bootloaderIdentity;
+  try {
+    const result=await probeBootloaderRoundTrip({characteristics,subscribe,signal,credentials,identitySalt:salt,
+      onBaseline:value=>{baseline={...value};},onBootloaderIdentity:value=>{bootloaderIdentity={...value};},
+      onStage,onDiagnostic});
+    if(result.resetRequested!==true||!baseline||!bootloaderIdentity)
+      throw new Error('Preparation preflight did not complete identity and reset');
+    const reference={version:1,verified:true,expected:{identity:baseline.identity},
+      salt:firmwareHex(salt),bootloaderIdentity};
+    const journal=await createFirmwareRecoveryJournal({deviceId,pair,baseline,identityReference:reference});
+    writeFirmwareRecoveryJournal(journalStorage,journal);
+    return {state:'preflight-reset-requested',journal,baseline,pairSource:pair.source,
+      firmwareDataSent:false,destinationWritten:false,rebootVerified:false};
+  } finally {salt.fill(0);}
+}
+
+function firmwareWorkflowPlan(journal) {
+  if(!journal) return {action:'preflight',label:'Start verified preparation',pair:'preparation',mutation:true,powerCycle:false};
+  validateFirmwareRecoveryJournal(journal);
+  const transferStages=['ready','M-update-entry','M-slot-selection','M-transfer','M-finished',
+    'D-update-entry','D-bootloader-entry','D-identity-and-transfer'];
+  const stopped=journal.stage==='stopped',stage=stopped?journal.lastStage:journal.stage;
+  if(transferStages.includes(stage)) return {action:stage==='ready'?'transfer':'recover',
+    label:stage==='ready'?(journal.pair.source==='preparation'?'Install preparation pair':'Restore original pair'):'Resume exact firmware pair',
+    pair:journal.pair.source,mutation:true,powerCycle:stage==='ready'&&journal.pair.source==='preparation'};
+  if(stage==='paired-transfer-finished') return {action:'reset',label:'Apply installed firmware',pair:journal.pair.source,mutation:true,powerCycle:false};
+  if(['reset-request','reset-write-completed','prepared-readback-verification'].includes(stage)&&journal.pair.source==='preparation')
+    return {action:'verify-preparation',label:'Verify preparation after power cycle',pair:'preparation',mutation:false,powerCycle:true};
+  if(stage==='prepared-readback-verified') return {action:'write-us',label:'Set and verify US',pair:'preparation',mutation:true,powerCycle:false};
+  if(stage==='US-write-attempt') return {action:'resolve-us',label:'Read uncertain US result',pair:'preparation',mutation:false,powerCycle:false};
+  if(['US-readback-verified','US-persistence-verification'].includes(stage))
+    return {action:'verify-us',label:'Verify US after power cycle',pair:'preparation',mutation:false,powerCycle:true};
+  if(stage==='US-persistence-verified') return {action:'restore',label:'Restore original firmware',pair:'restoration',mutation:true,powerCycle:false};
+  if(['reset-request','reset-write-completed','restoration-readback-verification'].includes(stage)&&journal.pair.source==='restoration')
+    return {action:'verify-restoration',label:'Final verification after power cycle',pair:'restoration',mutation:false,powerCycle:true};
+  if(stage==='restoration-readback-verified') return {action:'complete',label:'US workflow complete',pair:null,mutation:false,powerCycle:false};
+  return {action:'inspect',label:'Recovery state needs inspection',pair:journal.pair.source,mutation:false,powerCycle:false};
 }
 
 // Read-only application-protocol verification. Requires a freshly connected,
@@ -1587,17 +2181,23 @@ function ascii(value) {
 }
 function controls() {
   const connected = !!session?.device.gatt.connected;
+  const workflowPlan=currentFirmwareWorkflowPlan();
+  const filesReady=!!(firmwarePairs.preparation&&firmwarePairs.restoration);
   $('connect').disabled = busy || connected || !navigator.bluetooth || !window.isSecureContext;
   $('disconnect').disabled = !connected;
   $('probe').disabled = busy || !connected;
   $('authenticate').disabled = busy || !connected || session?.authenticated || !crypto.subtle;
   $('motorAuth').disabled = busy || !connected || !session?.motorEligible || session?.motorAttempted;
-  $('setUS').disabled = busy || !connected || !canSetUS(session);
+  $('setUS').disabled = true;
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || !connected || session?.authenticated;
-  $('bootProbe').disabled = busy || guidedTestRunning || !connected || session?.bootProbeAttempted;
-  $('bootProbe').textContent = probeRecord && !probeRecord.verified ? 'Verify after restart' : 'Check region';
-  if (guidedTestRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
+  $('bootProbe').disabled = busy || firmwareWorkflowRunning || !connected || !filesReady ||
+    workflowPlan.action==='complete'||workflowPlan.action==='inspect'||
+    workflowPlan.mutation&&!$('firmwareConsent').checked||
+    workflowPlan.powerCycle&&!$('powerCycled').checked;
+  $('bootProbe').textContent = workflowPlan.label;
+  if(!firmwareWorkflowRunning) renderFirmwareWorkflowStatus(workflowPlan,connected,filesReady);
+  if (firmwareWorkflowRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
 }
 function protectedStatus(message, css = '') {
   $('protected').textContent = message;
@@ -2029,6 +2629,7 @@ async function identifyDrive() {
       assertCurrent(s);
       log(`${short.toUpperCase()} notifications enabled.`);
     }
+    s.firmwareNotifications=true;
     for (const query of INFO_QUERIES) {
       const result = await queryInfo(s, query);
       assertCurrent(s);
@@ -2415,7 +3016,8 @@ $('clearLog').onclick = () => {
 // This is not the bike passkey or its serial number.
 const BOOT_PROFILE = Object.freeze([49, 65, 89, 38, 83, 88, 151, 147, 35, 132, 98, 100, 51, 131, 39]);
 const PROBE_RECORD_KEY = 'shimano-probe-readback-v1';
-let probeRecord = null, guidedTestRunning = false;
+let probeRecord = null, firmwareWorkflowRunning = false, firmwareJournalProblem = '';
+const firmwarePairs={preparation:null,restoration:null};
 try {
   const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)||'null');
   if(record?.version===1 && /^[a-f0-9]{32}$/.test(record.salt) && typeof record.connection==='string' && record.expected) probeRecord=record;
@@ -2433,100 +3035,238 @@ function probeSubscription(s) {
     return ()=>{for(const [ch,receive]of listeners)ch.removeEventListener('characteristicvaluechanged',receive);};
   };
 }
-async function verifyPendingBootloaderProbe(s) {
-  if(!probeRecord || probeRecord.verified || probeRecord.connection===s.probeToken) return;
-  const record=probeRecord;
-  const salt=Uint8Array.from(record.salt.match(/../g),x=>parseInt(x,16));
-  const writer=createFirmwareGattWriter(s.chars,s.controller.signal);
+// Legacy probe records are accepted only when an earlier build already proved
+// the original application baseline after reconnect and retained a D-loader
+// fingerprint. Uncertain region records are deliberately ignored.
+function reusableLegacyIdentityReference() {
+  const expected=probeRecord?.expected;
+  if(probeRecord?.kind||probeRecord?.verified!==true||!validBootloaderFingerprint(probeRecord.bootloaderIdentity)||
+      !/^[a-f0-9]{32}$/.test(probeRecord.salt||'')||
+      `${expected?.family}/${expected?.unit}/${expected?.dVersion}/${expected?.mVersion}/${expected?.destination}`!==
+        '34/0/4.5.0.0/4.4.8.0/0'||!/^[a-f0-9]{64}$/.test(expected.identity||'')) return null;
+  return {version:1,verified:true,expected:{identity:expected.identity},salt:probeRecord.salt,
+    bootloaderIdentity:{...probeRecord.bootloaderIdentity}};
+}
+async function verifyPendingBootloaderProbe() {}
+function optionalFirmwareJournal() {
+  firmwareJournalProblem='';
   try {
-    log(record.kind==='us-region'?'Checking the same motor and US destination after reconnect.':'Checking original motor identity, native firmware and region after the probe.');
-    const result=await verifyFirmwareAfterReconnect({expected:record.expected,previousConnection:record.connection,connection:s.probeToken,
-      identitySalt:salt,write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal});
+    if(!localStorage.getItem(FIRMWARE_RECOVERY_JOURNAL_KEY)) return null;
+    return readFirmwareRecoveryJournal(localStorage);
+  } catch(error) {firmwareJournalProblem=error.message;return undefined;}
+}
+function currentFirmwareWorkflowPlan() {
+  const journal=optionalFirmwareJournal();
+  if(journal===undefined) return {action:'inspect',label:'Recovery state needs inspection',pair:null,mutation:false,powerCycle:false};
+  const plan=firmwareWorkflowPlan(journal);
+  if(!journal&&reusableLegacyIdentityReference())
+    return {...plan,action:'transfer-legacy',label:'Install preparation pair'};
+  return plan;
+}
+function renderFirmwareWorkflowStatus(plan,connected,filesReady) {
+  const el=$('bootProbeStatus');
+  if(plan.action==='complete') {el.textContent='Complete: original D4.5/M4.4.8 firmware and US region were verified after restart.';return;}
+  if(plan.action==='inspect') {el.textContent=`Stored recovery state is invalid: ${firmwareJournalProblem||'unknown state'}. Do not send another write.`;return;}
+  if(!filesReady) {el.textContent='Select and verify both preparation files and both restoration files.';return;}
+  if(plan.powerCycle&&!$('powerCycled').checked) {el.textContent='Fully turn the bike off and on, reconnect, then tick the power-cycle box.';return;}
+  if(plan.mutation&&!$('firmwareConsent').checked) {el.textContent='Read the firmware warning and tick the acknowledgement before continuing.';return;}
+  el.textContent=connected?`Ready: ${plan.label}. Enter the passkey if this connection is not authenticated.`
+    :`Next: ${plan.label}. Connect the bike to continue.`;
+}
+async function ensureFirmwareTransport(s) {
+  assertCurrent(s);
+  for(const short of ['2af9','2afa','2afb','2afd','2afe']) {
+    if(!s.chars[short])s.chars[short]=await s.service.getCharacteristic(UUID(short));
     assertCurrent(s);
-    record.verified=result.state==='reconnected-readback-matches';saveProbeRecord();
-    const message=record.kind==='us-region'
-      ? `Post-region readback: same motor ${result.identityMatches?'yes':'NO'}; D ${result.dVersion}; M ${result.mVersion}; region ${regionName(result.destination)}; US expectation ${record.verified?'matches':'DOES NOT MATCH'}. Reconnect observed; physical power cycle and speed not independently verified.`
-      : `Post-probe readback: same motor ${result.identityMatches?'yes':'NO'}; D ${result.dVersion}; M ${result.mVersion}; region ${regionName(result.destination)}; original configuration ${record.verified?'matches':'DOES NOT MATCH'}.`;
-    log(message);$('bootProbeStatus').textContent=message;
+  }
+  if(!s.firmwareNotifications) {
+    for(const short of ['2af9','2afb','2afd']) {await s.chars[short].startNotifications();assertCurrent(s);}
+    s.firmwareNotifications=true;
+  }
+}
+async function ensureWorkflowSession(s,{information=false,motor=false}={}) {
+  if(!s.verified) {
+    $('bootProbeStatus').textContent='Authenticating the connection…';
+    await authenticate();assertCurrent(s);
+    if(!s.verified)throw new Error('Session authentication did not complete');
+  }
+  if(information&&!s.batchDone) {
+    $('bootProbeStatus').textContent='Reading exact motor, firmware and region…';
+    await identifyDrive();assertCurrent(s);
+    if(!s.batchDone||!s.motorEligible)throw new Error('Exact E5000 motor/firmware baseline was not verified');
+  }
+  await ensureFirmwareTransport(s);
+  if(motor&&!s.motorAuthenticated) {
+    $('bootProbeStatus').textContent='Authenticating the motor…';
+    await authenticateMotor();assertCurrent(s);
+    if(!s.motorAuthenticated)throw new Error('Motor authentication did not complete');
+  }
+}
+function firmwareDiagnostic(event) {
+  const detail=event.packet?` TX ${event.characteristic.toUpperCase()} ${hex(event.packet)}`
+    :event.prefix?` ${hex(event.prefix)} (${event.length} bytes; header only)`
+    :event.status!==undefined?` status ${hex([event.status])}`:event.reason?` ${event.reason}`:'';
+  log(`Firmware ${event.step}: ${event.event}${detail}`);
+}
+function journalIdentityReference(journal) {
+  return {version:1,verified:true,expected:{identity:journal.baseline.identity},salt:journal.identitySalt,
+    bootloaderIdentity:{...journal.bootloaderIdentity}};
+}
+async function withWorkflowBaselineReader(s,journal,operation) {
+  const writer=createFirmwareGattWriter(s.chars,s.controller.signal);
+  const salt=Uint8Array.from(journal.identitySalt.match(/../g),x=>parseInt(x,16));
+  try {
+    const readBaseline=()=>readFirmwareBaseline({write:writer.write,subscribe:probeSubscription(s),
+      signal:s.controller.signal,identitySalt:salt});
+    return await operation({writer,readBaseline});
   } finally {writer.close();salt.fill(0);}
 }
-async function runBootloaderProbe() {
-  if(busy || !session?.motorAuthenticated || !session.motorEligible || session.bootProbeAttempted || probeRecord&&!probeRecord.verified) return;
-  const s=session,profile=Uint8Array.from(BOOT_PROFILE),salt=crypto.getRandomValues(new Uint8Array(16));
-  s.bootProbeAttempted=true;busy=true;controls();
-  log('Bootloader entry/exit probe started. Firmware erase and data commands are blocked.');
+async function resetCompletedPair(s) {
+  const result=await requestFirmwarePairReset({characteristics:s.chars,signal:s.controller.signal,
+    deviceId:s.device.id,connection:s.probeToken,journalStorage:localStorage,
+    onStage:stage=>{log(`Firmware workflow: ${stage}`);$('bootProbeStatus').textContent=stage;}});
+  if(result.state!=='reset-write-completed')throw new Error('Firmware reset completion was not recorded');
+  $('powerCycled').checked=false;
+  log('Firmware reset write completed. Physical power cycle and reconnect required before readback.');
+  if(session===s)disconnect();
+}
+async function transferAndReset(s,plan,journal) {
+  const files=firmwarePairs[plan.pair];
+  if(!files)throw new Error(`Select the exact ${plan.pair} pair`);
+  const profile=Uint8Array.from(BOOT_PROFILE);
   try {
-    const result=await probeBootloaderRoundTrip({characteristics:s.chars,subscribe:probeSubscription(s),signal:s.controller.signal,credentials:profile,identitySalt:salt,
-      onBaseline(baseline){probeRecord={version:1,connection:s.probeToken,salt:hex(salt).replaceAll(' ','').toLowerCase(),expected:baseline,verified:false};saveProbeRecord();},
-      onBootloaderIdentity(identity){assertCurrent(s);probeRecord.bootloaderIdentity=identity;saveProbeRecord();},
-      onDiagnostic(event){
-        const detail=event.packet?` TX ${event.characteristic.toUpperCase()} ${hex(event.packet)}`
-          :event.prefix?` ${hex(event.prefix)} (${event.length} bytes; header only)`
-          :event.status!==undefined?` status ${hex([event.status])}`:event.reason?` ${event.reason}`:'';
-        log(`Entry ${event.step}: ${event.event}${detail}`);
-      },
-      onStage(stage){log(`Bootloader probe stage: ${stage}`);$('bootProbeStatus').textContent=stage;}});
-    log(`Bootloader information: D family ${result.family}, unit ${result.unit}. Recovery entry from application acknowledged: ${result.recoveryEntryAcknowledged===true?'yes':'unverified'}. Bootloader identity recorded. Reset write completed; reboot not yet verified.`);
+    $('bootProbeStatus').textContent=plan.action==='recover'?'Replaying the exact recorded pair from M byte zero…':'Installing the exact reviewed pair…';
+    if(plan.action==='recover') {
+      await recoverFirmwarePair({files,credentials:profile,characteristics:s.chars,subscribe:probeSubscription(s),
+        signal:s.controller.signal,deviceId:s.device.id,journalStorage:localStorage,
+        onStage:stage=>{log(`Firmware recovery: ${stage}`);$('bootProbeStatus').textContent=stage;}});
+    } else {
+      let baseline,identityReference;
+      if(plan.pair==='preparation') {
+        identityReference=journal?journalIdentityReference(journal):reusableLegacyIdentityReference();
+        if(!identityReference)throw new Error('A verified D-loader preflight is required');
+        baseline=journal?.baseline||{...probeRecord.expected};
+      } else {
+        if(!journal||journal.stage!=='US-persistence-verified')throw new Error('Restoration requires verified US persistence');
+        baseline={identity:journal.baseline.identity,family:34,unit:0,dVersion:'4.3.0.0',mVersion:'4.2.1.0',destination:1};
+      }
+      await transferFirmwarePair({files,baseline,credentials:profile,characteristics:s.chars,subscribe:probeSubscription(s),
+        signal:s.controller.signal,identityReference,deviceId:s.device.id,journalStorage:localStorage,
+        onStage:stage=>{log(`Firmware workflow: ${stage}`);$('bootProbeStatus').textContent=stage;}});
+    }
+    log(`MILESTONE: ${plan.pair} D/M transfer completed; reset remains separate.`);
+    await resetCompletedPair(s);
+  } finally {profile.fill(0);}
+}
+async function writeAndVerifyUs(s) {
+  const journal=readFirmwareRecoveryJournal(localStorage);
+  const result=await withWorkflowBaselineReader(s,journal,({readBaseline})=>
+    runPreparedUsWriteTransaction({journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,
+      readBaseline,writeDestination:()=>writeUsDestination(s)}));
+  if(result.state!=='US-readback-verified')throw new Error('US was not read back after the one destination write');
+  $('powerCycled').checked=false;
+  log('MILESTONE: US destination read back on preparation firmware. Physical power-cycle verification remains.');
+  if(session===s)disconnect();
+}
+async function runFirmwareWorkflow() {
+  if(busy||firmwareWorkflowRunning||!session?.device.gatt.connected)return;
+  const s=session,initialPlan=currentFirmwareWorkflowPlan();
+  if(initialPlan.action==='complete'||initialPlan.action==='inspect')return;
+  if(!firmwarePairs.preparation||!firmwarePairs.restoration) {
+    $('bootProbeStatus').textContent='Select and verify the preparation package and both restoration files first.';return;
+  }
+  if(initialPlan.mutation&&!$('firmwareConsent').checked)return;
+  if(initialPlan.powerCycle&&!$('powerCycled').checked)return;
+  if(!s.verified&&!/^[0-9]{6}$/.test($('passkey').value)) {
+    $('bootProbeStatus').textContent='Enter your six-digit Shimano passkey first.';$('passkey').focus();return;
+  }
+  firmwareWorkflowRunning=true;controls();
+  log(`--- guided US workflow step start: ${initialPlan.action} ---`);
+  try {
+    const applicationActions=['preflight','transfer-legacy','transfer','verify-preparation','write-us','resolve-us','verify-us','restore','verify-restoration'];
+    const needsInformation=applicationActions.includes(initialPlan.action);
+    const needsMotor=['preflight','transfer-legacy','transfer','write-us','restore'].includes(initialPlan.action);
+    await ensureWorkflowSession(s,{information:needsInformation,motor:needsMotor});
+    let journal=optionalFirmwareJournal(),plan=currentFirmwareWorkflowPlan();
+    if(plan.action==='preflight') {
+      const profile=Uint8Array.from(BOOT_PROFILE);
+      try {
+        $('bootProbeStatus').textContent='Recording this motor’s loader identity before firmware data…';
+        await createPreparationPreflightJournal({files:firmwarePairs.preparation,credentials:profile,
+          characteristics:s.chars,subscribe:probeSubscription(s),signal:s.controller.signal,deviceId:s.device.id,
+          journalStorage:localStorage,onDiagnostic:firmwareDiagnostic,
+          onStage:stage=>{log(`Preparation preflight: ${stage}`);$('bootProbeStatus').textContent=stage;}});
+        log('MILESTONE: preparation preflight recorded the application and loader identities; no firmware bytes or region setter sent.');
+        $('powerCycled').checked=false;if(session===s)disconnect();
+      } finally {profile.fill(0);}
+    } else if(['transfer-legacy','transfer','recover','restore'].includes(plan.action)) {
+      await transferAndReset(s,plan,journal);
+    } else if(plan.action==='reset') {
+      await resetCompletedPair(s);
+    } else if(plan.action==='verify-preparation') {
+      const result=await withWorkflowBaselineReader(s,journal,({writer})=>verifyPreparedFirmwareAfterReconnect({
+        journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,write:writer.write,
+        subscribe:probeSubscription(s),signal:s.controller.signal}));
+      if(!result.preparationVerified)throw new Error('Prepared firmware readback did not match the recorded motor and pair');
+      log('MILESTONE: same motor, D4.3.0/M4.2.1 and EU were verified after power cycle.');
+      $('powerCycled').checked=false;
+      await ensureWorkflowSession(s,{information:true,motor:true});
+      await writeAndVerifyUs(s);
+    } else if(plan.action==='write-us') {
+      await writeAndVerifyUs(s);
+    } else if(plan.action==='resolve-us') {
+      const result=await withWorkflowBaselineReader(s,journal,({readBaseline})=>resolveUncertainUsWriteAfterReconnect({
+        journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,readBaseline}));
+      if(result.state!=='US-readback-verified')throw new Error('The uncertain destination write did not produce a verified US value; no retry was sent');
+      $('powerCycled').checked=false;log('US was found after an uncertain write. A physical power cycle is still required.');
+      if(session===s)disconnect();
+    } else if(plan.action==='verify-us') {
+      const result=await withWorkflowBaselineReader(s,journal,({writer})=>verifyUsPersistenceAfterPowerCycle({
+        journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,powerCycleConfirmed:true,
+        write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal}));
+      if(!result.persistenceVerified)throw new Error('US did not persist on the same prepared motor after power cycle');
+      log('MILESTONE: US destination persisted across a physical power cycle on preparation firmware.');
+      $('powerCycled').checked=false;
+      await ensureWorkflowSession(s,{information:true,motor:true});
+      await transferAndReset(s,{action:'restore',pair:'restoration'},readFirmwareRecoveryJournal(localStorage));
+    } else if(plan.action==='verify-restoration') {
+      const result=await withWorkflowBaselineReader(s,journal,({writer})=>verifyRestoredFirmwareAfterReconnect({
+        journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,write:writer.write,
+        subscribe:probeSubscription(s),signal:s.controller.signal}));
+      if(!result.goalVerified)throw new Error('Final original-firmware and US readback did not match');
+      $('powerCycled').checked=false;
+      log('MILESTONE: same motor is back on D4.5.0/M4.4.8 with US destination verified after restart. Speed behavior was not measured.');
+    } else throw new Error(`Unsupported workflow state ${plan.action}`);
   } catch(error) {
-    log(`Bootloader probe stopped at ${error.stage||'initialization'}. Reset requested: ${error.resetRequested?'yes':'no'}. Firmware images were not sent.`);
+    log(`Guided US workflow stopped: ${error.message}`);
+    $('bootProbeStatus').textContent=`Stopped: ${error.message}. Copy the log before another action.`;
+    if(session===s&&/reconnect|disconnected|uncertain|firmware workflow|firmware recovery|reset/i.test(error.message))disconnect();
   } finally {
-    profile.fill(0);salt.fill(0);
-    $('bootProbeStatus').textContent='Turn the bike off and on. Connect again, enter your passkey, then tap Verify after restart. Copy the log afterward.';
-    if(session===s) disconnect();
-    busy=false;controls();
+    log('--- guided US workflow step end ---');firmwareWorkflowRunning=false;controls();
   }
 }
-async function runGuidedBikeTest() {
-  if (busy || guidedTestRunning || !session?.device.gatt.connected) return;
-  const s = session;
-  const verifying = !!(probeRecord && !probeRecord.verified);
-  if (!s.verified && !/^[0-9]{6}$/.test($('passkey').value)) {
-    $('bootProbeStatus').textContent = 'Enter your six-digit Shimano passkey first.';
-    $('passkey').focus();return;
-  }
-  guidedTestRunning = true;controls();
-  try {
-    if (!s.verified) {
-      $('bootProbeStatus').textContent = 'Authenticating the connection…';
-      await authenticate();assertCurrent(s);
-      if (!s.verified) throw new Error('Session authentication did not complete. Reconnect and try again.');
-    }
-    if (!s.batchDone) {
-      $('bootProbeStatus').textContent = verifying ? 'Checking the bike after restart…' : 'Reading region and compatibility…';
-      await identifyDrive();assertCurrent(s);
-    }
-    if (verifying) {
-      // This click is verification only, even if readback clears the pending record.
-      if (!probeRecord?.verified) throw new Error('Expected motor, firmware and region could not be verified. Copy the log.');
-      $('bootProbeStatus').textContent = probeRecord.kind==='us-region'
-        ? 'Same motor, preparation firmware and US match after reconnect. Copy log. A power cycle is not independently verified.'
-        : 'Original motor, firmware and region match. Test finished — tap Copy log.';
-      return;
-    }
-    if (!s.batchDone) throw new Error('Region and compatibility checks did not complete. Copy the log.');
-    $('bootProbeStatus').textContent = 'Region check finished. See US-region workflow above; tap Copy log. No recovery or region-write attempt was made.';
-  } catch (error) {
-    $('bootProbeStatus').textContent = error.message;
-  } finally {guidedTestRunning = false;controls();}
-}
-$('bootProbe').onclick=runGuidedBikeTest;
-if (probeRecord && !probeRecord.verified) $('bootProbeStatus').textContent = 'Turn the bike off and on, connect and enter your passkey, then tap Verify after restart.';
+$('bootProbe').onclick=runFirmwareWorkflow;
 
-let firmwareCheckGeneration = 0;
-$('firmwareFiles').onchange = async () => {
-  const generation = ++firmwareCheckGeneration;
-  const files = Array.from($('firmwareFiles').files);
-  $('firmwareStatus').textContent = 'Checking files…';
+const firmwareCheckGeneration={preparation:0,restoration:0};
+async function validateFirmwareSelection(kind) {
+  const generation=++firmwareCheckGeneration[kind],input=$(kind==='preparation'?'preparationFiles':'restorationFiles');
+  const status=$(kind==='preparation'?'preparationStatus':'restorationStatus'),files=Array.from(input.files);
+  firmwarePairs[kind]=null;status.textContent='Checking exact hashes and pair requirements…';controls();
   try {
-    const pair = await checkFirmwarePair(files);
-    if (generation !== firmwareCheckGeneration) return;
-    const message = `Verified ${pair.source} files: D ${pair.dVersion}, M ${pair.mVersion}. Pair requirements pass. Transfer: ${pair.mGeometry.blocks} M blocks, ${pair.mGeometry.checkpoints} checkpoints, then ${pair.dGeometry.blocks} D blocks. Installation is not available yet.`;
-    $('firmwareStatus').textContent = message;
-    log(message);
-  } catch (error) {
-    if (generation === firmwareCheckGeneration) $('firmwareStatus').textContent = `Files not accepted: ${error.message}`;
-  }
-};
+    const pair=await loadFirmwarePair(files);
+    if(generation!==firmwareCheckGeneration[kind])return;
+    if(pair.source!==kind)throw new Error(`These are ${pair.source} files, not ${kind} files`);
+    firmwarePairs[kind]=files;
+    status.textContent=`Verified locally: D ${pair.d.version.join('.')}, M ${pair.m.version.join('.')}.`;
+    log(`${kind[0].toUpperCase()+kind.slice(1)} firmware files verified locally by exact SHA-256.`);
+    pair.d.data.fill(0);pair.m.data.fill(0);
+  } catch(error) {if(generation===firmwareCheckGeneration[kind])status.textContent=`Files not accepted: ${error.message}`;}
+  finally {if(generation===firmwareCheckGeneration[kind])controls();}
+}
+$('preparationFiles').onchange=()=>validateFirmwareSelection('preparation');
+$('restorationFiles').onchange=()=>validateFirmwareSelection('restoration');
+$('firmwareConsent').onchange=controls;
+$('powerCycled').onchange=controls;
 
 
 $('copyLog').onclick = async () => {
@@ -2546,7 +3286,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · US-region readiness batch`;
+$('build').textContent = `Build ${BUILD} · guided US-region workflow`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

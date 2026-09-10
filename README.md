@@ -1,25 +1,39 @@
 # Shimano WebBLE
 
-A single-file Web Bluetooth diagnostic and experimental session-authentication
-console for Shimano STEPS. The experimental US-destination setter is disabled
-for the tested original firmware; the reviewed preparation pair has an eligibility
-gate but has not been installed or validated on this bike.
-Firmware transfer code is tested offline; the page does not expose firmware flashing.
+A single-file Web Bluetooth guided candidate workflow for Shimano STEPS. It
+checks the exact tested E5000 motor and original firmware, installs a reviewed
+preparation pair, attempts one authenticated US-destination write, verifies it
+after a physical power cycle, restores the original firmware pair, and verifies
+US again. The firmware transfer is exhaustively simulated but has not yet run on
+the bike, so the workflow stops unless every identity, version, region and
+reconnect checkpoint matches.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .57)
+## Current next step (build .62)
 
-**Check region** authenticates the connection and reads region and compatibility.
-It does not authenticate the motor, enter a bootloader, or attempt a region write.
-**Verify after restart** remains available for a saved pending verification.
-Recovery tests are on hold; no repeat bike test is requested.
+The tested D4.5.0/M4.4.8 EU pair rejects the exact destination setter with AB/3A.
+The source-backed candidate route uses D4.3.0/M4.2.1, for which the newer app
+enables its destination-setting path. Build .62 exposes that route as one guided
+button and durable recovery journal. It accepts the exact reviewed preparation
+ZIP directly, but requires both exact original restoration files before it will
+send firmware data.
 
-The missing step is a validated firmware-preparation workflow. Source and vendor
-instructions support 4.3.0 as a US-region candidate, but the tested original
-4.5.0 firmware rejected the setter. Loader access does not establish successful
-preparation, interrupted-transfer recovery, or US-write permission. Firmware
-transfer remains unavailable from the page. The build notes below are historical.
+Download and select the preparation ZIP plus the original D4.5.0 and M4.4.8
+restoration files. Connect in Android Chrome, enter the six-digit Shimano
+passkey, accept the firmware warning, and use the single workflow button. After
+each reset, physically turn the bike off and on, reconnect, tick the power-cycle
+box, and continue. The page rechecks the same salted motor identity, exact native
+D/M versions, and destination at every transition. Interrupted component work
+is resumed only by reselecting the exact journaled files and replaying the
+source-derived complete pair sequence.
+
+This is ready for the first controlled live preparation test, not yet a proven
+region-change procedure. A successful final state requires the original
+D4.5.0/M4.4.8 pair and US value 1 after the final restart. Assistance speed must
+be measured separately. Shimano's direct restoration links may return HTTP 403
+on some networks; if either download is unavailable, the page stays locked and
+the test must not begin.
 
 ## Use
 

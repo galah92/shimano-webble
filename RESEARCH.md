@@ -1,11 +1,13 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .55): SC-E7000 display; motor reports
+Current status (2026-09-10, build .62): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. Direct US writes were
 rejected. The source-backed candidate route is preparation to D 4.3.0.0 /
 M 4.2.1.0, then authenticated destination write and independent readback.
-Firmware installation, successful US write and persistence remain unverified.
-Recovery probes are implementation diagnostics, not region-unlock commands.
+The complete guided transaction and reconnect recovery are now exposed after
+offline simulation and exact-file checks. Firmware installation, successful US
+write, persistence, restoration and the assistance-speed result remain live
+verification gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2525,3 +2527,105 @@ notification. The settled failure stays failed, with no writes or timers added.
 This validates host cleanup only; it does not qualify firmware installation.
 Next implementation work should keep explicit-rejection recovery separate from
 uncertain transport outcomes, rather than enable a general retry-on-failure path.
+
+## Build .60: source-backed reconnect recovery journal and full M replay
+
+Further eTuning 3.0.7 tracing resolves the paired reconnect behavior. The
+recovery UI launches `f64d9` with `recovery_install=true` plus the cached family
+and baseline. `f64d9.V` carries the flag in `C0012ab`; `f9c41.Y` passes it to
+`Th.n4`, which assigns `Th.h`. `Th.o3` is only a wrapper around `p3`. In the
+paired `Th.q4` path, the relevant calls occur in this order: `o3`,
+`C0776xk.z0(M image)`, `p3`, and `C0041b7.g2(D image)`. Both decompiler copies
+have the same order. `C0776xk.z0` delegates to `x0(..., false)` with the complete
+image object; no persisted byte offset is supplied. `Th.p3` uses `h` only to
+bypass the PCA request when bridge mode32 and selector0 are already active.
+
+This supports a reconnect recovery that replays M from its beginning and then
+continues the paired D path. It does not support resuming M at an arbitrary
+saved byte. The source's same-session partial-window rewrites remain separate
+from reconnect recovery and are not enabled after timeouts or disconnects.
+
+The unwired coordinator now writes a versioned journal before its first
+update-mode command. The journal contains only whitelisted baseline fields,
+the exact reviewed D/M SHA-256 hashes, versions and sizes, a salted binding to
+the origin-scoped Web Bluetooth device ID, the salted D-loader fingerprint,
+completed-component flags, and the last stage. It never stores the passkey,
+motor-authentication credentials, raw device ID, raw serial or firmware bytes.
+Every stage transition must round-trip through durable storage.
+
+`recoverFirmwarePair` requires the same Bluetooth device binding, user-reselected
+files with the exact recorded hashes, and the recorded bootloader fingerprint.
+It invokes both session negotiations with `recoveryInstall=true`, replays all of
+M, runs the ordinary paired D entry, verifies the D-loader fingerprint before
+D setup/data, and stops without reset. An already completed journal does not
+replay. Failure records the stage for another explicit reconnect attempt.
+
+`node tests/firmware_recovery.cjs` covers full M replay even when the old attempt
+reported M complete, paired ordering, every worker failure, impossible journal
+states, different device/file rejection before writes, field whitelisting and
+the completed no-op. The ordinary coordinator now refuses to mutate the bike
+unless its journal was durably saved; its controlled and full-wire tests pass.
+The Web Bluetooth device ID identifies the SC-E7000 endpoint rather than proving
+the attached motor on its own. The D-loader fingerprint supplies the motor check
+before D data, while the fresh application fingerprint remains the pre-mutation
+check. This limitation matches the source workflow and must remain explicit.
+
+No UI caller, reset, firmware image write or region write is enabled by build
+.60. Remaining offline work is a reset/reconnect transaction that accepts only
+the exact prepared D4.3.0.0/M4.2.1.0 readback, retains recovery state until that
+verification succeeds, and then gates the already modeled US write and a later
+power-cycle persistence read. Only after those failure paths pass simulation is
+a controlled preparation test justified.
+
+## Builds .61-.62: complete guarded transaction and direct ZIP input
+
+The guided transaction now separates paired transfer, reset, reconnect readback,
+the one destination mutation, physical-power-cycle persistence, restoration and
+final readback. Preparation begins only from the same E5000 family 34/unit 0,
+D4.5.0.0/M4.4.8.0 and EU value 0. Restoration begins only after the same motor
+has reported D4.3.0.0/M4.2.1.0 and US value 1 in a different BLE session after
+explicit physical-power-cycle confirmation. Completion requires a later session
+to report the original D4.5.0.0/M4.4.8.0 pair and US value 1. The journal remains
+until that final match.
+
+The direct setter packet remains `00 16 A8 01 01`. Reinspection of the desktop
+setter establishes byte 3 as destination_rewrite and byte 4 as destination, so
+the rejected original-firmware attempt did not use a reversed selector. The
+newer app's connection state machine deliberately enters `03 4B / 06 1F` and
+then restores `03 00 / 06 00` before normal operation. Keeping its temporary
+connection mode active is therefore not a supported alternative explanation for
+AB/3A. Its compatibility predicate routes E5000 firmware 4.3.0 through the
+destination-setting path and routes tested 4.5.0 through preparation.
+
+The public `5000_430.zip` has SHA-256
+`4dee4d75ee83c22e951114cbf57332709c15be637ec2a8171bd82f9345adb137`.
+Its two extracted files are byte-identical to the archived Shimano desktop
+D4.3.0/M4.2.1 files already reviewed. Build .62 accepts only that complete
+archive hash, its exact two local-entry layouts, decompressed sizes and raw
+SHA-256 hashes. It also continues accepting the two exact extracted DAT files.
+The archive is parsed and decompressed locally; neither file contents nor user
+credentials leave the browser.
+
+Journal validation now binds a preparation journal to the original EU baseline
+and a restoration journal to the prepared US baseline. Every post-reset stage
+requires the recorded reset-connection binding. A stopped journal must retain a
+non-stopped last stage, while an active journal cannot carry stale failure state.
+After preparation preflight, the transfer button requires a physical power-cycle
+confirmation before the first firmware byte.
+
+The exact original restoration images remain mandatory before preparation.
+The reviewed D4.5.0 wrapper and M4.4.8 raw file validate locally. Shimano's
+catalog names and sizes match, but direct public URLs returned HTTP 403 from the
+development environment. No public mirror of that exact pair was found. The UI
+links to Shimano and refuses to start when either file is unavailable or fails
+its exact hash. No firmware bytes have yet been sent by this guided workflow.
+
+Offline validation covers the complete physical packet streams at both reviewed
+image sizes, failure before and after every simulated write, timeouts, aborts,
+same-device and loader-identity gates, full-M reconnect replay, reset separation,
+uncertain one-shot US readback, physical-power-cycle persistence, restoration,
+final goal readback, reviewed wrapper normalization, and exact ZIP extraction.
+The remaining evidence is a controlled bike run. It must first establish that
+the preparation pair transfers, resets and reads back exactly; only then may the
+same transaction attempt US. The final readback is the region result. Higher
+assistance speed is a separate physical observation.

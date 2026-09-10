@@ -61,9 +61,9 @@ class RegionWriteTests(unittest.TestCase):
         }''', options)
 
     def run_attempt(self):
-        self.page.locator('#setUS').click()
-        # Simulate an additional programmatic tap while busy.
-        self.page.evaluate('setUS()')
+        # The legacy standalone button is intentionally disabled; exercise the
+        # retained primitive directly and simulate an immediate second call.
+        self.page.evaluate('setUS();setUS()')
         self.page.wait_for_function("document.getElementById('log').textContent.includes('--- US-region attempt end;')", timeout=25000)
         self.assertFalse(self.errors)
         self.assertTrue(self.page.locator('#setUS').is_disabled())
