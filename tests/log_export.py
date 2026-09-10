@@ -61,6 +61,7 @@ class LogExportTests(unittest.TestCase):
 
     def test_report_preserves_pc_mode_route_and_echo_evidence(self):
         source='[one] Connected; test\n'
+        source+='[one] PC-mode application slot observed via 2AFD: 0D\n'
         source+='[one] RX normal PC-link mode 1 secure echo 1 via 2AFB: 00 32 30 A2 2B\n'
         source+='[one] RX normal PC-link mode 1 completion via 2AFB: 00 32 12 01\n'
         source+='[one] MILESTONE: normal PC-link mode 1 accepted; entering protected inspection mode next.\n'
@@ -68,6 +69,7 @@ class LogExportTests(unittest.TestCase):
         self.set_log(source)
         self.page.locator('#copyLog').click()
         copied=self.page.evaluate('window.copied')
+        self.assertIn('PC-mode application slot observed via 2AFD: 0D',copied)
         self.assertIn('secure echo 1 via 2AFB',copied)
         self.assertIn('completion via 2AFB',copied)
         self.assertIn('protected PC mode 5: completion reply timed out',copied)

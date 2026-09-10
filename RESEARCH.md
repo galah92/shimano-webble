@@ -1,15 +1,21 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .67): SC-E7000 display; motor reports
+Current status (2026-09-10, build .68): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation now
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
 flag. The earlier live attempts supplied neither state and used a shortened
 setter packet. The .65 bike test verified the `E8`/`EA` regulation unlock.
-Builds .65 and .66 both stopped before any setting command because mode 5 did
-not return its completion message. Build .67 adds the normal mode-1 PC-link
-transition that the desktop establishes before entering its inspection UI and
-observes category-32 replies on all subscribed routes. It otherwise preserves
+not return its completion message. Build .67 added the normal mode-1 PC-link
+transition, but the bike returned neither its broadcast secure echoes nor a
+completion. The official BLE capture contains the missing transport identity:
+setup `00 0C 01` is followed by `00 32 12 01 0D`, assigning the wireless phone
+application slot `0D`. The previous builds copied desktop adapter slot `00`.
+The firmware's saved-slot completion path makes this the leading explanation,
+while the .68 bike run remains the live validation gate.
+Build .68 learns this slot from the live setup announcement when possible and
+uses the capture-backed `0D` fallback. Both mode stages require their own exact
+mode in the returned category-32 completion. It otherwise preserves
 the command-only candidate with no firmware or bootloader operation. Successful
 two-stage PC-mode entry, US write, persistence and the assistance-speed result
 remain live verification gates.
@@ -2752,3 +2758,27 @@ framing checkpoint before the completion gate. The page listens for these
 responses on 2AF9, 2AFB, and 2AFD and logs the characteristic that carried
 them. A mode-status response received before the fifth word cannot satisfy the
 gate. Any failure requests mode 0 and disconnects without sending `A0` or `A8`.
+
+The real .67 run sent both mode-1 setup and all five words but observed zero
+echoes and no completion. No setting opcode ran. This bounded result ruled out
+the secure-word values as the immediate failure point and exposed the remaining
+difference from a wireless session: the return application slot.
+
+## Build .68: route PC-mode completion to the wireless application
+
+The supplied eTuning ATT capture writes display setup `00 0C 01`; 61 ms later
+2AFD reports `00 32 12 01 0D FF FF 00 FF FF`. D4.5.0's mode request handler
+reads the request's second parameter as the application slot, retains it during
+the five-word check, and sends completion to that slot. Shimano's managed
+library likewise fills parameter 1 from `PCAppliSlotNo`. Slot `00` is therefore
+specific to the directly attached desktop adapter, while this SC-E7000 BLE
+route announces slot `0D`.
+
+Build .68 records an unicast slot below `3F` from a mode-1 opcode-12 setup
+announcement. If the bridge does not relay that announcement, it uses `0D` from
+the exact supplied capture. Mode 1, mode 5, and mode 0 requests all carry the
+selected slot. An opcode-12 notification counts as completion only after the
+fifth secure word and only when both its reported mode and application slot
+equal the request.
+The `A0` and `A8` commands remain unreachable on any missing or mismatched mode
+completion.

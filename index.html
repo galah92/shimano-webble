@@ -370,7 +370,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.67';
+const BUILD = '2026-09-10.68';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2712,6 +2712,20 @@ async function identifyDrive() {
       const observe = ev => {
         if (session !== s) return;
         const data = bytes(ev.target.value);
+        // The wireless display reports the PC-mode application slot as
+        // category 32 / opcode 12 / mode 1 / slot after setup command 0C.
+        // Capture it for later PC-link requests. 0x3f is broadcast and 0xff
+        // is padding, so neither can identify this phone connection.
+        if (data.length >= 5 && data[0] === 0 && data[1] === 0x32
+            && data[2] === 0x12 && data[3] === 1 && data[4] < 0x3f) {
+          if (s.pcApplicationSlot === undefined) {
+            s.pcApplicationSlot = data[4];
+            log(`PC-mode application slot observed via ${short.toUpperCase()}: ${data[4].toString(16).padStart(2, '0').toUpperCase()}`);
+          } else if (s.pcApplicationSlot !== data[4]) {
+            s.pcApplicationSlotConflict = true;
+            log(`PC application slot conflict: ${s.pcApplicationSlot.toString(16).padStart(2, '0').toUpperCase()} then ${data[4].toString(16).padStart(2, '0').toUpperCase()}`);
+          }
+        }
         const stats = traffic[short];
         stats.count++;
         // Only message-type prefixes, never arbitrary notification payloads.
@@ -3008,9 +3022,22 @@ function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength
 // sends column 1 before column 0. D4.5.0 parses the wire pair little-endian.
 const PC_MODE1_WORDS=Object.freeze([[0xa2,0x2b],[0x30,0x0e],[0x7a,0x4d],[0x62,0x2b],[0x85,0xb4]]);
 const PC_MODE5_WORDS=Object.freeze([[0x27,0x0f],[0x11,0x55],[0x35,0xb0],[0x03,0xf3],[0x09,0x03]]);
+// The supplied official eTuning BLE capture announces mode 1 to application
+// slot 0x0d immediately after display setup 0C. Desktop adapter slot 0 yielded
+// no completion in the live SC-E7000 test. Prefer the bike's live announcement
+// and use the captured wireless-slot candidate only when it is not relayed.
+const CAPTURED_WIRELESS_PC_APPLICATION_SLOT=0x0d;
+function pcApplicationSlot(s) {
+  if(s.pcApplicationSlotConflict)throw new Error('Conflicting PC application slots observed; reconnect before privileged commands');
+  if(Number.isInteger(s.pcApplicationSlot)&&s.pcApplicationSlot>=0&&s.pcApplicationSlot<0x3f)return s.pcApplicationSlot;
+  s.pcApplicationSlot=CAPTURED_WIRELESS_PC_APPLICATION_SLOT;
+  log('PC application slot was not observed live; using wireless slot 0D from the supplied official eTuning capture.');
+  return s.pcApplicationSlot;
+}
 window.commandDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
   assertCurrent(s);
+  const applicationSlot=pcApplicationSlot(s);
   return new Promise((resolve,reject)=>{
     const routes=['2af9','2afb','2afd'].map(short=>[short,s.chars[short]]).filter(([,ch])=>ch);
     let written=false,settled=false,response,wordsSent=0,secureEchoes=0;
@@ -3039,7 +3066,15 @@ function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
         return;
       }
       if(data[2]===0x13)return finish(new Error(`${label} rejected${data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:''}`));
-      if(data.length<3)return finish(new Error(`${label} returned a short reply`));
+      if(data.length<5)return finish(new Error(`${label} returned a short reply`));
+      if(data[3]!==mode) {
+        log(`RX ${label} ignored mode ${data[3].toString(16).padStart(2,'0').toUpperCase()} status via ${short.toUpperCase()}; expected ${mode.toString(16).padStart(2,'0').toUpperCase()}.`);
+        return;
+      }
+      if(data[4]!==applicationSlot) {
+        log(`RX ${label} ignored application slot ${data[4].toString(16).padStart(2,'0').toUpperCase()} via ${short.toUpperCase()}; expected ${applicationSlot.toString(16).padStart(2,'0').toUpperCase()}.`);
+        return;
+      }
       response=data.slice();
       log(`RX ${label} completion via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
       if(written)finish();
@@ -3053,8 +3088,9 @@ function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
     s.controller.signal.addEventListener('abort',onAbort,{once:true});
     (async()=>{
       try {
-        log(`TX 2AFE ${label} request: 00 32 10 ${mode.toString(16).padStart(2,'0').toUpperCase()} 00 00 00`);
-        await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x10,mode,0,0,0));
+        const slotHex=applicationSlot.toString(16).padStart(2,'0').toUpperCase();
+        log(`TX 2AFE ${label} request: 00 32 10 ${mode.toString(16).padStart(2,'0').toUpperCase()} ${slotHex} 00 00`);
+        await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x10,mode,applicationSlot,0,0));
         if(settled)return;
         assertCurrent(s);
         if(initialDelay)await window.commandDelay(initialDelay);
@@ -3300,7 +3336,7 @@ function exportLog() {
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
   const lines = snapshot.split('\n').filter(Boolean);
   // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.
-  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|PC-link mode|protected PC mode|secure echo|pre-key status|^Entry |^Bootloader |^Post-probe )/i;
+  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|PC-mode application|PC application|PC-link mode|protected PC mode|secure echo|pre-key status|ignored mode|^Entry |^Bootloader |^Post-probe )/i;
   const routine = /^(?:TX |RX |ATT |READ |RESULT |QUERY TRAFFIC |--- |(?:Captured setup|eTuning setup|Restore setup) |2AF[9BD] traffic:|2AF[9BD] notifications enabled|Motor serial received|Log copied)/;
   const useful = lines.filter(line => {
     const message = line.replace(/^\[[^\]]+\] /,'');

@@ -9,7 +9,7 @@ command.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .67)
+## Current next step (build .68)
 
 Decompilation explains the earlier `00 16 AB 3A 00` result. The D4.5.0
 destination setter is present and has no firmware-version gate. It returns
@@ -22,8 +22,18 @@ reply. Builds .65 and .66 both stopped before any setting command because mode
 5 never returned its completion message; correcting the byte order alone did
 not resolve it. Static analysis of the desktop workflow shows that its normal
 connection establishes PC-link mode 1 before the inspection UI enters mode 5.
-Build .67 reproduces that complete lifecycle and listens for the category-32
-completion on every subscribed reply route. It requires mode 1 completion,
+Build .67 reproduced that complete lifecycle, but the real bike returned no
+mode-1 secure echoes or completion. The supplied official BLE capture explains
+the missing route: after setup `00 0C 01`, the wireless session announces
+`00 32 12 01 0D`, reporting mode 1 and application slot `0D`. Builds .65-.67
+sent the desktop adapter's slot `00` and received no completion through
+SC-E7000. The firmware's saved-slot completion logic makes that routing mismatch
+the current evidence-backed explanation; the next bike run must validate it.
+
+Build .68 records a live category-32 mode-1 slot announcement when available
+and otherwise uses the capture-backed wireless slot `0D`. Both mode requests
+carry that slot, and the page requires the returned mode and slot to match the
+request. It requires mode 1 completion,
 then mode 5 completion, before it can read and same-value stage lighting time,
 the full `00 16 A8 01 01 00 00` destination command, immediate readback, and a
 protected-mode exit on every path. It stores a salted same-device verification
@@ -149,7 +159,7 @@ challenge, keys, ciphertext, secure PC words, and passkey are omitted from logs.
 The user's build .14 log verified motor authentication on the real bike, with
 the three DA challenge fragments and E2 FF FF completion after the third E0.
 
-## Command-only US destination candidate (build .67)
+## Command-only US destination candidate (build .68)
 
 The D4.5.0 `A8` handler at `0x2537c` accepts the write only while PC mode is 4
 or 5 and a one-shot flag set by the `A0` handler is active. There is no version
@@ -158,9 +168,12 @@ secure sequence, reads lighting time, writes the same value with `A0`, and sends
 four destination parameters. This explains why the earlier shortened
 `00 16 A8 01 01` call reached `AB 3A`.
 
-Build .67 first reads current destination again; only EU (0) permits progress.
+Build .68 first reads current destination again; only EU (0) permits progress.
 It establishes the desktop's ordinary PC-link mode 1, then enters inspection
-mode 5 and requires a completion reply after each five-word sequence. It reads
+mode 5 and requires a matching completion reply after each five-word sequence.
+Unlike the desktop adapter, the wireless path uses application slot `0D`; the
+page learns it from the bike's setup announcement or falls back to the exact
+value in the supplied official capture. It reads
 lighting time, stages
 the identical value, saves a durable reconnect expectation, then sends the full
 `00 16 A8 01 01 00 00` packet once. It accepts only `AA` as the setter's normal

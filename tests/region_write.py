@@ -23,7 +23,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate('''async opts => {
           window.commandDelay=async()=>{};
           window.regionWrites=[];window.regionReads=0;window.secureWords=0;
-          window.secureWordsByMode={1:0,5:0};window.currentPcMode=0;
+          window.secureWordsByMode={1:0,5:0};window.currentPcMode=0;window.currentPcSlot=0;
           if(opts.storageFailure){
             const original=Storage.prototype.setItem;
             Storage.prototype.setItem=function(k,v){
@@ -34,6 +34,8 @@ class RegionWriteTests(unittest.TestCase):
           session.verified=session.motorEligible=session.motorAuthenticated=true;
           session.directWriteEligible=session.commandWriteEligible=true;
           session.currentDestination=0;
+          if(opts.omitPcApplicationSlot)delete session.pcApplicationSlot;
+          else session.pcApplicationSlot=opts.pcApplicationSlot??0x0d;
           for(const short of ['2afe','2afd','2af9','2afb'])
             session.chars[short]=await session.service.getCharacteristic(UUID(short));
           const rx=session.chars['2afd'];
@@ -44,10 +46,11 @@ class RegionWriteTests(unittest.TestCase):
           session.chars['2afe'].writeValueWithResponse=async packet=>{
             const p=[...packet];regionWrites.push(p);
             if(p[1]===0x32&&p[2]===0x10) {
+              currentPcSlot=p[4];
               if(p[3]===1) {
                 currentPcMode=1;
                 if(opts.mode1RequestFailure)throw Error('Normal PC-link request ATT failure');
-                if(opts.mode1PreKeyStatus)emit([0,0x32,0x12,1]);
+                if(opts.mode1PreKeyStatus)emit([0,0x32,0x12,1,currentPcSlot]);
                 return;
               }
               if(p[3]===5) {
@@ -57,7 +60,7 @@ class RegionWriteTests(unittest.TestCase):
               }
               if(p[3]===0) {
                 if(opts.exitWriteFailure)throw Error('PC mode exit ATT failure');
-                if(!opts.exitTimeout)emit([0,0x32,opts.exitReject?0x13:0x12,opts.exitReject?0x3a:0]);
+                if(!opts.exitTimeout)emit([0,0x32,opts.exitReject?0x13:0x12,opts.exitReject?0x3a:0,currentPcSlot]);
                 return;
               }
             }
@@ -70,7 +73,15 @@ class RegionWriteTests(unittest.TestCase):
                 const reject=currentPcMode===1?opts.mode1Reject:opts.pcReject;
                 const target=opts.completionRoute||'2afd';
                 const targetRx=session.chars[target];
-                targetRx.value=new DataView(Uint8Array.from([0,0x32,reject?0x13:0x12,reject?0x3a:0]).buffer);
+                if(opts.wrongModeFirst&&!reject){
+                  targetRx.value=new DataView(Uint8Array.from([0,0x32,0x12,currentPcMode===1?5:1,currentPcSlot]).buffer);
+                  targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
+                }
+                if(opts.wrongSlotFirst&&!reject){
+                  targetRx.value=new DataView(Uint8Array.from([0,0x32,0x12,currentPcMode,(currentPcSlot+1)&0x3e]).buffer);
+                  targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
+                }
+                targetRx.value=new DataView(Uint8Array.from([0,0x32,reject?0x13:0x12,reject?0x3a:currentPcMode,currentPcSlot]).buffer);
                 targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
               }
               return;
@@ -134,16 +145,16 @@ class RegionWriteTests(unittest.TestCase):
         self.assertEqual(self.packets(),[])
 
     def test_exact_protected_sequence_preserves_lighting_and_sets_us_once(self):
-        self.prepare();self.run_attempt()
+        self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
-            [0,0x32,0x10,1,0,0,0],
+            [0,0x32,0x10,1,0x0d,0,0],
             [0,0x32,0x30,0xa2,0x2b,0,0],
             [0,0x32,0x30,0x30,0x0e,0,0],
             [0,0x32,0x30,0x7a,0x4d,0,0],
             [0,0x32,0x30,0x62,0x2b,0,0],
             [0,0x32,0x30,0x85,0xb4,0,0],
-            [0,0x32,0x10,5,0,0,0],
+            [0,0x32,0x10,5,0x0d,0,0],
             [0,0x32,0x30,0x27,0x0f,0,0],
             [0,0x32,0x30,0x11,0x55,0,0],
             [0,0x32,0x30,0x35,0xb0,0,0],
@@ -153,9 +164,10 @@ class RegionWriteTests(unittest.TestCase):
             [0,0x16,0xa0,0x34,0x12,0,0],
             [0,0x16,0xa8,1,1,0,0],
             [0,0x16,0xac,1],
-            [0,0x32,0x10,0,0,0,0],
+            [0,0x32,0x10,0,0x0d,0,0],
         ])
         self.assertIn('MILESTONE: US (1) read back',self.page.locator('#log').inner_text())
+        self.assertIn('using wireless slot 0D',self.page.locator('#log').inner_text())
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
 
     def test_restart_record_is_durable_before_the_only_destination_write(self):
@@ -209,6 +221,16 @@ class RegionWriteTests(unittest.TestCase):
         self.assertEqual(sum(p[2]==0xa8 for p in packets),1)
         self.assertEqual(sum(p[:4]==[0,0x32,0x30,0xa2] for p in packets),1)
         self.assertIn('pre-key status',self.page.locator('#log').inner_text())
+
+    def test_wrong_mode_completion_is_ignored_until_exact_mode_arrives(self):
+        self.prepare(wrongModeFirst=True);self.run_attempt()
+        self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
+        self.assertIn('ignored mode',self.page.locator('#log').inner_text())
+
+    def test_wrong_slot_completion_is_ignored_until_exact_slot_arrives(self):
+        self.prepare(wrongSlotFirst=True);self.run_attempt()
+        self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
+        self.assertIn('ignored application slot',self.page.locator('#log').inner_text())
 
     def test_destination_and_readback_failures_never_retry_and_always_exit(self):
         failures=({'destinationReject':0x3a},{'destinationWriteFailure':True},

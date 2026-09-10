@@ -30,6 +30,11 @@ class Characteristic extends EventTarget {
         if (options.initTimeout === packet[1]) return;
         rx.value = value([packet[1] + 32, options.initReject === packet[1] ? 1 : packet[1] === 4 ? 141 : 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
+        if (packet[1] === 12 && !options.omitPcSlotAnnouncement) {
+          const pcRx = characteristics['2afd'];
+          pcRx.value = value([0, 0x32, 0x12, 1, options.pcApplicationSlot ?? 0x0d, 0xff, 0xff, 0, 0xff, 0xff]);
+          pcRx.dispatchEvent(new Event('characteristicvaluechanged'));
+        }
         if (packet[1] === 3) {
           characteristics['2afd'].value = value([0, 22, 128, 0, 0, 0, 0, 0, 0, 0]);
           characteristics['2afd'].dispatchEvent(new Event('characteristicvaluechanged'));
@@ -408,6 +413,8 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(packets, [[0,3,0], [0,4], [0,6,0],
             [0,12,1], [0,3,75], [0,4], [0,6,31], [0,3,0], [0,4], [0,6,0]])
         self.assertEqual(self.page.locator('#region').inner_text(), 'EU')
+        self.assertEqual(self.page.evaluate('session.pcApplicationSlot'), 0x0d)
+        self.assertIn('PC-mode application slot observed via 2AFD: 0D', self.page.locator('#log').inner_text())
         self.assertFalse(any(x[2][1] == 136 for x in self.writes()))
         self.assertFalse(self.errors)
 
