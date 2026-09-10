@@ -32,11 +32,19 @@ with sync_playwright() as p:
     assert page.evaluate('calls')==[]
     page.locator('#passkey').fill('123456')
     page.locator('#bootProbe').click()
-    expect(page.locator('#bootProbeStatus')).to_contain_text('Turn the bike off and on')
-    assert page.evaluate('calls')==['session','read','motor','probe']
-    assert page.evaluate('session===null && !busy && !guidedTestRunning')
-    expect(page.locator('#log')).to_contain_text('Recovery entry from application acknowledged: yes')
-    assert page.evaluate("JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)).verified===false")
+    expect(page.locator('#bootProbeStatus')).to_contain_text('Region check finished')
+    expect(page.locator('#bootProbe')).to_have_text('Check region')
+    assert page.evaluate('calls')==['session','read']
+    assert page.evaluate('session!==null && !busy && !guidedTestRunning')
+    assert page.evaluate('probeRecord===null')
+    # Repeated checks on this connection must not launch recovery either.
+    page.locator('#bootProbe').click()
+    assert page.evaluate('calls')==['session','read']
+    # Preserve verification for records created by earlier builds.
+    page.evaluate("""() => {
+      probeRecord={version:1,connection:'previous',salt:'07'.repeat(16),expected:{identity:'a'.repeat(64),family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:0},verified:false,bootloaderIdentity:{version:1,family:34,unit:0,identity:'b'.repeat(64)}};
+      saveProbeRecord();
+    }""")
     # Verification must stop after reading, without motor authentication or a second probe.
     page.evaluate('''() => {
       calls=[];session=fakeSession();controls();
@@ -69,11 +77,11 @@ with sync_playwright() as p:
         assert 'Post-region readback:' in page.evaluate('exportLog()')
     page.evaluate("probeRecord=JSON.parse(originalProbeRecord);saveProbeRecord()")
     # A failed prerequisite must never reach the probe.
-    for failure,expected in [('session',['session']),('read',['session','read']),('motor',['session','read','motor'])]:
+    for failure,expected in [('session',['session']),('read',['session','read'])]:
         page.evaluate('''failure=>{
           probeRecord=null;calls=[];session=fakeSession();controls();
           authenticate=async()=>{calls.push('session');session.verified=failure!=='session';};
-          identifyDrive=async()=>{calls.push('read');session.batchDone=true;session.motorEligible=failure!=='read';};
+          identifyDrive=async()=>{calls.push('read');session.batchDone=failure!=='read';session.motorEligible=failure!=='read';};
           authenticateMotor=async()=>{calls.push('motor');session.motorAuthenticated=failure!=='motor';};
         }''',failure)
         page.locator('#passkey').fill('123456')
@@ -88,4 +96,4 @@ with sync_playwright() as p:
     assert 'stopped' in copied and 'Post-probe readback' in copied
     assert not errors,errors
     browser.close()
-print('Guided test UI: embedded profile, passkey gate, ordered automatic setup, verification-only restart, prerequisite failures and saved record passed')
+print('Region check UI: no motor authentication or recovery, verification-only restart, prerequisite failures and saved record passed')

@@ -1,10 +1,25 @@
 # Shimano WebBLE
 
 A single-file Web Bluetooth diagnostic and experimental session-authentication
-console for Shimano STEPS. The experimental US-destination setter is currently disabled.
+console for Shimano STEPS. The experimental US-destination setter is disabled
+for the tested original firmware; the reviewed preparation pair has an eligibility
+gate but has not been installed or validated on this bike.
 Firmware transfer code is tested offline; the page does not expose firmware flashing.
 
 **Live site:** https://galah92.github.io/shimano-webble/
+
+## Current next step (build .57)
+
+**Check region** authenticates the connection and reads region and compatibility.
+It does not authenticate the motor, enter a bootloader, or attempt a region write.
+**Verify after restart** remains available for a saved pending verification.
+Recovery tests are on hold; no repeat bike test is requested.
+
+The missing step is a validated firmware-preparation workflow. Source and vendor
+instructions support 4.3.0 as a US-region candidate, but the tested original
+4.5.0 firmware rejected the setter. Loader access does not establish successful
+preparation, interrupted-transfer recovery, or US-write permission. Firmware
+transfer remains unavailable from the page. The build notes below are historical.
 
 ## Use
 
@@ -351,9 +366,12 @@ supply actual connection lifecycle tokens and the same private identity salt.
 Matching readback does not establish power-cycle persistence; that remains
 an explicit live verification requirement.
 
-## Guided bike test (build .41)
+## Historical guided bike test (build .41; replaced by .57)
 
-No profile download, file selection, or paid account is required.
+This earlier procedure is on hold. The main button now performs the region
+check described above; it no longer runs this probe.
+
+No profile download, file selection, or paid account was required.
 
 1. Connect and enter the six-digit Shimano passkey.
 2. Tap **Run bike test**. Session authentication, compatibility reads, motor authentication and the entry/read/reset probe run automatically. Keep Chrome foregrounded.

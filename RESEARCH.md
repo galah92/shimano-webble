@@ -2399,3 +2399,20 @@ cover identity/version/region mismatches, all read errors and the distinct
 connection requirement. Reconnect is not independent proof of a power cycle:
 physical restart persistence and a real US change remain unverified. No
 firmware transfer was enabled and no new bike test is requested.
+
+
+## Build .57: enforce the recovery-test hold in the guided action
+
+The .55 card said recovery diagnostics were on hold, but runGuidedBikeTest
+still called motor authentication and runBootloaderProbe after compatibility
+reads. This contradicted the stated next step. The main action now says Check
+region and stops after session authentication and the information batch.
+Pending same-motor restart verification retains its existing read-only branch.
+The recovery primitive remains available for offline work but has no guided
+button caller. Firmware transfer remains unwired; no new bike test is requested.
+
+The browser test asserts that a normal click and a repeated click cannot invoke
+motor authentication or recovery, retains earlier-build restart records, and
+checks US matching/mismatching readback without further writes. This change
+implements the investigation hold; it does not advance firmware compatibility
+or establish a successful US write.

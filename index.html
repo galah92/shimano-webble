@@ -320,7 +320,7 @@ END HANDOFF NOTES
 <body>
 <h1>Shimano BLE Diagnostic</h1>
 <div class="muted" id="build"></div>
-<p>Connect, enter your passkey, and tap Run bike test. The page will guide you through the next check. US-region configuration is not ready yet.</p>
+<p>Connect, enter your passkey, and tap Check region. US-region configuration is not ready yet.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -346,10 +346,10 @@ END HANDOFF NOTES
 <div class="muted">Use the passkey configured in E-TUBE. It is used locally and is not saved or logged.</div>
 </div>
 <div class="card">
-<strong>Recovery diagnostic — on hold</strong>
-<p>No repeat test is needed while the preparation workflow is being investigated. This diagnostic checks recovery entry only; it does not unlock region writes.</p>
-<div class="row"><button id="bootProbe" disabled>Run bike test</button></div>
-<div id="bootProbeStatus" role="status">Connect, enter your passkey, then tap Run bike test. Setup runs automatically.</div>
+<strong>US-region readiness</strong>
+<p>Check the current region and firmware. Firmware preparation remains under investigation; this check does not enter recovery mode or change the region.</p>
+<div class="row"><button id="bootProbe" disabled>Check region</button></div>
+<div id="bootProbeStatus" role="status">Connect, enter your passkey, then tap Check region. Setup runs automatically.</div>
 </div>
 <details class="card"><summary>Advanced diagnostics</summary>
 <div class="row"><button id="probe" disabled>Run read-only probe</button><button id="authenticate" disabled>Authenticate session</button></div>
@@ -368,7 +368,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.56';
+const BUILD = '2026-09-10.57';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1568,7 +1568,7 @@ function controls() {
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || !connected || session?.authenticated;
   $('bootProbe').disabled = busy || guidedTestRunning || !connected || session?.bootProbeAttempted;
-  $('bootProbe').textContent = probeRecord && !probeRecord.verified ? 'Verify after restart' : 'Run bike test';
+  $('bootProbe').textContent = probeRecord && !probeRecord.verified ? 'Verify after restart' : 'Check region';
   if (guidedTestRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
 }
 function protectedStatus(message, css = '') {
@@ -2475,13 +2475,8 @@ async function runGuidedBikeTest() {
         : 'Original motor, firmware and region match. Test finished — tap Copy log.';
       return;
     }
-    if (!s.motorEligible) throw new Error('Bike compatibility was not verified. Copy the log.');
-    if (!s.motorAuthenticated) {
-      $('bootProbeStatus').textContent = 'Authenticating the motor…';
-      await authenticateMotor();assertCurrent(s);
-      if (!s.motorAuthenticated) throw new Error('Motor authentication did not complete. Copy the log.');
-    }
-    await runBootloaderProbe();
+    if (!s.batchDone) throw new Error('Region and compatibility checks did not complete. Copy the log.');
+    $('bootProbeStatus').textContent = 'Region check finished. See US-region workflow above; tap Copy log. No recovery or region-write attempt was made.';
   } catch (error) {
     $('bootProbeStatus').textContent = error.message;
   } finally {guidedTestRunning = false;controls();}
