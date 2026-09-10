@@ -2416,3 +2416,37 @@ motor authentication or recovery, retains earlier-build restart records, and
 checks US matching/mismatching readback without further writes. This change
 implements the investigation hold; it does not advance firmware compatibility
 or establish a successful US write.
+
+## Preparation blocker audit — 2026-09-10
+
+The previous guided-action correction is deployed as .57. The next unresolved
+requirement is the actual preparation transfer and its interrupted-M recovery
+path; another D-loader entry success would not establish either.
+
+Targeted reinspection of eTuning 3.0.7 Th.q4 (8093-8104) shows an Ih.k family
+check before its alternative M worker callers (8261, 8531). This is not an
+E5000 recovery route. C0776xk.z0 (4776-4778) delegates to x0(false), rather than
+implementing independent reconnect recovery. Th.W2 (6832-6842) returns an
+in-memory cached Sh only for a matching family; it does not demonstrate
+restoration after process loss. These are bounded findings about these callers,
+not proof that no other recovery implementation exists.
+
+Primary documentation checked through indexed official source excerpts:
+- https://si.shimano.com/en/pdfs/um/7J4WA/UM-7J4WA-008-ENG.pdf,
+  page 21, Restoring the firmware: the general Professional procedure uses
+  SM-PCE02 connected to a PC and the affected unit.
+- https://bike.shimano.com/en-UK/support-and-service/faq/EPC0A.html,
+  NM-6060 and NM-4030: wireless-failure recovery guidance includes restarting
+  the system and checking restoration; unresolved wireless update failures
+  are directed to wired restoration. The linked recovery categories in
+  NM-6060 concern system information displays/wireless units and power meters.
+  This does not specify interrupted E5000 M-component recovery over WebBLE.
+
+Full PDF downloads attempted in this audit were unavailable (web size limit
+and direct HTTP 403). The claims above are limited to the returned official
+indexed sections, not an exhaustive review of those manuals. The documentation
+neither establishes our phone-only recovery implementation nor proves such a
+route impossible. No purchase is proposed and no additional motor test or
+firmware write is enabled. Required new evidence is a source-backed E5000 M
+interruption/reconnect restoration sequence or a known-working corresponding
+trace; repeating intact D-entry diagnostics does not supply that evidence.
