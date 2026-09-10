@@ -1,6 +1,6 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .62): SC-E7000 display; motor reports
+Current status (2026-09-10, build .63): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. Direct US writes were
 rejected. The source-backed candidate route is preparation to D 4.3.0.0 /
 M 4.2.1.0, then authenticated destination write and independent readback.
@@ -2577,7 +2577,7 @@ verification succeeds, and then gates the already modeled US write and a later
 power-cycle persistence read. Only after those failure paths pass simulation is
 a controlled preparation test justified.
 
-## Builds .61-.62: complete guarded transaction and direct ZIP input
+## Builds .61-.63: complete guarded transaction and simplified local input
 
 The guided transaction now separates paired transfer, reset, reconnect readback,
 the one destination mutation, physical-power-cycle persistence, restoration and
@@ -2600,11 +2600,20 @@ destination-setting path and routes tested 4.5.0 through preparation.
 The public `5000_430.zip` has SHA-256
 `4dee4d75ee83c22e951114cbf57332709c15be637ec2a8171bd82f9345adb137`.
 Its two extracted files are byte-identical to the archived Shimano desktop
-D4.3.0/M4.2.1 files already reviewed. Build .62 accepts only that complete
+D4.3.0/M4.2.1 files already reviewed. Build .63 accepts only that complete
 archive hash, its exact two local-entry layouts, decompressed sizes and raw
 SHA-256 hashes. It also continues accepting the two exact extracted DAT files.
 The archive is parsed and decompressed locally; neither file contents nor user
 credentials leave the browser.
+
+Build .63 combines the preparation archive and both restoration images into one
+file selection, classifies them by the reviewed hashes regardless of selection
+order, and caches the verified bundle in local browser storage for interrupted
+workflow recovery. The cache is cleared after final success. The six-digit
+passkey and authorized Bluetooth device object remain memory-only in the open
+tab, allowing one passkey entry and best-effort direct reconnects. Each required
+physical restart is confirmed by pressing an explicitly worded **I
+power-cycled** workflow action; the separate checkbox was removed.
 
 Journal validation now binds a preparation journal to the original EU baseline
 and a restoration journal to the prepared US baseline. Every post-reset stage

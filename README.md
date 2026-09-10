@@ -10,23 +10,26 @@ reconnect checkpoint matches.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .62)
+## Current next step (build .63)
 
 The tested D4.5.0/M4.4.8 EU pair rejects the exact destination setter with AB/3A.
 The source-backed candidate route uses D4.3.0/M4.2.1, for which the newer app
-enables its destination-setting path. Build .62 exposes that route as one guided
+enables its destination-setting path. Build .63 exposes that route as one guided
 button and durable recovery journal. It accepts the exact reviewed preparation
 ZIP directly, but requires both exact original restoration files before it will
 send firmware data.
 
-Download and select the preparation ZIP plus the original D4.5.0 and M4.4.8
-restoration files. Connect in Android Chrome, enter the six-digit Shimano
-passkey, accept the firmware warning, and use the single workflow button. After
-each reset, physically turn the bike off and on, reconnect, tick the power-cycle
-box, and continue. The page rechecks the same salted motor identity, exact native
-D/M versions, and destination at every transition. Interrupted component work
-is resumed only by reselecting the exact journaled files and replaying the
-source-derived complete pair sequence.
+Download the preparation ZIP plus the original D4.5.0 and M4.4.8 restoration
+files, then choose all three in the page's single file picker. Enter the
+six-digit Shimano passkey once, accept the firmware warning, and use the single
+workflow button; it opens the Bluetooth chooser when a connection is needed.
+After each reset, physically turn the bike off and on and press the explicitly
+worded **I power-cycled** action. The passkey stays only in memory in that open
+tab until completion. The page rechecks the same salted motor identity, exact
+native D/M versions, and destination at every transition. Interrupted component
+work uses the locally cached exact files; if that cache is unavailable, the page
+requires the same files again. Recovery always replays the source-derived
+complete pair sequence.
 
 This is ready for the first controlled live preparation test, not yet a proven
 region-change procedure. A successful final state requires the original

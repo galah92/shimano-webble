@@ -137,7 +137,8 @@ bike.gatt = {
     }};
   }
 };
-Object.defineProperty(navigator, 'bluetooth', {value: {requestDevice: async () => bike}});
+window.deviceChooserCalls = 0;
+Object.defineProperty(navigator, 'bluetooth', {value: {requestDevice: async () => {deviceChooserCalls++; return bike;}}});
 """
 
 class BrowserTests(unittest.TestCase):
@@ -178,6 +179,17 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.writes(), [])
         self.assertNotIn(['read', '2af8'], self.page.evaluate('operations'))
         self.assertIn('not readable', self.page.locator('#protected').inner_text())
+
+    def test_open_tab_reconnect_reuses_authorized_bike(self):
+        self.open()
+        self.assertEqual(self.page.evaluate('deviceChooserCalls'), 1)
+        self.page.locator('#disconnect').click()
+        self.page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'")
+        self.page.evaluate('connect(workflowDevice)')
+        self.page.wait_for_function("!document.getElementById('probe').disabled")
+        self.assertEqual(self.page.evaluate('deviceChooserCalls'), 1)
+        self.assertTrue(self.page.evaluate('session.device === bike'))
+        self.assertFalse(self.errors)
 
     def test_handshake_and_sensitive_log_omission(self):
         self.open()

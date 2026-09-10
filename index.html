@@ -325,39 +325,33 @@ END HANDOFF NOTES
 <div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div></div>
-<div class="row">
-<button id="connect">Connect Shimano</button>
-
-<button id="disconnect" disabled>Disconnect</button>
-</div>
 <div class="card">
 <label for="passkey">Shimano passkey (six digits)</label>
 <input id="passkey" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" disabled />
-
-<div class="muted">Use the passkey configured in E-TUBE. It is used locally and is not saved or logged.</div>
+<div class="muted" id="passkeyStatus">Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.</div>
 </div>
 <div class="card">
 <strong>Change region to US</strong>
-<p>The files stay on this phone. Download the reviewed preparation ZIP and the two original restoration files, then select them below. The page accepts only exact reviewed SHA-256 hashes.</p>
+<p>The files stay on this phone. Download these three files, then choose all three together once. The page identifies them by exact reviewed SHA-256 hashes.</p>
 <div class="workflow-files">
-<label>Preparation pair — D 4.3.0 and M 4.2.1
-  <span><a href="https://etuning-app.com/wp-content/uploads/2024/11/5000_430.zip" target="_blank" rel="noopener">Download reviewed preparation ZIP</a></span>
-  <input id="preparationFiles" type="file" accept=".zip,.dat" multiple aria-label="Select preparation ZIP or D and M firmware files" />
+<div><strong>1. Download</strong><br />
+  <a href="https://etuning-app.com/wp-content/uploads/2024/11/5000_430.zip" target="_blank" rel="noopener">Preparation ZIP</a> ·
+  <a href="https://api.shimano.com/etube/public/data/upload/published/DUE5000-D.4.5.0.dat" target="_blank" rel="noopener">Restoration D</a> ·
+  <a href="https://api.shimano.com/etube/public/data/upload/published/DUE5000-M.4.4.8.dat" target="_blank" rel="noopener">Restoration M</a>
+</div>
+<label><strong>2. Choose the three downloaded files together</strong>
+  <input id="firmwareFiles" type="file" accept=".zip,.dat" multiple aria-label="Select the preparation ZIP and both restoration firmware files" />
 </label>
-<div id="preparationStatus" role="status">Select the preparation ZIP.</div>
-<label>Restoration pair — D 4.5.0 and M 4.4.8
-  <span><a href="https://api.shimano.com/etube/public/data/upload/published/DUE5000-D.4.5.0.dat" target="_blank" rel="noopener">DUE5000-D.4.5.0.dat</a> · <a href="https://api.shimano.com/etube/public/data/upload/published/DUE5000-M.4.4.8.dat" target="_blank" rel="noopener">DUE5000-M.4.4.8.dat</a></span>
-  <input id="restorationFiles" type="file" accept=".dat" multiple aria-label="Select restoration D and M firmware files" />
-</label>
-<div id="restorationStatus" role="status">Select both restoration files.</div>
+<div id="firmwareStatus" role="status">No firmware bundle selected.</div>
+<div class="muted">Verified files are cached only in this browser for recovery and cleared after final success. After the first Bluetooth chooser, the page reuses that bike in this open tab when Chrome permits it.</div>
 <div class="muted">If Shimano blocks either restoration download, stop here. The workflow will remain disabled and will not install the preparation pair without both verified restoration files.</div>
 </div>
 <label class="check"><input id="firmwareConsent" type="checkbox" /> <span>I understand that this installs firmware. I will keep the bike charged, Chrome open, and the phone close until the page asks for a power cycle.</span></label>
-<label class="check"><input id="powerCycled" type="checkbox" /> <span>I fully turned the bike off and back on after the page’s last reset/write instruction.</span></label>
 <div class="row"><button id="bootProbe" disabled>Continue US workflow</button></div>
-<div id="bootProbeStatus" role="status">Select the preparation ZIP and both restoration files, connect, enter your passkey, then continue.</div>
+<div id="bootProbeStatus" role="status">Choose the three files, enter the passkey, accept the firmware warning, then continue.</div>
 </div>
 <details class="card"><summary>Advanced diagnostics</summary>
+<div class="row"><button id="connect">Connect Shimano</button><button id="disconnect" disabled>Disconnect</button></div>
 <div class="row"><button id="probe" disabled>Run read-only probe</button><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
@@ -369,7 +363,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-10.62';
+const BUILD = '2026-09-10.63';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1461,6 +1455,41 @@ async function loadFirmwarePair(files) {
   if (d.source !== m.source || !firmwarePairRequirements(d, m)) throw new Error('Mixed or incompatible component pair');
   return {d, m, source: d.source};
 }
+async function loadFirmwareBundle(files) {
+  if(files.length!==3&&files.length!==4)
+    throw new Error('Choose the preparation ZIP plus both restoration DAT files together');
+  const classified=[];
+  for(const file of files) {
+    if(file.size<256||file.size>32*1024*1024) throw new Error('File size outside supported firmware range');
+    const data=new Uint8Array(await file.arrayBuffer()).slice();
+    try {
+      const hash=await firmwareSha256(data);
+      const source=FIRMWARE_ARCHIVES[hash]?.source||FIRMWARE_WRAPPERS[hash]?.source||FIRMWARE_IMAGES[hash];
+      if(!source) throw new Error('A selected file does not match the reviewed firmware bundle');
+      classified.push({file,source,archive:!!FIRMWARE_ARCHIVES[hash]});
+    } finally {data.fill(0);}
+  }
+  const archives=classified.filter(item=>item.archive);
+  if(archives.length>1) throw new Error('Choose one preparation ZIP only');
+  if(archives.length===1&&files.length!==3)
+    throw new Error('With the preparation ZIP, choose exactly the two restoration DAT files');
+  const preparation=classified.filter(item=>item.source==='preparation').map(item=>item.file);
+  const restoration=classified.filter(item=>item.source==='restoration').map(item=>item.file);
+  if(!((preparation.length===1&&archives.length===1)||preparation.length===2)||restoration.length!==2)
+    throw new Error('Bundle needs one preparation ZIP (or two preparation DATs) and two restoration DATs');
+  let prepPair,restorePair;
+  try {
+    prepPair=await loadFirmwarePair(preparation);
+    restorePair=await loadFirmwarePair(restoration);
+    if(prepPair.source!=='preparation'||restorePair.source!=='restoration')
+      throw new Error('Firmware bundle source mismatch');
+    return {preparation,restoration,
+      preparationVersions:`D ${prepPair.d.version.join('.')}, M ${prepPair.m.version.join('.')}`,
+      restorationVersions:`D ${restorePair.d.version.join('.')}, M ${restorePair.m.version.join('.')}`};
+  } finally {
+    for(const pair of [prepPair,restorePair]) {pair?.d.data.fill(0);pair?.m.data.fill(0);}
+  }
+}
 async function checkFirmwarePair(files) {
   const {d, m} = await loadFirmwarePair(files);
   // The picker retains no bytes or authorization token.
@@ -2162,6 +2191,8 @@ const logEl = $('log');
 let session = null;
 let busy = false;
 let connectionAttempt = 0;
+let workflowPasskey = '';
+let workflowDevice = null;
 
 function log(message) {
   logEl.textContent += `[${new Date().toISOString()}] ${message}\n`;
@@ -2179,10 +2210,28 @@ function hex(value) {
 function ascii(value) {
   return [...bytes(value)].map(b => b >= 32 && b <= 126 ? String.fromCharCode(b) : '.').join('');
 }
+function hasWorkflowPasskey() {
+  return /^[0-9]{6}$/.test($('passkey').value)||/^[0-9]{6}$/.test(workflowPasskey);
+}
+function rememberWorkflowPasskey() {
+  const entered=$('passkey').value;
+  if(/^[0-9]{6}$/.test(entered)) {
+    workflowPasskey=entered;
+    $('passkey').value='';
+  }
+  return /^[0-9]{6}$/.test(workflowPasskey);
+}
+function guidedButtonLabel(plan,connected) {
+  if(plan.action==='complete'||plan.action==='inspect') return plan.label;
+  const lower=plan.label.charAt(0).toLowerCase()+plan.label.slice(1);
+  if(plan.powerCycle) return `I power-cycled — ${connected?lower:`connect and ${lower}`}`;
+  return connected?plan.label:`Connect and ${lower}`;
+}
 function controls() {
   const connected = !!session?.device.gatt.connected;
   const workflowPlan=currentFirmwareWorkflowPlan();
   const filesReady=!!(firmwarePairs.preparation&&firmwarePairs.restoration);
+  const passkeyReady=!!session?.verified||hasWorkflowPasskey();
   $('connect').disabled = busy || connected || !navigator.bluetooth || !window.isSecureContext;
   $('disconnect').disabled = !connected;
   $('probe').disabled = busy || !connected;
@@ -2190,13 +2239,16 @@ function controls() {
   $('motorAuth').disabled = busy || !connected || !session?.motorEligible || session?.motorAttempted;
   $('setUS').disabled = true;
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
-  $('passkey').disabled = busy || !connected || session?.authenticated;
-  $('bootProbe').disabled = busy || firmwareWorkflowRunning || !connected || !filesReady ||
+  $('passkey').disabled = busy || session?.authenticated;
+  $('bootProbe').disabled = busy || firmwareWorkflowRunning || !filesReady || !passkeyReady ||
+    (!connected&&(!navigator.bluetooth||!window.isSecureContext)) ||
     workflowPlan.action==='complete'||workflowPlan.action==='inspect'||
-    workflowPlan.mutation&&!$('firmwareConsent').checked||
-    workflowPlan.powerCycle&&!$('powerCycled').checked;
-  $('bootProbe').textContent = workflowPlan.label;
-  if(!firmwareWorkflowRunning) renderFirmwareWorkflowStatus(workflowPlan,connected,filesReady);
+    workflowPlan.mutation&&!$('firmwareConsent').checked;
+  $('bootProbe').textContent = guidedButtonLabel(workflowPlan,connected);
+  $('passkeyStatus').textContent=/^[0-9]{6}$/.test(workflowPasskey)
+    ?'Passkey ready for required reconnects in this open tab. It is not saved or logged.'
+    :'Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.';
+  if(!firmwareWorkflowRunning) renderFirmwareWorkflowStatus(workflowPlan,connected,filesReady,passkeyReady);
   if (firmwareWorkflowRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
 }
 function protectedStatus(message, css = '') {
@@ -2271,18 +2323,16 @@ async function runProbe() {
   catch (e) { if (session === s) log(`Probe stopped: ${e.message}`); }
   finally { if (session === s) { busy = false; controls(); } }
 }
-async function connect() {
+async function connect(preferredDevice=null) {
   if (busy || session) return;
   const attempt = ++connectionAttempt;
   busy = true;
   controls();
   let s;
   try {
-    $('status').textContent = 'Choosing device…';
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{namePrefix: 'SCE'}, {services: [SERVICE_18FF]}],
-      optionalServices: [SERVICE_18FF]
-    });
+    $('status').textContent = preferredDevice?'Reconnecting saved bike…':'Choosing device…';
+    const device = preferredDevice||await navigator.bluetooth.requestDevice({
+      filters: [{namePrefix: 'SCE'}, {services: [SERVICE_18FF]}],optionalServices: [SERVICE_18FF]});
     s = {device, chars: {}, controller: new AbortController(), authenticated: false, probeToken: crypto.randomUUID()};
     session = s;
     device.addEventListener('gattserverdisconnected', () => resetSession(s), {once: true});
@@ -2313,11 +2363,16 @@ async function connect() {
     });
     await s.chars['2af3'].startNotifications();
     assertCurrent(s);
+    workflowDevice=device;
     $('notify').textContent = 'Enabled';
     $('status').textContent = 'Connected';
     log('Connected; 2AF3 indications enabled. No authentication sent.');
     await probe(s);
   } catch (e) {
+    if(preferredDevice&&workflowDevice===preferredDevice) {
+      workflowDevice=null;
+      log('Saved-bike reconnect unavailable. The next guided tap will reopen the Bluetooth chooser.');
+    }
     if (s && session !== s) return;
     log(`Connection failed: ${e.name}: ${e.message}`);
     if (s) disconnect();
@@ -2403,7 +2458,7 @@ function sendSessionSetup(s) {
 }
 async function authenticate() {
   if (busy || !session || session.authenticated) return;
-  let passkey = $('passkey').value;
+  let passkey = /^[0-9]{6}$/.test($('passkey').value)?$('passkey').value:workflowPasskey;
   if (!/^[0-9]{6}$/.test(passkey)) { log('Enter the six-digit Shimano passkey first.'); return; }
   const s = session;
   busy = true;
@@ -2971,7 +3026,7 @@ async function setUS() {
 $('setUS').onclick = setUS;
 $('motorAuth').onclick = authenticateMotor;
 $('identify').onclick = identifyDrive;
-$('connect').onclick = connect;
+$('connect').onclick = ()=>connect();
 $('probe').onclick = runProbe;
 $('disconnect').onclick = disconnect;
 $('authenticate').onclick = authenticate;
@@ -3018,6 +3073,58 @@ const BOOT_PROFILE = Object.freeze([49, 65, 89, 38, 83, 88, 151, 147, 35, 132, 9
 const PROBE_RECORD_KEY = 'shimano-probe-readback-v1';
 let probeRecord = null, firmwareWorkflowRunning = false, firmwareJournalProblem = '';
 const firmwarePairs={preparation:null,restoration:null};
+const FIRMWARE_CACHE_DB='shimano-reviewed-firmware-v1',FIRMWARE_CACHE_STORE='bundles';
+function openFirmwareCache() {
+  if(!window.indexedDB)return Promise.reject(new Error('Local firmware recovery cache is unavailable'));
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open(FIRMWARE_CACHE_DB,1);
+    request.onupgradeneeded=()=>request.result.createObjectStore(FIRMWARE_CACHE_STORE);
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error||new Error('Could not open local firmware recovery cache'));
+    request.onblocked=()=>reject(new Error('Local firmware recovery cache is blocked'));
+  });
+}
+async function cacheFirmwareBundle(files) {
+  const entries=[];
+  for(const file of files)entries.push({name:file.name||'firmware.dat',type:file.type||'application/octet-stream',data:await file.arrayBuffer()});
+  const db=await openFirmwareCache();
+  try {
+    await new Promise((resolve,reject)=>{
+      const transaction=db.transaction(FIRMWARE_CACHE_STORE,'readwrite');
+      transaction.objectStore(FIRMWARE_CACHE_STORE).put({version:1,entries},'reviewed');
+      transaction.oncomplete=resolve;
+      transaction.onerror=()=>reject(transaction.error||new Error('Could not save local firmware recovery cache'));
+      transaction.onabort=()=>reject(transaction.error||new Error('Local firmware recovery cache was aborted'));
+    });
+  } finally {db.close();for(const entry of entries)new Uint8Array(entry.data).fill(0);}
+}
+async function readCachedFirmwareBundle() {
+  const db=await openFirmwareCache();
+  try {
+    const record=await new Promise((resolve,reject)=>{
+      const request=db.transaction(FIRMWARE_CACHE_STORE,'readonly').objectStore(FIRMWARE_CACHE_STORE).get('reviewed');
+      request.onsuccess=()=>resolve(request.result||null);
+      request.onerror=()=>reject(request.error||new Error('Could not read local firmware recovery cache'));
+    });
+    if(!record)return null;
+    if(record.version!==1||!Array.isArray(record.entries)||![3,4].includes(record.entries.length)||
+        record.entries.some(entry=>typeof entry?.name!=='string'||!(entry.data instanceof ArrayBuffer)))
+      throw new Error('Invalid local firmware recovery cache');
+    return record.entries.map(entry=>new File([entry.data],entry.name,{type:entry.type||'application/octet-stream'}));
+  } finally {db.close();}
+}
+async function clearCachedFirmwareBundle() {
+  const db=await openFirmwareCache();
+  try {
+    await new Promise((resolve,reject)=>{
+      const transaction=db.transaction(FIRMWARE_CACHE_STORE,'readwrite');
+      transaction.objectStore(FIRMWARE_CACHE_STORE).delete('reviewed');
+      transaction.oncomplete=resolve;
+      transaction.onerror=()=>reject(transaction.error||new Error('Could not clear local firmware recovery cache'));
+      transaction.onabort=()=>reject(transaction.error||new Error('Local firmware recovery cache was aborted'));
+    });
+  } finally {db.close();}
+}
 try {
   const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)||'null');
   if(record?.version===1 && /^[a-f0-9]{32}$/.test(record.salt) && typeof record.connection==='string' && record.expected) probeRecord=record;
@@ -3063,15 +3170,15 @@ function currentFirmwareWorkflowPlan() {
     return {...plan,action:'transfer-legacy',label:'Install preparation pair'};
   return plan;
 }
-function renderFirmwareWorkflowStatus(plan,connected,filesReady) {
+function renderFirmwareWorkflowStatus(plan,connected,filesReady,passkeyReady) {
   const el=$('bootProbeStatus');
   if(plan.action==='complete') {el.textContent='Complete: original D4.5/M4.4.8 firmware and US region were verified after restart.';return;}
   if(plan.action==='inspect') {el.textContent=`Stored recovery state is invalid: ${firmwareJournalProblem||'unknown state'}. Do not send another write.`;return;}
-  if(!filesReady) {el.textContent='Select and verify both preparation files and both restoration files.';return;}
-  if(plan.powerCycle&&!$('powerCycled').checked) {el.textContent='Fully turn the bike off and on, reconnect, then tick the power-cycle box.';return;}
+  if(!filesReady) {el.textContent='Choose the preparation ZIP and both restoration DAT files together.';return;}
+  if(!passkeyReady) {el.textContent='Enter the six-digit Shimano passkey once.';return;}
   if(plan.mutation&&!$('firmwareConsent').checked) {el.textContent='Read the firmware warning and tick the acknowledgement before continuing.';return;}
-  el.textContent=connected?`Ready: ${plan.label}. Enter the passkey if this connection is not authenticated.`
-    :`Next: ${plan.label}. Connect the bike to continue.`;
+  if(plan.powerCycle) {el.textContent=`Fully turn the bike off and back on, then press “${guidedButtonLabel(plan,connected)}”.`;return;}
+  el.textContent=`Ready: press “${guidedButtonLabel(plan,connected)}”.`;
 }
 async function ensureFirmwareTransport(s) {
   assertCurrent(s);
@@ -3126,7 +3233,6 @@ async function resetCompletedPair(s) {
     deviceId:s.device.id,connection:s.probeToken,journalStorage:localStorage,
     onStage:stage=>{log(`Firmware workflow: ${stage}`);$('bootProbeStatus').textContent=stage;}});
   if(result.state!=='reset-write-completed')throw new Error('Firmware reset completion was not recorded');
-  $('powerCycled').checked=false;
   log('Firmware reset write completed. Physical power cycle and reconnect required before readback.');
   if(session===s)disconnect();
 }
@@ -3164,7 +3270,6 @@ async function writeAndVerifyUs(s) {
     runPreparedUsWriteTransaction({journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,
       readBaseline,writeDestination:()=>writeUsDestination(s)}));
   if(result.state!=='US-readback-verified')throw new Error('US was not read back after the one destination write');
-  $('powerCycled').checked=false;
   log('MILESTONE: US destination read back on preparation firmware. Physical power-cycle verification remains.');
   if(session===s)disconnect();
 }
@@ -3176,8 +3281,7 @@ async function runFirmwareWorkflow() {
     $('bootProbeStatus').textContent='Select and verify the preparation package and both restoration files first.';return;
   }
   if(initialPlan.mutation&&!$('firmwareConsent').checked)return;
-  if(initialPlan.powerCycle&&!$('powerCycled').checked)return;
-  if(!s.verified&&!/^[0-9]{6}$/.test($('passkey').value)) {
+  if(!s.verified&&!hasWorkflowPasskey()) {
     $('bootProbeStatus').textContent='Enter your six-digit Shimano passkey first.';$('passkey').focus();return;
   }
   firmwareWorkflowRunning=true;controls();
@@ -3197,7 +3301,7 @@ async function runFirmwareWorkflow() {
           journalStorage:localStorage,onDiagnostic:firmwareDiagnostic,
           onStage:stage=>{log(`Preparation preflight: ${stage}`);$('bootProbeStatus').textContent=stage;}});
         log('MILESTONE: preparation preflight recorded the application and loader identities; no firmware bytes or region setter sent.');
-        $('powerCycled').checked=false;if(session===s)disconnect();
+        if(session===s)disconnect();
       } finally {profile.fill(0);}
     } else if(['transfer-legacy','transfer','recover','restore'].includes(plan.action)) {
       await transferAndReset(s,plan,journal);
@@ -3209,7 +3313,6 @@ async function runFirmwareWorkflow() {
         subscribe:probeSubscription(s),signal:s.controller.signal}));
       if(!result.preparationVerified)throw new Error('Prepared firmware readback did not match the recorded motor and pair');
       log('MILESTONE: same motor, D4.3.0/M4.2.1 and EU were verified after power cycle.');
-      $('powerCycled').checked=false;
       await ensureWorkflowSession(s,{information:true,motor:true});
       await writeAndVerifyUs(s);
     } else if(plan.action==='write-us') {
@@ -3218,7 +3321,7 @@ async function runFirmwareWorkflow() {
       const result=await withWorkflowBaselineReader(s,journal,({readBaseline})=>resolveUncertainUsWriteAfterReconnect({
         journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,readBaseline}));
       if(result.state!=='US-readback-verified')throw new Error('The uncertain destination write did not produce a verified US value; no retry was sent');
-      $('powerCycled').checked=false;log('US was found after an uncertain write. A physical power cycle is still required.');
+      log('US was found after an uncertain write. A physical power cycle is still required.');
       if(session===s)disconnect();
     } else if(plan.action==='verify-us') {
       const result=await withWorkflowBaselineReader(s,journal,({writer})=>verifyUsPersistenceAfterPowerCycle({
@@ -3226,7 +3329,6 @@ async function runFirmwareWorkflow() {
         write:writer.write,subscribe:probeSubscription(s),signal:s.controller.signal}));
       if(!result.persistenceVerified)throw new Error('US did not persist on the same prepared motor after power cycle');
       log('MILESTONE: US destination persisted across a physical power cycle on preparation firmware.');
-      $('powerCycled').checked=false;
       await ensureWorkflowSession(s,{information:true,motor:true});
       await transferAndReset(s,{action:'restore',pair:'restoration'},readFirmwareRecoveryJournal(localStorage));
     } else if(plan.action==='verify-restoration') {
@@ -3234,7 +3336,9 @@ async function runFirmwareWorkflow() {
         journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,write:writer.write,
         subscribe:probeSubscription(s),signal:s.controller.signal}));
       if(!result.goalVerified)throw new Error('Final original-firmware and US readback did not match');
-      $('powerCycled').checked=false;
+      workflowPasskey='';workflowDevice=null;
+      try {await clearCachedFirmwareBundle();log('Local firmware recovery cache cleared after final verification.');}
+      catch(error) {log(`Final verification succeeded, but the local firmware recovery cache could not be cleared: ${error.message}`);}
       log('MILESTONE: same motor is back on D4.5.0/M4.4.8 with US destination verified after restart. Speed behavior was not measured.');
     } else throw new Error(`Unsupported workflow state ${plan.action}`);
   } catch(error) {
@@ -3245,28 +3349,69 @@ async function runFirmwareWorkflow() {
     log('--- guided US workflow step end ---');firmwareWorkflowRunning=false;controls();
   }
 }
-$('bootProbe').onclick=runFirmwareWorkflow;
-
-const firmwareCheckGeneration={preparation:0,restoration:0};
-async function validateFirmwareSelection(kind) {
-  const generation=++firmwareCheckGeneration[kind],input=$(kind==='preparation'?'preparationFiles':'restorationFiles');
-  const status=$(kind==='preparation'?'preparationStatus':'restorationStatus'),files=Array.from(input.files);
-  firmwarePairs[kind]=null;status.textContent='Checking exact hashes and pair requirements…';controls();
-  try {
-    const pair=await loadFirmwarePair(files);
-    if(generation!==firmwareCheckGeneration[kind])return;
-    if(pair.source!==kind)throw new Error(`These are ${pair.source} files, not ${kind} files`);
-    firmwarePairs[kind]=files;
-    status.textContent=`Verified locally: D ${pair.d.version.join('.')}, M ${pair.m.version.join('.')}.`;
-    log(`${kind[0].toUpperCase()+kind.slice(1)} firmware files verified locally by exact SHA-256.`);
-    pair.d.data.fill(0);pair.m.data.fill(0);
-  } catch(error) {if(generation===firmwareCheckGeneration[kind])status.textContent=`Files not accepted: ${error.message}`;}
-  finally {if(generation===firmwareCheckGeneration[kind])controls();}
+async function continueFirmwareWorkflow() {
+  if(busy||firmwareWorkflowRunning)return;
+  const plan=currentFirmwareWorkflowPlan();
+  if(plan.action==='complete'||plan.action==='inspect')return;
+  if(!firmwarePairs.preparation||!firmwarePairs.restoration||
+      plan.mutation&&!$('firmwareConsent').checked)return controls();
+  if(!session?.verified&&!rememberWorkflowPasskey()) {
+    $('bootProbeStatus').textContent='Enter your six-digit Shimano passkey once.';
+    $('passkey').focus();controls();return;
+  }
+  controls();
+  if(plan.powerCycle) log(`Physical power cycle confirmed for guided step: ${plan.action}.`);
+  if(!session?.device.gatt.connected) {
+    await connect(workflowDevice);
+    if(!session?.device.gatt.connected)return;
+  }
+  await runFirmwareWorkflow();
 }
-$('preparationFiles').onchange=()=>validateFirmwareSelection('preparation');
-$('restorationFiles').onchange=()=>validateFirmwareSelection('restoration');
+$('bootProbe').onclick=continueFirmwareWorkflow;
+
+let firmwareCheckGeneration=0;
+async function validateFirmwareSelection() {
+  const generation=++firmwareCheckGeneration,files=Array.from($('firmwareFiles').files);
+  firmwarePairs.preparation=null;firmwarePairs.restoration=null;
+  $('firmwareStatus').textContent='Checking all files, exact hashes and pair requirements…';controls();
+  try {
+    const bundle=await loadFirmwareBundle(files);
+    if(generation!==firmwareCheckGeneration)return;
+    firmwarePairs.preparation=bundle.preparation;firmwarePairs.restoration=bundle.restoration;
+    $('firmwareStatus').textContent=`Verified locally: preparation ${bundle.preparationVersions}; restoration ${bundle.restorationVersions}. Saving for recovery…`;
+    log('Complete preparation and restoration firmware bundle verified locally by exact SHA-256.');
+    try {
+      await cacheFirmwareBundle(files);
+      if(generation===firmwareCheckGeneration)$('firmwareStatus').textContent=`Verified and cached locally: preparation ${bundle.preparationVersions}; restoration ${bundle.restorationVersions}.`;
+    } catch(error) {
+      if(generation===firmwareCheckGeneration)$('firmwareStatus').textContent=`Verified for this open tab: preparation ${bundle.preparationVersions}; restoration ${bundle.restorationVersions}. Local recovery cache unavailable.`;
+      log(`Firmware files verified, but local recovery caching failed: ${error.message}`);
+    }
+  } catch(error) {if(generation===firmwareCheckGeneration)$('firmwareStatus').textContent=`Files not accepted: ${error.message}`;}
+  finally {if(generation===firmwareCheckGeneration)controls();}
+}
+async function restoreCachedFirmwareSelection() {
+  const generation=++firmwareCheckGeneration;
+  try {
+    const files=await readCachedFirmwareBundle();
+    if(!files||generation!==firmwareCheckGeneration)return;
+    $('firmwareStatus').textContent='Checking the locally cached recovery bundle…';
+    const bundle=await loadFirmwareBundle(files);
+    if(generation!==firmwareCheckGeneration)return;
+    firmwarePairs.preparation=bundle.preparation;firmwarePairs.restoration=bundle.restoration;
+    $('firmwareStatus').textContent=`Loaded verified local cache: preparation ${bundle.preparationVersions}; restoration ${bundle.restorationVersions}.`;
+    log('Verified preparation and restoration firmware bundle restored from this browser’s local recovery cache.');
+  } catch(error) {
+    if(generation===firmwareCheckGeneration) {
+      $('firmwareStatus').textContent='Cached firmware could not be verified. Choose the three downloaded files again.';
+      try {await clearCachedFirmwareBundle();} catch {}
+      log(`Local firmware recovery cache discarded: ${error.message}`);
+    }
+  } finally {if(generation===firmwareCheckGeneration)controls();}
+}
+$('firmwareFiles').onchange=validateFirmwareSelection;
 $('firmwareConsent').onchange=controls;
-$('powerCycled').onchange=controls;
+$('passkey').oninput=controls;
 
 
 $('copyLog').onclick = async () => {
@@ -3286,6 +3431,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
+restoreCachedFirmwareSelection();
 $('build').textContent = `Build ${BUILD} · guided US-region workflow`;
 log(`Ready. Build ${BUILD}.`);
 </script>

@@ -17,7 +17,6 @@ with sync_playwright() as p:
         probeToken:'connection-a',verified:true,batchDone:true,motorEligible:true,motorAuthenticated:true};
       firmwarePairs.preparation=[{}];firmwarePairs.restoration=[{}];
       document.getElementById('firmwareConsent').checked=true;
-      document.getElementById('powerCycled').checked=true;
       window.testJournal={stage:'synthetic'};
       optionalFirmwareJournal=()=>testJournal;
       ensureWorkflowSession=async(_s,opts)=>calls.push(`session:${opts.information}:${opts.motor}`);
@@ -38,7 +37,6 @@ with sync_playwright() as p:
         page.evaluate('''([action,pair,mutation,power])=>{
           calls=[];testPlan={action,label:action,pair,mutation,powerCycle:power};
           document.getElementById('firmwareConsent').checked=true;
-          document.getElementById('powerCycled').checked=true;
           currentFirmwareWorkflowPlan=()=>testPlan;controls();
         }''',[action,pair,mutation,power])
         page.locator('#bootProbe').click()
@@ -59,12 +57,30 @@ with sync_playwright() as p:
     assert run('restore',pair='restoration',mutation=True)==['session:true:true','transfer:restore:restoration']
     assert run('verify-restoration',pair='restoration',power=True)==['session:true:false','verify-restoration']
 
-    # Required user gates prevent dispatch before the handler starts.
+    # Firmware acknowledgement remains a required mutation gate.
     page.evaluate("testPlan={action:'restore',label:'restore',pair:'restoration',mutation:true,powerCycle:false};document.getElementById('firmwareConsent').checked=false;calls=[];controls()")
     expect(page.locator('#bootProbe')).to_be_disabled()
     assert page.evaluate('calls')==[]
-    page.evaluate("testPlan={action:'verify-us',label:'verify-us',pair:'preparation',mutation:false,powerCycle:true};document.getElementById('firmwareConsent').checked=true;document.getElementById('powerCycled').checked=false;controls()")
-    expect(page.locator('#bootProbe')).to_be_disabled()
+    # Pressing the explicitly worded action is the physical power-cycle confirmation.
+    page.evaluate("testPlan={action:'verify-us',label:'Verify US after power cycle',pair:'preparation',mutation:false,powerCycle:true};document.getElementById('firmwareConsent').checked=true;controls()")
+    expect(page.locator('#bootProbe')).to_be_enabled()
+    expect(page.locator('#bootProbe')).to_contain_text('I power-cycled')
     assert page.locator('#setUS').is_disabled()
+
+    # The primary action opens Bluetooth and continues in the same tap.
+    page.evaluate('''() => {
+      Object.defineProperty(navigator,'bluetooth',{value:{},configurable:true});
+      calls=[];session=null;workflowPasskey='';
+      testPlan={action:'preflight',label:'Start verified preparation',pair:'preparation',mutation:true,powerCycle:false};
+      connect=async()=>{calls.push(`connect:${workflowPasskey}:${document.getElementById('passkey').value}`);session={device:{gatt:{connected:true}}};};
+      runFirmwareWorkflow=async()=>calls.push('run');controls();
+    }''')
+    page.locator('#passkey').fill('123456')
+    expect(page.locator('#bootProbe')).to_be_enabled()
+    expect(page.locator('#bootProbe')).to_contain_text('Connect and start')
+    page.locator('#bootProbe').click()
+    page.wait_for_function("calls.length === 2")
+    assert page.evaluate('calls') == ['connect:123456:', 'run']
+    expect(page.locator('#passkeyStatus')).to_contain_text('ready for required reconnects')
     browser.close()
 print('Guided US workflow UI dispatch, mutation gates and power-cycle gates passed')
