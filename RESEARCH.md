@@ -1,6 +1,6 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-11, build .72): SC-E7000 display; motor reports
+Current status (2026-09-11, build .73): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
@@ -9,11 +9,14 @@ flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 and
 modes exactly. Builds .68 through .70 then received `A3 3A` from `A0`; `A8` was
 never sent. Build .71 then showed that the first zero-selector prefix is also
 rejected immediately after an exact mode-5 completion. D4.5.0 has a separate
-five-word key for mode 4, and the A0/A8 predicates accept modes 4 or 5. Build
-.72 therefore selects authenticated mode 4, requires its exact completion, and
-sends only the complete nonpersistent A0 candidate. Only a normal `A2` permits
-the exact Android eTuning destination frame `00 16 A8 01 01`. Mode 4, staging,
-US write, persistence and assistance-speed result remain live gates.
+five-word key for mode 4, and build .72 verified its exact completion before a
+nine-byte `A0` was rejected. A cross-check against the successful `AC 01` query
+shows that normalized offset `+4` is target address 0 and command parameters
+begin at `+5`; the earlier zero-selector interpretation was wrong. Build .73
+therefore combines accepted mode 4 with Shimano's exact seven-byte same-value
+lighting setter. Only a normal `A2` permits the Android destination frame
+`00 16 A8 01 01`. Corrected staging, US write, persistence and assistance-speed
+result remain live gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2855,10 +2858,15 @@ speed-limit command is used.
 
 The .70 bike result rejected `00 16 A0 0A 00 FF FF` with `A3 3A` after exact
 mode-1 and mode-5 completions. The motor then accepted mode 0 and disconnected;
-`A8` was not sent. This disproves the legacy generic lighting setter as the
-D4.5 destination prerequisite. It does not weaken the protected-mode result.
+`A8` was not sent. This rejects that packet in mode 5. It did not test the
+separately keyed mode 4 later accepted in build .72.
 
 ## Build .71: isolate the zero-selector staging boundary
+
+**Superseded by build .73.** The normalized-offset interpretation in this
+section omitted the motor target address inserted between opcode and setting
+parameters. The section remains as the record of the experiment that led to
+build .72.
 
 Rechecking the D4.5 receive path establishes the handler field mapping. The
 internal bus reassembler places the command category and opcode at normalized
@@ -2928,5 +2936,34 @@ freshly reads all five `A4/A6` bytes, and sends one complete
 the exact five-byte Android region call `00 16 A8 01 01`; bytes following the
 public fields in fixed ten-byte replies are not copied into a setter. Any mode,
 stage, storage, write, or readback failure requests mode 0 and prevents a retry.
-The bike must still establish mode-4 acceptance, A0 acceptance, immediate US
-readback, and separate-power-cycle persistence.
+The .72 bike run established exact mode-4 acceptance on slot `0D`, then read
+`A4/A6` as `0A 00 FF FF 93`. Its nine-byte stage returned `A3 3A`, so `A8` was
+not sent; mode exit completed and the bike remained EU.
+
+## Build .73: combine authenticated mode 4 with Shimano's A0 frame
+
+The working destination query `00 16 AC 01` resolves an ambiguity left by the
+decompiler. `FUN_000254a4` accepts the live query although it requires byte
+`+4` in its normalized message to be zero. That byte therefore cannot be raw
+selector `01`; it is the motor target address from raw byte 0. Category and
+opcode occupy normalized offsets `+2/+3`, target address occupies `+4`, and
+public setting parameters start at `+5`. This mapping also explains why the
+firmware copies five bytes for a four-parameter BLE setter: the wireless bridge
+supplies the final internal byte.
+
+Both Shimano implementations independently construct the public `A0` command
+as a 16-bit lighting value followed by `FF FF`. Android
+`C0549qn.X(int)` emits `00 16 A0 <low> <high> FF FF`; the desktop
+`DUUnitDataLink.SetLightingTime` emits the same fields. Only the declared first
+two `A6` parameters are the lighting value. The later fixed-notification bytes
+belong to the normalized bridge record and must not be copied into a BLE setter.
+
+No previous run tested this official seven-byte packet while authenticated
+mode 4 was active: build .70 paired it with mode 5, while build .72 paired mode
+4 with a nine-byte packet. Build .73 retains build .72's accepted mode-1 and
+mode-4 lifecycle and changes only the transient stage. It reads the 16-bit
+lighting time and sends one unchanged `00 16 A0 <low> <high> FF FF`. Only `A2`
+creates the pending restart record and permits the at-most-once Android region
+write `00 16 A8 01 01`. Every failure exits mode and disconnects without `A8`.
+Immediate selector-1 US readback and a separate reconnect remain mandatory;
+assistance cutoff still requires a separate physical measurement.

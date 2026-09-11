@@ -370,7 +370,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-11.72';
+const BUILD = '2026-09-11.73';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2688,7 +2688,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 command path identified: protected PC mode and a zero-selector A0 stage are required before the US setter.';
+    return 'D4.5.0 command path identified: authenticated PC mode 4 and Shimano’s lighting-time A0 stage are required before the US setter.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -3125,23 +3125,24 @@ async function exitPcMode(s) {
   await enterPcMode(s,{mode:0,words:[],label:'exit PC mode',initialDelay:0,timeout:3000});
   log('Protected PC mode exited.');
 }
-async function readRegulationStageRecord(s) {
+async function readLightingTime(s) {
   const data=await driveSettingExchange(s,{label:'Read lighting time',packet:Uint8Array.of(0,0x16,0xa4,0),
-    normalOpcode:0xa6,errorOpcode:0xa7,minLength:8});
+    normalOpcode:0xa6,errorOpcode:0xa7,minLength:5});
   const value=data[3]|data[4]<<8;
-  const record=data.slice(3,8);
-  log(`Regulation stage record read: ${hex(record)}; lighting time ${value}.`);
-  return record;
+  log(`Lighting time read for same-value staging: ${value}.`);
+  return value;
 }
-async function stageRegulationRecord(s,record) {
-  if(!(record instanceof Uint8Array)||record.length!==5)throw new Error('Invalid regulation stage record');
-  // D4.5 requires the first A0 parameter to be zero, then copies five bytes
-  // into a transient candidate. Send only the complete candidate. It is a RAM
-  // stage and cannot persist a region change without the later A8 command.
-  const packet=Uint8Array.of(0,0x16,0xa0,0,...record);
-  await driveSettingExchange(s,{label:'Stage complete regulation record',packet,
+async function stageLightingTime(s,value) {
+  if(!Number.isInteger(value)||value<0||value>0xffff)throw new Error('Invalid lighting-time value');
+  // The internal D message stores target address 0 at offset +4 and setting
+  // parameters from +5. Both Shimano applications serialize lighting time as
+  // a little-endian UInt16 followed by FF FF. The bridge supplies the fifth
+  // internal byte copied by D4.5; it is not another public BLE parameter.
+  const packet=Uint8Array.of(0,0x16,0xa0,value&0xff,value>>>8,0xff,0xff);
+  if(packet.length!==7)throw new Error('Unexpected lighting-time packet length');
+  await driveSettingExchange(s,{label:'Stage unchanged lighting time',packet,
     normalOpcode:0xa2,errorOpcode:0xa3,minLength:3});
-  log('MILESTONE: complete zero-selector A0 regulation record accepted; one destination command is now permitted.');
+  log('MILESTONE: unchanged lighting time accepted in authenticated mode 4; one destination command is now permitted.');
 }
 // Current Shimano Android eTuning sends selector/value without legacy desktop
 // padding. Readback, rather than AA alone, determines success.
@@ -3224,9 +3225,9 @@ async function setUS() {
     await enterPcMode4(s);
     assertCurrent(s);
     log('Authenticated PC mode 4 accepted by the motor.');
-    const stageRecord=await readRegulationStageRecord(s);
+    const lightingTime=await readLightingTime(s);
     assertCurrent(s);
-    await stageRegulationRecord(s,stageRecord);
+    await stageLightingTime(s,lightingTime);
     assertCurrent(s);
 
     // Save a salted same-device restart expectation after every prerequisite

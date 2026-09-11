@@ -97,13 +97,13 @@ class RegionWriteTests(unittest.TestCase):
             }
             if(p[2]===0xa4) {
               if(opts.lightingReadWriteFailure)throw Error('Lighting read ATT failure');
-              emit(opts.lightingReadReject?[0,0x16,0xa7,0x3a]:opts.shortStageRecord?
+              emit(opts.lightingReadReject?[0,0x16,0xa7,0x3a]:opts.shortLightingReply?
                 [0,0x16,0xa6,0x34]:[0,0x16,0xa6,0x34,0x12,0x56,0x78,0x9a,0xff,0xff]);
               return;
             }
             if(p[2]===0xa0) {
-              if(opts.stageWriteFailure&&(opts.stageFailureLength??9)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
-              emit((opts.stageReject&&(opts.stageFailureLength??9)===p.length)?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
+              if(opts.stageWriteFailure&&(opts.stageFailureLength??7)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
+              emit((opts.stageReject&&(opts.stageFailureLength??7)===p.length)?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
               return;
             }
             if(p[2]===0xa8) {
@@ -145,7 +145,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate("probeRecord={version:1,verified:false};setUS()")
         self.assertEqual(self.packets(),[])
 
-    def test_exact_mode4_sequence_stages_complete_record_and_sets_us_once(self):
+    def test_exact_mode4_sequence_stages_unchanged_lighting_and_sets_us_once(self):
         self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
@@ -162,22 +162,22 @@ class RegionWriteTests(unittest.TestCase):
             [0,0x32,0x30,0xb1,0x72,0,0],
             [0,0x32,0x30,0x01,0x10,0,0],
             [0,0x16,0xa4,0],
-            [0,0x16,0xa0,0,0x34,0x12,0x56,0x78,0x9a],
+            [0,0x16,0xa0,0x34,0x12,0xff,0xff],
             [0,0x16,0xa8,1,1],
             [0,0x16,0xac,1],
             [0,0x32,0x10,0,0x0d,0,0],
         ])
         self.assertIn('MILESTONE: US (1) read back',self.page.locator('#log').inner_text())
         self.assertIn('using wireless slot 0D',self.page.locator('#log').inner_text())
-        self.assertIn('complete zero-selector A0 regulation record accepted',self.page.locator('#log').inner_text())
+        self.assertIn('unchanged lighting time accepted in authenticated mode 4',self.page.locator('#log').inner_text())
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
 
     def test_a0_failure_stops_before_destination_write(self):
-        self.prepare(stageReject=True,stageFailureLength=9);self.run_attempt()
+        self.prepare(stageReject=True,stageFailureLength=7);self.run_attempt()
         packets=self.packets()
         self.assertFalse(any(p[2]==0xa8 for p in packets))
         self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
-        self.assertEqual([len(p) for p in packets if p[2]==0xa0],[9])
+        self.assertEqual([len(p) for p in packets if p[2]==0xa0],[7])
 
     def test_restart_record_is_durable_before_the_only_destination_write(self):
         self.prepare();self.run_attempt()
@@ -203,7 +203,7 @@ class RegionWriteTests(unittest.TestCase):
         failures=(
             {'mode1RequestFailure':True}, {'mode1Reject':True},
             {'mode4RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
-            {'lightingReadWriteFailure':True}, {'lightingReadReject':True}, {'shortStageRecord':True},
+            {'lightingReadWriteFailure':True}, {'lightingReadReject':True}, {'shortLightingReply':True},
             {'stageWriteFailure':True}, {'stageReject':True}, {'storageFailure':True},
         )
         for options in failures:

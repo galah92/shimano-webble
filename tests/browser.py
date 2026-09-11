@@ -470,8 +470,8 @@ class BrowserTests(unittest.TestCase):
     def test_reported_motor_firmware_describes_the_protected_command_path(self):
         self.open()
         result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
-        self.assertIn('protected PC mode', result)
-        self.assertIn('zero-selector A0 stage', result)
+        self.assertIn('authenticated PC mode 4', result)
+        self.assertIn('lighting-time A0 stage', result)
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
 
