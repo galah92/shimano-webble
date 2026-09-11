@@ -9,30 +9,28 @@ command.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .71)
+## Current next step (build .72)
 
 Decompilation explains the earlier `00 16 AB 3A 00` results. The D4.5.0
 destination setter is present and has no firmware-version gate. It returns
 `3A` when protected PC mode 4/5 and the one-shot setting stage are absent or
 when persistence fails.
 
-The .68 through .70 bike tests validated the live slot and protected lifecycle:
+The .68 through .71 bike tests validated the live slot and protected lifecycle:
 the motor reported slot `0D` and returned exact completions for modes 1 and 5.
 The destination command remained unsent because each run stopped at `A0` with
-`A3 3A`. Build .70 tested the legacy generic lighting setter, but D4.5's actual
-`A0` handler requires a zero first parameter and copies the next five bytes into
-a transient regulation candidate. The generic frame put lighting value `0A` in
-that required-zero position, so its rejection does not test the prerequisite
-that the `A8` destination handler uses.
+`A3 3A`. Build .71 showed that even its first zero-selector prefix was rejected
+immediately after a valid mode-5 completion. Repeated packet-length probing is
+therefore no longer useful.
 
-Build .69 did use the zero selector and all five live bytes, but its nine-byte
-form was also rejected. That leaves a bounded disagreement between the protected
-mode state and the wireless packet shape. Build .71 distinguishes those cases
-in one run by sending zero-selector `A0` prefixes from four through nine bytes.
-These writes only replace the RAM candidate and set the one-shot flag; they do
-not persist it. The page stops after the first rejection. It permits the single
-destination write only if the final nine-byte command containing all five fresh
-`A4/A6` bytes receives `A2`.
+D4.5.0 contains a separate five-word key for authenticated PC mode 4. The same
+firmware predicates guarding `A0` and `A8` explicitly accept mode 4 or 5, while
+the desktop inspection path exercised so far selects mode 5. Build .72 changes
+that one authorization state. It enters mode 4 with the key extracted from the
+exact D4.5.0 image, requires the exact mode-4/slot-`0D` completion, reads the
+fresh five-byte `A4/A6` value, and sends one complete zero-selector `A0` stage.
+That stage only updates the transient RAM candidate; it does not persist a
+region. Any rejection exits PC mode without sending `A8`.
 
 The destination command is the exact five-byte form used by Shimano Android
 eTuning 3.0.7: `00 16 A8 01 01`. The page stores a salted same-device
@@ -47,9 +45,9 @@ D4.5.0/M4.4.8 motor pair and US value `1` in that different BLE session.
 Assistance speed must be measured separately.
 
 This is a statically supported candidate and is fully exercised against a
-synthetic BLE device. The two-stage PC-mode lifecycle is verified on the bike;
-the zero-selector `A0` boundary, `A8` commit, and persistence still require one
-controlled bike run. The retired firmware preparation implementation
+synthetic BLE device. Mode 1, mode 5, slot `0D`, motor authentication, and the
+regulation unlock are verified on the bike; mode 4, the `A0` stage, `A8` commit,
+and persistence still require one controlled bike run. The retired firmware preparation implementation
 remains hidden and inert for regression and recovery reference; it is not used
 by the primary workflow.
 
@@ -160,7 +158,7 @@ challenge, keys, ciphertext, secure PC words, and passkey are omitted from logs.
 The user's build .14 log verified motor authentication on the real bike, with
 the three DA challenge fragments and E2 FF FF completion after the third E0.
 
-## Command-only US destination candidate (build .71)
+## Command-only US destination candidate (build .72)
 
 The D4.5.0 `A8` handler at `0x2537c` accepts the write only while PC mode is 4
 or 5 and a one-shot flag set by the `A0` handler is active. There is no version
@@ -173,18 +171,17 @@ seven-byte limit. Fixed-size replies include bytes beyond a setting's public
 fields, while the D4.5 handler still consumes the complete five-byte `A4/A6`
 record after a zero selector.
 
-Build .71 first reads the current OEM destination again; only selector 1 and EU
-value 0 permit progress. It establishes the desktop's ordinary PC-link mode 1,
-then enters inspection mode 5 and requires a matching completion reply after
-each five-word sequence. Unlike the desktop adapter, the wireless path uses
-application slot `0D`; the page learns it from the bike's setup announcement or
-falls back to the exact value in the supplied official capture. It reads all
-five live `A4/A6` bytes and tests `00 16 A0 00` through the complete
-`00 16 A0 00 <five live bytes>` one byte at a time. It saves a durable reconnect
-expectation only after the complete form returns `A2`, then sends the Android
-eTuning destination frame `00 16 A8 01 01` once. It accepts only `AA` as the
-setter's normal reply and immediately reads destination slot 1. It always
-requests PC-mode exit. An
+Build .72 first reads the current OEM destination again; only selector 1 and EU
+value 0 permit progress. It establishes ordinary PC-link mode 1, then enters
+the firmware's separately keyed authenticated mode 4 and requires a matching
+completion reply after each five-word sequence. Unlike the desktop adapter,
+the wireless path uses application slot `0D`; the page learns it from the bike's
+setup announcement or falls back to the exact value in the supplied official
+capture. It reads all five live `A4/A6` bytes and sends exactly one complete
+`00 16 A0 00 <five live bytes>` stage. It saves a durable reconnect expectation
+only after that form returns `A2`, then sends the Android eTuning destination
+frame `00 16 A8 01 01` once. It accepts only `AA` as the setter's normal reply
+and immediately reads destination slot 1. It always requests PC-mode exit. An
 acknowledgement alone is never success, and a later connection performs readback
 only. There is no automatic retry, downgrade, factory-slot write, or separate
 speed setter.

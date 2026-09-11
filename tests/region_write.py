@@ -23,7 +23,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate('''async opts => {
           window.commandDelay=async()=>{};
           window.regionWrites=[];window.regionReads=0;window.secureWords=0;
-          window.secureWordsByMode={1:0,5:0};window.currentPcMode=0;window.currentPcSlot=0;
+          window.secureWordsByMode={1:0,4:0};window.currentPcMode=0;window.currentPcSlot=0;
           if(opts.storageFailure){
             const original=Storage.prototype.setItem;
             Storage.prototype.setItem=function(k,v){
@@ -53,9 +53,9 @@ class RegionWriteTests(unittest.TestCase):
                 if(opts.mode1PreKeyStatus)emit([0,0x32,0x12,1,currentPcSlot]);
                 return;
               }
-              if(p[3]===5) {
-                currentPcMode=5;
-                if(opts.modeRequestFailure||opts.mode5RequestFailure)throw Error('Protected PC mode request ATT failure');
+              if(p[3]===4) {
+                currentPcMode=4;
+                if(opts.modeRequestFailure||opts.mode4RequestFailure)throw Error('Authenticated PC mode request ATT failure');
                 return;
               }
               if(p[3]===0) {
@@ -74,7 +74,7 @@ class RegionWriteTests(unittest.TestCase):
                 const target=opts.completionRoute||'2afd';
                 const targetRx=session.chars[target];
                 if(opts.wrongModeFirst&&!reject){
-                  targetRx.value=new DataView(Uint8Array.from([0,0x32,0x12,currentPcMode===1?5:1,currentPcSlot]).buffer);
+                  targetRx.value=new DataView(Uint8Array.from([0,0x32,0x12,currentPcMode===1?4:1,currentPcSlot]).buffer);
                   targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
                 }
                 if(opts.wrongSlotFirst&&!reject){
@@ -102,8 +102,8 @@ class RegionWriteTests(unittest.TestCase):
               return;
             }
             if(p[2]===0xa0) {
-              if(opts.stageWriteFailure&&(opts.stageFailureLength??4)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
-              emit((opts.stageReject&&(opts.stageFailureLength??4)===p.length)?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
+              if(opts.stageWriteFailure&&(opts.stageFailureLength??9)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
+              emit((opts.stageReject&&(opts.stageFailureLength??9)===p.length)?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
               return;
             }
             if(p[2]===0xa8) {
@@ -145,7 +145,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate("probeRecord={version:1,verified:false};setUS()")
         self.assertEqual(self.packets(),[])
 
-    def test_exact_protected_sequence_diagnoses_a0_shape_and_sets_us_once(self):
+    def test_exact_mode4_sequence_stages_complete_record_and_sets_us_once(self):
         self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
@@ -155,18 +155,13 @@ class RegionWriteTests(unittest.TestCase):
             [0,0x32,0x30,0x7a,0x4d,0,0],
             [0,0x32,0x30,0x62,0x2b,0,0],
             [0,0x32,0x30,0x85,0xb4,0,0],
-            [0,0x32,0x10,5,0x0d,0,0],
-            [0,0x32,0x30,0x27,0x0f,0,0],
-            [0,0x32,0x30,0x11,0x55,0,0],
-            [0,0x32,0x30,0x35,0xb0,0,0],
-            [0,0x32,0x30,0x03,0xf3,0,0],
-            [0,0x32,0x30,0x09,0x03,0,0],
+            [0,0x32,0x10,4,0x0d,0,0],
+            [0,0x32,0x30,0x19,0xb2,0,0],
+            [0,0x32,0x30,0x73,0xd8,0,0],
+            [0,0x32,0x30,0xa4,0x73,0,0],
+            [0,0x32,0x30,0xb1,0x72,0,0],
+            [0,0x32,0x30,0x01,0x10,0,0],
             [0,0x16,0xa4,0],
-            [0,0x16,0xa0,0],
-            [0,0x16,0xa0,0,0x34],
-            [0,0x16,0xa0,0,0x34,0x12],
-            [0,0x16,0xa0,0,0x34,0x12,0x56],
-            [0,0x16,0xa0,0,0x34,0x12,0x56,0x78],
             [0,0x16,0xa0,0,0x34,0x12,0x56,0x78,0x9a],
             [0,0x16,0xa8,1,1],
             [0,0x16,0xac,1],
@@ -177,16 +172,12 @@ class RegionWriteTests(unittest.TestCase):
         self.assertIn('complete zero-selector A0 regulation record accepted',self.page.locator('#log').inner_text())
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
 
-    def test_every_a0_prefix_failure_stops_before_destination_write(self):
-        for length in range(4,10):
-            with self.subTest(length=length):
-                self.prepare(stageReject=True,stageFailureLength=length);self.run_attempt()
-                packets=self.packets()
-                self.assertFalse(any(p[2]==0xa8 for p in packets))
-                self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
-                attempted=[len(p) for p in packets if p[2]==0xa0]
-                self.assertEqual(attempted,list(range(4,length+1)))
-                self.context.close()
+    def test_a0_failure_stops_before_destination_write(self):
+        self.prepare(stageReject=True,stageFailureLength=9);self.run_attempt()
+        packets=self.packets()
+        self.assertFalse(any(p[2]==0xa8 for p in packets))
+        self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
+        self.assertEqual([len(p) for p in packets if p[2]==0xa0],[9])
 
     def test_restart_record_is_durable_before_the_only_destination_write(self):
         self.prepare();self.run_attempt()
@@ -211,7 +202,7 @@ class RegionWriteTests(unittest.TestCase):
     def test_each_prerequisite_failure_prevents_destination_write_and_exits_mode(self):
         failures=(
             {'mode1RequestFailure':True}, {'mode1Reject':True},
-            {'mode5RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
+            {'mode4RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
             {'lightingReadWriteFailure':True}, {'lightingReadReject':True}, {'shortStageRecord':True},
             {'stageWriteFailure':True}, {'stageReject':True}, {'storageFailure':True},
         )

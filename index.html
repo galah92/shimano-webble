@@ -370,7 +370,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-11.71';
+const BUILD = '2026-09-11.72';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -3020,10 +3020,12 @@ function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength
   });
 }
 // The desktop opens ordinary PC-link mode 1 before its inspection UI can enter
-// mode 5. Its tables store each UInt16 as [high, low], then its transmit loop
-// sends column 1 before column 0. D4.5.0 parses the wire pair little-endian.
+// mode 5. D4.5.0 also defines a separately keyed mode 4, and both A0 and A8
+// explicitly require mode 4 or 5. Its tables store each UInt16 as [high, low],
+// then its transmit loop sends column 1 before column 0. D4.5.0 parses the wire
+// pair little-endian.
 const PC_MODE1_WORDS=Object.freeze([[0xa2,0x2b],[0x30,0x0e],[0x7a,0x4d],[0x62,0x2b],[0x85,0xb4]]);
-const PC_MODE5_WORDS=Object.freeze([[0x27,0x0f],[0x11,0x55],[0x35,0xb0],[0x03,0xf3],[0x09,0x03]]);
+const PC_MODE4_WORDS=Object.freeze([[0x19,0xb2],[0x73,0xd8],[0xa4,0x73],[0xb1,0x72],[0x01,0x10]]);
 // The supplied official eTuning BLE capture announces mode 1 to application
 // slot 0x0d immediately after display setup 0C. Desktop adapter slot 0 yielded
 // no completion in the live SC-E7000 test. Prefer the bike's live announcement
@@ -3113,11 +3115,11 @@ function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
 }
 async function enterPcMode1(s) {
   const response=await enterPcMode(s,{mode:1,words:PC_MODE1_WORDS,label:'normal PC-link mode 1'});
-  log('MILESTONE: normal PC-link mode 1 accepted; entering protected inspection mode next.');
+  log('MILESTONE: normal PC-link mode 1 accepted; entering authenticated setting mode next.');
   return response;
 }
-async function enterPcMode5(s) {
-  return enterPcMode(s,{mode:5,words:PC_MODE5_WORDS,label:'protected PC mode 5'});
+async function enterPcMode4(s) {
+  return enterPcMode(s,{mode:4,words:PC_MODE4_WORDS,label:'authenticated PC mode 4'});
 }
 async function exitPcMode(s) {
   await enterPcMode(s,{mode:0,words:[],label:'exit PC mode',initialDelay:0,timeout:3000});
@@ -3134,16 +3136,11 @@ async function readRegulationStageRecord(s) {
 async function stageRegulationRecord(s,record) {
   if(!(record instanceof Uint8Array)||record.length!==5)throw new Error('Invalid regulation stage record');
   // D4.5 requires the first A0 parameter to be zero, then copies five bytes
-  // into a transient candidate. Earlier live tests disagree only on how many
-  // of those bytes the wireless bridge will carry in one setting frame. Test
-  // every prefix without persisting it; A8 stays closed until the complete
-  // nine-byte form is accepted.
-  for(let count=0;count<=record.length;count++) {
-    const packet=Uint8Array.of(0,0x16,0xa0,0,...record.slice(0,count));
-    const label=`A0 staging diagnostic ${packet.length}B`;
-    await driveSettingExchange(s,{label,packet,normalOpcode:0xa2,errorOpcode:0xa3,minLength:3});
-    log(`A0 staging diagnostic accepted: ${packet.length}-byte frame with ${count}/5 live record bytes.`);
-  }
+  // into a transient candidate. Send only the complete candidate. It is a RAM
+  // stage and cannot persist a region change without the later A8 command.
+  const packet=Uint8Array.of(0,0x16,0xa0,0,...record);
+  await driveSettingExchange(s,{label:'Stage complete regulation record',packet,
+    normalOpcode:0xa2,errorOpcode:0xa3,minLength:3});
   log('MILESTONE: complete zero-selector A0 regulation record accepted; one destination command is now permitted.');
 }
 // Current Shimano Android eTuning sends selector/value without legacy desktop
@@ -3223,10 +3220,10 @@ async function setUS() {
     pcModeTouched=true;
     await enterPcMode1(s);
     assertCurrent(s);
-    $('regionStatus').textContent = 'Entering protected PC mode…';
-    await enterPcMode5(s);
+    $('regionStatus').textContent = 'Entering authenticated setting mode…';
+    await enterPcMode4(s);
     assertCurrent(s);
-    log('Protected PC mode 5 accepted by the motor.');
+    log('Authenticated PC mode 4 accepted by the motor.');
     const stageRecord=await readRegulationStageRecord(s);
     assertCurrent(s);
     await stageRegulationRecord(s,stageRecord);

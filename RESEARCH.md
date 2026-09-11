@@ -1,20 +1,19 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-11, build .71): SC-E7000 display; motor reports
+Current status (2026-09-11, build .72): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
 flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 and
 .69 bike tests reported wireless application slot `0D` and completed both PC
 modes exactly. Builds .68 through .70 then received `A3 3A` from `A0`; `A8` was
-never sent. Build .70 reproduced Android's generic lighting setter, but its
-first parameter was `0A`, while the D4.5 `A0` prerequisite handler requires
-zero and then copies five regulation-record bytes. Build .69 supplied that zero
-and all five bytes but was also rejected. Build .71 safely probes zero-selector
-prefix lengths 4 through 9 and stops before `A8` on any rejection. Only a normal
-`A2` for the complete record permits the exact Android eTuning destination
-frame `00 16 A8 01 01`. The staging boundary, US write, persistence and
-assistance-speed result remain live gates.
+never sent. Build .71 then showed that the first zero-selector prefix is also
+rejected immediately after an exact mode-5 completion. D4.5.0 has a separate
+five-word key for mode 4, and the A0/A8 predicates accept modes 4 or 5. Build
+.72 therefore selects authenticated mode 4, requires its exact completion, and
+sends only the complete nonpersistent A0 candidate. Only a normal `A2` permits
+the exact Android eTuning destination frame `00 16 A8 01 01`. Mode 4, staging,
+US write, persistence and assistance-speed result remain live gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2901,3 +2900,33 @@ Android region call sites. It requires immediate selector-1 readback, exits PC
 mode on all paths and requires a separate power-cycle readback for persistence.
 No firmware, bootloader, erase, retry, factory-selector, or speed-setting command
 is reachable from this workflow.
+
+## Build .72: exercise the firmware's authenticated mode 4
+
+The .71 bike run completed motor authentication, `E8`/`EA`, ordinary mode 1,
+and mode 5 on wireless application slot `0D`. It freshly read the regulation
+record as `0A 00 FF FF 84`, then sent the first diagnostic frame
+`00 16 A0 00`. The motor immediately returned `A3 3A`, the page exited mode 5,
+and `A8` remained unsent. Since the first prefix failed, .71 provided no
+evidence about longer prefix acceptance and further prefix looping would only
+repeat the same rejected state.
+
+Static analysis supplies a distinct next authorization state. The D4.5.0 image
+contains three adjacent five-word secure tables: the already verified mode-1
+and mode-5 tables, plus a mode-4 table at image offset `0x19f8` with wire pairs
+`19 B2`, `73 D8`, `A4 73`, `B1 72`, and `01 10`. The `A0` and `A8` handlers both
+read the same current-mode byte at RAM `0x200029f9` and explicitly accept values
+4 or 5. The secure-word handler promotes the requested mode into that byte
+before emitting opcode-12 completion. Mode 4 is therefore a firmware-defined,
+authenticated setting candidate rather than an invented state.
+
+Build .72 retains every proven gate and changes only the second PC-mode
+selection. It requires exact mode-1 and mode-4 completions for live slot `0D`,
+freshly reads all five `A4/A6` bytes, and sends one complete
+`00 16 A0 00 <five live bytes>` stage. No short-prefix loop remains. A normal
+`A2` is mandatory before the at-most-once destination write. The write stays
+the exact five-byte Android region call `00 16 A8 01 01`; bytes following the
+public fields in fixed ten-byte replies are not copied into a setter. Any mode,
+stage, storage, write, or readback failure requests mode 0 and prevents a retry.
+The bike must still establish mode-4 acceptance, A0 acceptance, immediate US
+readback, and separate-power-cycle persistence.
