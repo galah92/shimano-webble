@@ -471,7 +471,7 @@ class BrowserTests(unittest.TestCase):
         self.open()
         result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
         self.assertIn('protected PC mode', result)
-        self.assertIn('same-value lighting stage', result)
+        self.assertIn('record-preserving regulation stage', result)
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
 

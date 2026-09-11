@@ -1,24 +1,19 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-10, build .68): SC-E7000 display; motor reports
+Current status (2026-09-11, build .69): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation now
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
-flag. The earlier live attempts supplied neither state and used a shortened
-setter packet. The .65 bike test verified the `E8`/`EA` regulation unlock.
-not return its completion message. Build .67 added the normal mode-1 PC-link
-transition, but the bike returned neither its broadcast secure echoes nor a
-completion. The official BLE capture contains the missing transport identity:
-setup `00 0C 01` is followed by `00 32 12 01 0D`, assigning the wireless phone
-application slot `0D`. The previous builds copied desktop adapter slot `00`.
-The firmware's saved-slot completion path makes this the leading explanation,
-while the .68 bike run remains the live validation gate.
-Build .68 learns this slot from the live setup announcement when possible and
-uses the capture-backed `0D` fallback. Both mode stages require their own exact
-mode in the returned category-32 completion. It otherwise preserves
-the command-only candidate with no firmware or bootloader operation. Successful
-two-stage PC-mode entry, US write, persistence and the assistance-speed result
-remain live verification gates.
+flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 bike
+test then reported wireless application slot `0D` and completed both PC modes
+exactly, resolving the transport route. Its `A0` request was rejected with
+`3A`; `A8` was never sent. The rejection exposed a separate framing error:
+D4.5.0 treats this setting as an 11-byte record, while .68 sent only a two-byte
+lighting value in the position where the handler requires a zero selector.
+Build .69 reads both record halves, preserves every returned byte, stages the
+first five behind selector zero, changes only the OEM destination byte in the
+six-byte tail, and keeps `A8` unreachable unless `A0` returns `A2`. The corrected
+stage, US write, persistence and assistance-speed result remain live gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2694,15 +2689,18 @@ application slot. Mode 0 clears the privileged state. These branches explain a
 specific missing-state result and do not depend on the newer app's policy of
 routing D4.5.0 through firmware preparation.
 
-Shimano's desktop `EtubeDataLinks` library supplies the matching wire sequence:
+The protected-mode sequence and D4.5.0 record handlers establish this wire
+sequence:
 
 1. `00 32 10 05 00 00 00`, wait 1000 ms with the battery present;
 2. five little-endian category-32 opcode-30 secure words, 100 ms apart, then require
    category-32 opcode-12 completion;
-3. read lighting time with `00 16 A4 00`;
-4. stage that identical little-endian value with
-   `00 16 A0 <low> <high> 00 00`;
-5. send destination with `00 16 A8 01 01 00 00`; and
+3. read the first five record bytes with `00 16 A4 00` / `A6`;
+4. stage those five bytes unchanged with
+   `00 16 A0 00 <five bytes from A6>`;
+5. read the current six-byte OEM record tail with `00 16 AC 01` / `AE`,
+   change only its destination byte from 0 to 1, and send all six bytes with
+   `00 16 A8 <six-byte candidate>`; and
 6. exit with `00 32 10 00 00 00 00`.
 
 The desktop authorization caller also invokes `UnlockRegulationSetAuth` after
@@ -2712,16 +2710,16 @@ its normal `EA` reply before entering PC mode. This is a conservative upstream
 authorization gate. The `A8` handler's local `3A` branch directly checks PC mode
 and the `A0` flag.
 
-Build .65 performs a fresh EU read, the complete authorization/mode/staging
-sequence, one full seven-byte destination write, immediate readback, and a
+Build .69 performs a fresh full-record EU read, the complete authorization and
+mode sequence, one full-record destination write, immediate readback, and a
 mode-0 exit on success or failure. A salted same-device record is durably saved
 immediately before `A8`. After a physical power cycle, the same button verifies
 the same D4.5.0/M4.4.8 pair and destination in a different BLE session; it does
 not repeat `A8`. The firmware preparation UI is hidden and its cache is no longer
 loaded at startup.
 
-Synthetic browser tests cover exact packet order and values, same-value lighting
-preservation, early and delayed replies, ATT failures that race replies, every
+Synthetic browser tests cover exact packet order, preservation of both record
+halves, early and delayed replies, ATT failures that race replies, every
 prerequisite gate, at-most-once `A8`, mandatory PC-mode exit, durable record
 reload, same-device pairing, and terminal persistence outcomes. Live validation
 still has to establish `E8/EA`, PC-mode completion, `A8/AA`, US readback and
@@ -2782,3 +2780,34 @@ fifth secure word and only when both its reported mode and application slot
 equal the request.
 The `A0` and `A8` commands remain unreachable on any missing or mismatched mode
 completion.
+
+## Build .69: preserve the complete regulation record
+
+The .68 bike run validated the wireless route. The information batch observed
+application slot `0D`; normal mode 1 completed as `00 32 12 01 0D`; protected
+mode 5 completed as `00 32 12 05 0D`. The subsequent `A4` read reported a
+lighting value of 10, but .68 sent `00 16 A0 0A 00 00 00`. The motor immediately
+returned `A3 3A`, the page exited mode 5, and no `A8` command was sent.
+
+The rejection matches the exact D4.5.0 handler. `FUN_000252a8` requires the
+first parameter after `A0` to be zero, copies the following five bytes into a
+candidate buffer, and only then sets the one-shot flag. `FUN_0002541c`, reached
+by `A4`, returns the corresponding five-byte live record. The persistent-record
+helper at `FUN_00025516` compares and writes 11 bytes. `A8` supplies the remaining
+six bytes, and the adjacent `AC` getter returns those six bytes. The persistent
+record lives at RAM `0x2000253c`; the candidate lives at `0x20002548`.
+
+Build .69 therefore performs a full-record read-modify-write. It requires the
+fresh `AC 01` response to contain all six OEM bytes and EU at byte 1. After exact
+mode completions, it reads all five `A4/A6` bytes and sends
+`00 16 A0 00 <the same five bytes>`. Only an `A2` response unlocks the final
+step. It then clones the six OEM bytes, changes byte 1 from EU (`00`) to US
+(`01`), and sends `00 16 A8 <the six-byte clone>`. Short replies and any error
+stop before the destination commit; `A8` remains at most once.
+
+This correction also avoids relying on legacy managed-library padding. The
+older `SetDestination` helper initializes a four-byte parameter array to
+`FF FF FF FF` before replacing its first two bytes. D4.5.0 itself copies six
+destination-tail bytes. Reusing the live `AC` result preserves the exact values
+for this motor and is stronger than choosing zero or `FF` for fields whose
+meaning is not established.
