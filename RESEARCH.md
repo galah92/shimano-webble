@@ -1,18 +1,19 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-11, build .70): SC-E7000 display; motor reports
+Current status (2026-09-11, build .71): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
 flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 and
-.69 bike tests reported wireless application slot `0D`, completed both PC modes
-exactly, and then received `A3 3A` from `A0`; `A8` was never sent. The .69 test
-disproved its own full-record framing hypothesis: the official BLE capture has
-241 motor writes and a maximum length of seven bytes, while .69 sent nine.
-Shimano's desktop DLL initializes both four-parameter setter arrays to
-`FF FF FF FF`. Build .70 uses its exact seven-byte wire forms: unchanged
-lighting time as `00 16 A0 <low> <high> FF FF`, followed only after `A2` by one
-`00 16 A8 01 01 FF FF`. The corrected stage, US write, persistence and
+.69 bike tests reported wireless application slot `0D` and completed both PC
+modes exactly. Builds .68 through .70 then received `A3 3A` from `A0`; `A8` was
+never sent. Build .70 reproduced Android's generic lighting setter, but its
+first parameter was `0A`, while the D4.5 `A0` prerequisite handler requires
+zero and then copies five regulation-record bytes. Build .69 supplied that zero
+and all five bytes but was also rejected. Build .71 safely probes zero-selector
+prefix lengths 4 through 9 and stops before `A8` on any rejection. Only a normal
+`A2` for the complete record permits the exact Android eTuning destination
+frame `00 16 A8 01 01`. The staging boundary, US write, persistence and
 assistance-speed result remain live gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
@@ -2852,3 +2853,51 @@ and firmware gates, the verified slot-`0D` mode lifecycle, at-most-once `A8`,
 immediate destination readback, protected-mode exit, and distinct-session
 persistence verification. No firmware, erase, bootloader, retry, or separate
 speed-limit command is used.
+
+The .70 bike result rejected `00 16 A0 0A 00 FF FF` with `A3 3A` after exact
+mode-1 and mode-5 completions. The motor then accepted mode 0 and disconnected;
+`A8` was not sent. This disproves the legacy generic lighting setter as the
+D4.5 destination prerequisite. It does not weaken the protected-mode result.
+
+## Build .71: isolate the zero-selector staging boundary
+
+Rechecking the D4.5 receive path establishes the handler field mapping. The
+internal bus reassembler places the command category and opcode at normalized
+offsets 2 and 3; the first raw setting parameter is therefore normalized offset
+4. `FUN_000252a8` requires that byte to be zero, copies the following five bytes
+to the transient candidate, and sets the only flag consumed by `A8`. Builds .68
+and .70 put lighting value `0A` in that position. Build .69 used the correct
+zero-selector form and all five fresh bytes, yet still received `A3 3A` after
+the exact protected completion. The remaining failure is therefore bounded to
+the motor's live mode state or the wireless delivery shape.
+
+The Android 3.0.7 source supplies two further controls. Its generic
+`C0549qn.X(int)` method emits the seven-byte lighting packet tested by .70, so
+that helper is not evidence for D4.5's destination prerequisite. Its actual
+region call sites in `eTuning/.../ea/w.java`, `C0545qj`, and `AbstractC0210gc`
+all emit exactly `00 16 A8 01 <destination>` with no explicit padding. The same
+2AFE characteristic also receives nine-byte setting writes in `G5`, so the
+seven-byte maximum observed in one HCI capture is bounded negative evidence,
+not a protocol ceiling.
+
+Build .71 performs one automated, nonpersistent diagnostic after all existing
+identity, authentication, `E8/EA`, mode-1 and mode-5 gates pass. It freshly reads
+the five-byte `A4/A6` record, then sends these `A0` forms in order:
+
+1. `00 16 A0 00`;
+2. the same packet followed by the first one, two, three and four live bytes;
+3. `00 16 A0 00 <all five live bytes>`.
+
+Every accepted prefix is logged. The first `A3` or transport failure stops,
+requests mode 0 and disconnects without `A8`. Prefix stages only overwrite the
+RAM candidate; no persistent helper runs until `A8`. Even if an early prefix
+sets the one-shot flag, a later failure cannot cause a write because the page
+never sends `A8` on that path and ends the privileged session.
+
+If and only if the complete nine-byte form returns `A2`, the last candidate is
+an exact copy of the fresh live record. The page then saves its same-device
+restart expectation and sends `00 16 A8 01 01` at most once, matching Shimano's
+Android region call sites. It requires immediate selector-1 readback, exits PC
+mode on all paths and requires a separate power-cycle readback for persistence.
+No firmware, bootloader, erase, retry, factory-selector, or speed-setting command
+is reachable from this workflow.

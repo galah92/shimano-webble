@@ -102,8 +102,8 @@ class RegionWriteTests(unittest.TestCase):
               return;
             }
             if(p[2]===0xa0) {
-              if(opts.stageWriteFailure){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
-              emit(opts.stageReject?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
+              if(opts.stageWriteFailure&&(opts.stageFailureLength??4)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
+              emit((opts.stageReject&&(opts.stageFailureLength??4)===p.length)?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
               return;
             }
             if(p[2]===0xa8) {
@@ -145,7 +145,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate("probeRecord={version:1,verified:false};setUS()")
         self.assertEqual(self.packets(),[])
 
-    def test_exact_protected_sequence_uses_desktop_setter_frames_and_sets_us_once(self):
+    def test_exact_protected_sequence_diagnoses_a0_shape_and_sets_us_once(self):
         self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
@@ -162,14 +162,31 @@ class RegionWriteTests(unittest.TestCase):
             [0,0x32,0x30,0x03,0xf3,0,0],
             [0,0x32,0x30,0x09,0x03,0,0],
             [0,0x16,0xa4,0],
-            [0,0x16,0xa0,0x34,0x12,0xff,0xff],
-            [0,0x16,0xa8,1,1,0xff,0xff],
+            [0,0x16,0xa0,0],
+            [0,0x16,0xa0,0,0x34],
+            [0,0x16,0xa0,0,0x34,0x12],
+            [0,0x16,0xa0,0,0x34,0x12,0x56],
+            [0,0x16,0xa0,0,0x34,0x12,0x56,0x78],
+            [0,0x16,0xa0,0,0x34,0x12,0x56,0x78,0x9a],
+            [0,0x16,0xa8,1,1],
             [0,0x16,0xac,1],
             [0,0x32,0x10,0,0x0d,0,0],
         ])
         self.assertIn('MILESTONE: US (1) read back',self.page.locator('#log').inner_text())
         self.assertIn('using wireless slot 0D',self.page.locator('#log').inner_text())
+        self.assertIn('complete zero-selector A0 regulation record accepted',self.page.locator('#log').inner_text())
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
+
+    def test_every_a0_prefix_failure_stops_before_destination_write(self):
+        for length in range(4,10):
+            with self.subTest(length=length):
+                self.prepare(stageReject=True,stageFailureLength=length);self.run_attempt()
+                packets=self.packets()
+                self.assertFalse(any(p[2]==0xa8 for p in packets))
+                self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
+                attempted=[len(p) for p in packets if p[2]==0xa0]
+                self.assertEqual(attempted,list(range(4,length+1)))
+                self.context.close()
 
     def test_restart_record_is_durable_before_the_only_destination_write(self):
         self.prepare();self.run_attempt()
