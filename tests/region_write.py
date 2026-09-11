@@ -92,14 +92,13 @@ class RegionWriteTests(unittest.TestCase):
               if(opts.readbackWriteFailure&&regionReads===2)throw Error('Readback ATT failure');
               if(opts.shortBefore&&regionReads===1){emit([0,0x16,0xae,1]);return;}
               emit([0,0x16,0xae,0,1,0x10,0x20,0x30,0x40,0xff]);
-              if(opts.shortDestinationRecord&&regionReads===1){emit([0,0x16,0xae,1,opts.before??0]);return;}
               emit([0,0x16,0xae,1,regionReads===1?(opts.before??0):(opts.after??1),0x21,0x43,0x65,0x87,0xff]);
               return;
             }
             if(p[2]===0xa4) {
               if(opts.lightingReadWriteFailure)throw Error('Lighting read ATT failure');
               emit(opts.lightingReadReject?[0,0x16,0xa7,0x3a]:opts.shortStageRecord?
-                [0,0x16,0xa6,0x34,0x12]:[0,0x16,0xa6,0x34,0x12,0x56,0x78,0x9a,0xff,0xff]);
+                [0,0x16,0xa6,0x34]:[0,0x16,0xa6,0x34,0x12,0x56,0x78,0x9a,0xff,0xff]);
               return;
             }
             if(p[2]===0xa0) {
@@ -146,7 +145,7 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate("probeRecord={version:1,verified:false};setUS()")
         self.assertEqual(self.packets(),[])
 
-    def test_exact_protected_sequence_preserves_both_record_halves_and_sets_us_once(self):
+    def test_exact_protected_sequence_uses_desktop_setter_frames_and_sets_us_once(self):
         self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
@@ -163,8 +162,8 @@ class RegionWriteTests(unittest.TestCase):
             [0,0x32,0x30,0x03,0xf3,0,0],
             [0,0x32,0x30,0x09,0x03,0,0],
             [0,0x16,0xa4,0],
-            [0,0x16,0xa0,0,0x34,0x12,0x56,0x78,0x9a],
-            [0,0x16,0xa8,1,1,0x21,0x43,0x65,0x87],
+            [0,0x16,0xa0,0x34,0x12,0xff,0xff],
+            [0,0x16,0xa8,1,1,0xff,0xff],
             [0,0x16,0xac,1],
             [0,0x32,0x10,0,0x0d,0,0],
         ])
@@ -186,7 +185,7 @@ class RegionWriteTests(unittest.TestCase):
         self.assertFalse(self.page.evaluate('probeRecord.verified'))
 
     def test_changed_or_short_fresh_region_stops_before_pc_mode(self):
-        for options in ({'before':1},{'before':2},{'shortBefore':True},{'shortDestinationRecord':True}):
+        for options in ({'before':1},{'before':2},{'shortBefore':True}):
             with self.subTest(options=options):
                 self.prepare(**options);self.run_attempt()
                 self.assertEqual(self.packets(),[[0,0x16,0xac,1]])

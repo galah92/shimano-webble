@@ -9,41 +9,30 @@ command.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .69)
+## Current next step (build .70)
 
 Decompilation explains the earlier `00 16 AB 3A 00` results. The D4.5.0
 destination setter is present and has no firmware-version gate. It returns
 `3A` when protected PC mode 4/5 and the one-shot setting stage are absent or
 when persistence fails.
 
-The build .65 bike test verified the regulation unlock with a normal `EA`
-reply. Builds .65 and .66 both stopped before any setting command because mode
-5 never returned its completion message; correcting the byte order alone did
-not resolve it. Static analysis of the desktop workflow shows that its normal
-connection establishes PC-link mode 1 before the inspection UI enters mode 5.
-Build .67 reproduced that complete lifecycle, but the real bike returned no
-mode-1 secure echoes or completion. The supplied official BLE capture explains
-the missing route: after setup `00 0C 01`, the wireless session announces
-`00 32 12 01 0D`, reporting mode 1 and application slot `0D`. Builds .65-.67
-sent the desktop adapter's slot `00` and received no completion through
-SC-E7000. The firmware's saved-slot completion logic made that routing mismatch
-the next bounded test.
+The .68 and .69 bike tests validated the live slot and protected lifecycle: the
+motor reported slot `0D` and returned exact completions for modes 1 and 5. Both
+then stopped at `A0` with `A3 3A`, before `A8` could run. Build .69 also exposed
+why its full-record interpretation was wrong: it copied bytes from fixed-length
+BLE replies that include a bridge trailer and sent a nine-byte motor command,
+while all 241 motor writes in the supplied official capture are at most seven
+bytes.
 
-The .68 bike test validated the live slot and protected lifecycle: the motor
-reported slot `0D` and returned exact completions for modes 1 and 5. It then
-rejected `A0` with `3A`, before `A8` could run. Reinspection of the D4.5.0
-handlers found a framing error in the page. The motor stores one 11-byte
-regulation record. `A4` reads its first five bytes, `AC` reads its last six,
-`A0` requires a zero selector followed by the unchanged first five, and `A8`
-commits the six-byte tail.
-
-Build .69 performs that exact read-modify-write. It preserves all eleven bytes,
-changes only the OEM destination byte from EU (`0`) to US (`1`), requires the
-normal `A2` staging reply, and permits one `A8` only after every gate succeeds.
-It stores a salted same-device verification record immediately before that
-write, reads the destination back, and exits protected mode on every path. A
-later tap after fully power-cycling the bike performs readback only and never
-retries the setter.
+Shimano's desktop DLL provides the wire-level setter contract. Its exact static
+initializer is `FF FF FF FF`; `SetLightingTime` replaces the first two bytes
+with the little-endian 16-bit value, and `SetDestination` replaces the first two
+bytes with selector and destination. Build .70 therefore reads the current
+lighting time and sends `00 16 A0 <low> <high> FF FF`. Only a normal `A2` reply
+permits one `00 16 A8 01 01 FF FF`. It stores a salted same-device verification
+record immediately before `A8`, reads the destination back, and exits protected
+mode on every path. A later tap after fully power-cycling the bike performs
+readback only and never retries the setter.
 
 Open the live site, enter the six-digit Shimano passkey, and press **Connect,
 verify, and set US**. If the page reports immediate US readback, fully power the
@@ -53,10 +42,10 @@ Assistance speed must be measured separately.
 
 This is a statically supported candidate and is fully exercised against a
 synthetic BLE device. The two-stage PC-mode lifecycle is verified on the bike;
-the corrected full-record `A0` stage, `A8` commit, and persistence still require
-one controlled bike run. The retired
-firmware preparation implementation remains hidden and inert for regression and
-recovery reference; it is not used by the primary workflow.
+the corrected desktop-format `A0` stage, `A8` commit, and persistence still
+require one controlled bike run. The retired firmware preparation implementation
+remains hidden and inert for regression and recovery reference; it is not used
+by the primary workflow.
 
 ## Use
 
@@ -165,42 +154,44 @@ challenge, keys, ciphertext, secure PC words, and passkey are omitted from logs.
 The user's build .14 log verified motor authentication on the real bike, with
 the three DA challenge fragments and E2 FF FF completion after the third E0.
 
-## Command-only US destination candidate (build .69)
+## Command-only US destination candidate (build .70)
 
 The D4.5.0 `A8` handler at `0x2537c` accepts the write only while PC mode is 4
 or 5 and a one-shot flag set by the `A0` handler is active. There is no version
-check in that handler. Its persistence helper compares and writes an 11-byte
-record. The `A4` getter returns the first five bytes and `A0` requires a zero
-selector before the same five bytes. The `AC` getter returns the six-byte tail;
-`A8` replaces that tail and commits the combined record.
+check in that handler. Its persistence helper compares and writes an internal
+11-byte record. Those internal buffer widths are not BLE parameter lengths.
+The official capture contains 241 writes to the motor characteristic and none
+exceeds seven bytes; its fixed-size replies include bridge trailer bytes after
+each command's declared parameters. Shimano's desktop DLL independently
+constructs both setters with exactly four parameters initialized to
+`FF FF FF FF`.
 
-Build .69 first reads the complete current OEM record again; only selector 1
-and EU value 0 permit progress.
-It establishes the desktop's ordinary PC-link mode 1, then enters inspection
-mode 5 and requires a matching completion reply after each five-word sequence.
-Unlike the desktop adapter, the wireless path uses application slot `0D`; the
-page learns it from the bike's setup announcement or falls back to the exact
-value in the supplied official capture. It reads and stages the identical
-five-byte first half, preserves the fresh six-byte OEM half while changing only
-its destination byte, saves a durable reconnect expectation, then sends that
-complete `A8` record once. It accepts only `AA` as the setter's normal reply and
-immediately reads destination slot 1. It always requests PC-mode exit.
-An acknowledgement alone is never success, and a later connection performs
-readback only. There is no automatic retry, downgrade, factory-slot write, or
-separate speed setter.
+Build .70 first reads the current OEM destination again; only selector 1 and EU
+value 0 permit progress. It establishes the desktop's ordinary PC-link mode 1,
+then enters inspection mode 5 and requires a matching completion reply after
+each five-word sequence. Unlike the desktop adapter, the wireless path uses
+application slot `0D`; the page learns it from the bike's setup announcement or
+falls back to the exact value in the supplied official capture. It reads the
+16-bit lighting time and stages that unchanged value as
+`00 16 A0 <low> <high> FF FF`, saves a durable reconnect expectation, then sends
+`00 16 A8 01 01 FF FF` once. It accepts only `AA` as the setter's normal reply
+and immediately reads destination slot 1. It always requests PC-mode exit. An
+acknowledgement alone is never success, and a later connection performs readback
+only. There is no automatic retry, downgrade, factory-slot write, or separate
+speed setter.
 
-If US is read back, disconnect,
-turn the bike fully off and on, reconnect, authenticate the session, and run
-**Read region and compatibility** again. Copy that second log and report that
-the bike was power-cycled. The app cannot detect a physical power cycle; a US
-value in one session does not prove persistence or an assistance-speed outcome.
+If US is read back, disconnect, turn the bike fully off and on, reconnect,
+authenticate the session, and run **Read region and compatibility** again. Copy
+that second log and report that the bike was power-cycled. The app cannot detect
+a physical power cycle; a US value in one session does not prove persistence or
+an assistance-speed outcome.
 
 The shared goal is a verified phone-only US-destination workflow with readback
 and persistence checks. Session setup, exact D4.5.0/M4.4.8 identity, EU
 readback, motor authentication, `E8` regulation unlock, wireless slot `0D`, and
-both protected PC-mode completions work on the bike. The corrected full-record
-stage, destination commit, persistence, and actual speed behavior remain to be
-verified live.
+both protected PC-mode completions work on the bike. The corrected
+desktop-format stage, destination commit, persistence, and actual speed behavior
+remain to be verified live.
 
 Synthetic write/readback tests: `python tests/region_write.py`.
 

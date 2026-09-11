@@ -1,19 +1,19 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-11, build .69): SC-E7000 display; motor reports
-E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation now
+Current status (2026-09-11, build .70): SC-E7000 display; motor reports
+E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation
 explains the earlier `AB 3A` response: its destination setter is present, has no
 version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
-flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 bike
-test then reported wireless application slot `0D` and completed both PC modes
-exactly, resolving the transport route. Its `A0` request was rejected with
-`3A`; `A8` was never sent. The rejection exposed a separate framing error:
-D4.5.0 treats this setting as an 11-byte record, while .68 sent only a two-byte
-lighting value in the position where the handler requires a zero selector.
-Build .69 reads both record halves, preserves every returned byte, stages the
-first five behind selector zero, changes only the OEM destination byte in the
-six-byte tail, and keeps `A8` unreachable unless `A0` returns `A2`. The corrected
-stage, US write, persistence and assistance-speed result remain live gates.
+flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 and
+.69 bike tests reported wireless application slot `0D`, completed both PC modes
+exactly, and then received `A3 3A` from `A0`; `A8` was never sent. The .69 test
+disproved its own full-record framing hypothesis: the official BLE capture has
+241 motor writes and a maximum length of seven bytes, while .69 sent nine.
+Shimano's desktop DLL initializes both four-parameter setter arrays to
+`FF FF FF FF`. Build .70 uses its exact seven-byte wire forms: unchanged
+lighting time as `00 16 A0 <low> <high> FF FF`, followed only after `A2` by one
+`00 16 A8 01 01 FF FF`. The corrected stage, US write, persistence and
+assistance-speed result remain live gates.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2783,6 +2783,10 @@ completion.
 
 ## Build .69: preserve the complete regulation record
 
+**Superseded by build .70.** This section records the hypothesis tested by .69;
+the live rejection and wire-level evidence below show that its internal-buffer
+widths were incorrectly treated as BLE parameter lengths.
+
 The .68 bike run validated the wireless route. The information batch observed
 application slot `0D`; normal mode 1 completed as `00 32 12 01 0D`; protected
 mode 5 completed as `00 32 12 05 0D`. The subsequent `A4` read reported a
@@ -2811,3 +2815,40 @@ older `SetDestination` helper initializes a four-byte parameter array to
 destination-tail bytes. Reusing the live `AC` result preserves the exact values
 for this motor and is stronger than choosing zero or `FF` for fields whose
 meaning is not established.
+
+## Build .70: restore Shimano's seven-byte setter frames
+
+The .69 bike run completed session authentication, motor authentication,
+`E8`/`EA`, normal PC-link mode 1, and protected mode 5. Its `A4` response was
+logged as `0A 00 FF FF 93`; the nine-byte `A0` stage was then rejected with
+`A3 3A`, and `A8` remained unreachable. Mode exit completed and the bike was
+left at EU.
+
+The supplied official HCI capture resolves the boundary between command data
+and the BLE bridge envelope. Handle `0x002f`, mapped to `2AFE`, has 241 writes
+and a maximum value length of seven bytes. The captured `A4` request is the
+four-byte `00 16 A4 00`; its ten-byte reply is
+`00 16 A6 0A 00 FF FF A4 01 FF`. The managed getter declares only the first two
+reply parameters as lighting time. The remaining bytes are fixed-envelope
+padding or trailer data and cannot be copied back as setting fields. The same
+applies to bytes after selector/value in the ten-byte `AC` reply.
+
+The desktop `etubedatalinks.dll` supplies the missing setter serialization.
+`DUUnitDataLink.SetLightingTime` creates a four-byte parameter array, copies the
+little-endian `UInt16` into indices 0 and 1, and sends category `16`, opcode
+`A0`. `SetDestination` creates the same four-byte array, overwrites indices 0
+and 1 with selector/value, and sends opcode `A8`. The FieldRVA initializer used
+by both methods is confirmed directly at DLL RVA `0xD1560` as
+`FF FF FF FF`. Thus the exact candidate frames are:
+
+- `00 16 A0 <lighting low> <lighting high> FF FF`;
+- require normal `00 16 A2` before continuing;
+- `00 16 A8 01 01 FF FF` for OEM selector 1 and US value 1.
+
+Build .68 used the correct seven-byte length for `A0` but filled the final two
+parameters with `00 00`; build .69 used invalid nine-byte record framing.
+Build .70 changes only this bounded wire-level issue. It retains exact motor
+and firmware gates, the verified slot-`0D` mode lifecycle, at-most-once `A8`,
+immediate destination readback, protected-mode exit, and distinct-session
+persistence verification. No firmware, erase, bootloader, retry, or separate
+speed-limit command is used.

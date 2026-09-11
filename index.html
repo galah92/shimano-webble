@@ -311,7 +311,7 @@ END HANDOFF NOTES
 <body>
 <h1>Shimano E5000 US-region workflow</h1>
 <div class="muted" id="build"></div>
-<p>This guided command-only workflow checks the exact motor and firmware, unlocks Shimano's protected setting mode, preserves the motor's complete regulation record, changes only the OEM destination to US, and reads it back. It does not install firmware or enter the bootloader.</p>
+<p>This guided command-only workflow checks the exact motor and firmware, unlocks Shimano's protected setting mode, stages the current lighting-time value with Shimano's desktop packet format, changes the OEM destination to US, and reads it back. It does not install firmware or enter the bootloader.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -370,7 +370,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-11.69';
+const BUILD = '2026-09-11.70';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2568,10 +2568,10 @@ const INFO_QUERIES = [
   {name: 'Restore setup 06', tx: '2afa', rx: '2af9', packet: [0, 6, 0], prefix: [0x26], setup: true, echo: 0, pause: 200},
   {name: 'Drive-unit model', tx: '2afe', rx: '2afd', packet: [0, 1, 0x1c, 0], prefix: [0, 1, 0x1e]},
   {name: 'Drive-unit firmware', tx: '2afe', rx: '2afd', packet: [0, 1, 0x2c, 0], prefix: [0, 1, 0x2e]},
-  // D4.5.0's AC handler returns the complete six-byte tail of the persistent
-  // regulation record. Keep it intact for the guarded A8 read-modify-write.
-  {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0], destination: true, fieldBytes: 9, minLength: 9},
-  {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1], destination: true, fieldBytes: 9, minLength: 9},
+  // The managed getter declares one value byte. Bytes after it in the fixed
+  // ten-byte BLE notification belong to the bridge envelope, not this setting.
+  {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0], destination: true, fieldBytes: 5, minLength: 5},
+  {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1], destination: true, fieldBytes: 5, minLength: 5},
   // Q5 connection state 43; Shimano names this PU_MD_MODEL_GET.
   // Keep the raw descriptor separate from the independently decoded family code.
   {name: 'Motor model descriptor', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0x7c, 0], prefix: [0, 0x16, 0x7e], errorPrefix: [0, 0x16, 0x7f], fieldBytes: 10, minLength: 10},
@@ -2674,7 +2674,7 @@ function regionCompatibility(results) {
   const field=name=>results.find(r=>r.name===name && r.status==='reply received')?.fields;
   const matches=(value,expected)=>value?.length>=expected.length && expected.every((b,i)=>value[i]===b);
   const model=field('Drive-unit model'),firmware=field('Drive-unit firmware'),destination=field('Current destination');
-  const identified=matches(model,[0,1,0x1e,0x22,0]) && matches(destination,[0,0x16,0xae,1]) && destination.length>=9 && destination[4]<=5;
+  const identified=matches(model,[0,1,0x1e,0x22,0]) && matches(destination,[0,0x16,0xae,1]) && destination.length>=5 && destination[4]<=5;
   const original=identified && matches(firmware,[0,1,0x2e,0x45,0])
     && matches(field('Native D firmware'),[0,1,0x86,0x45,0,0])
     && matches(field('Native M firmware'),[0,1,0x86,0x44,8,0]);
@@ -2688,7 +2688,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 command path identified: protected PC mode and a record-preserving regulation stage are required before the US setter.';
+    return 'D4.5.0 command path identified: protected PC mode and Shimano\'s padded lighting-time stage are required before the US setter.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -3123,29 +3123,30 @@ async function exitPcMode(s) {
   await enterPcMode(s,{mode:0,words:[],label:'exit PC mode',initialDelay:0,timeout:3000});
   log('Protected PC mode exited.');
 }
-async function readRegulationStageRecord(s) {
-  const data=await driveSettingExchange(s,{label:'Read regulation stage record',packet:Uint8Array.of(0,0x16,0xa4,0),
-    normalOpcode:0xa6,errorOpcode:0xa7,minLength:8});
-  const record=data.slice(3,8);
-  log(`Regulation stage record read: ${hex(record)}. All five bytes will be preserved.`);
-  return record;
+async function readLightingTime(s) {
+  const data=await driveSettingExchange(s,{label:'Read lighting time',packet:Uint8Array.of(0,0x16,0xa4,0),
+    normalOpcode:0xa6,errorOpcode:0xa7,minLength:5});
+  const value=data[3]|data[4]<<8;
+  log(`Lighting time read for same-value staging: ${value}.`);
+  return value;
 }
-async function stageRegulationRecord(s,record) {
-  if(!(record instanceof Uint8Array)||record.length!==5)throw new Error('Incomplete regulation stage record');
-  // A0 checks a zero selector at the first parameter, then copies five bytes.
-  await driveSettingExchange(s,{label:'Stage unchanged regulation record',
-    packet:Uint8Array.of(0,0x16,0xa0,0,...record),normalOpcode:0xa2,errorOpcode:0xa3,minLength:3});
-  log('Unchanged five-byte regulation record staged; destination setter gate is now satisfied for one command.');
+async function stageLightingTime(s,value) {
+  if(!Number.isInteger(value)||value<0||value>0xffff)throw new Error('Invalid lighting-time value');
+  // Shimano's desktop SetLightingTime always supplies four parameters: the
+  // little-endian UInt16 value followed by its exact FF FF initializer bytes.
+  const packet=Uint8Array.of(0,0x16,0xa0,value&0xff,value>>>8,0xff,0xff);
+  if(packet.length!==7)throw new Error('Unexpected lighting-time packet length');
+  await driveSettingExchange(s,{label:'Stage unchanged lighting time',
+    packet,normalOpcode:0xa2,errorOpcode:0xa3,minLength:3});
+  log('Unchanged lighting time staged with Shimano desktop padding; destination setter gate is now satisfied for one command.');
 }
-// D4.5.0 copies six A8 parameters into the second half of the same persistent
-// record. Preserve the fresh AC readback and change only its destination byte.
-// Readback, rather than an AA callback alone, determines the reported value.
-function writeUsDestination(s,currentRecord) {
+// Shimano's managed SetDestination uses four parameters initialized to FF and
+// overwrites selector/value. Readback, rather than AA alone, determines success.
+function writeUsDestination(s,currentDestination) {
   assertCurrent(s);
-  if(!(currentRecord instanceof Uint8Array)||currentRecord.length!==6||currentRecord[0]!==1||currentRecord[1]!==0)
-    throw new Error('Current OEM destination record is incomplete or no longer EU');
-  const candidate=currentRecord.slice();
-  candidate[1]=1;
+  if(currentDestination!==0)throw new Error('Current OEM destination is no longer EU');
+  const packet=Uint8Array.of(0,0x16,0xa8,1,1,0xff,0xff);
+  if(packet.length!==7)throw new Error('Unexpected destination packet length');
   return new Promise((resolve, reject) => {
     const rx = s.chars['2afd'];
     let written = false, settled = false, reply;
@@ -3176,9 +3177,9 @@ function writeUsDestination(s,currentRecord) {
     }, 20000);
     rx.addEventListener('characteristicvaluechanged', onValue);
     s.controller.signal.addEventListener('abort', onAbort, {once: true});
-    log(`TX 2AFE Set OEM destination to US: ${hex(Uint8Array.of(0,0x16,0xa8,...candidate))} (one attempt; other record bytes preserved)`);
+    log(`TX 2AFE Set OEM destination to US: ${hex(packet)} (one attempt; Shimano desktop padding)`);
     try {
-      s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x16,0xa8,...candidate)).then(() => {
+      s.chars['2afe'].writeValueWithResponse(packet).then(() => {
         if (settled) return;
         written = true;
         log('ATT destination write completed; checking device response and readback.');
@@ -3198,17 +3199,17 @@ async function setUS() {
   const readDestination = async name => {
     const result = await queryInfo(s, {...INFO_QUERIES.find(q => q.name === 'Current destination'), name});
     assertCurrent(s);
-    if (result.status !== 'reply received' || result.fields.length<9 || result.fields[3]!==1 || result.fields[4] > 5)
-      throw new Error(`${name}: complete OEM destination record not verified`);
+    if (result.status !== 'reply received' || result.fields.length<5 || result.fields[3]!==1 || result.fields[4] > 5)
+      throw new Error(`${name}: OEM destination not verified`);
     s.currentDestination = result.fields[4];
     $('region').textContent = regionName(s.currentDestination);
-    return {value:s.currentDestination,record:result.fields.slice(3,9)};
+    return s.currentDestination;
   };
   let pcModeTouched=false,failed=false;
   try {
     const before = await readDestination('Destination before US write');
-    if (before.value !== 0) {
-      $('regionStatus').textContent = `${regionName(before.value)} reported; no destination write sent.`;
+    if (before !== 0) {
+      $('regionStatus').textContent = `${regionName(before)} reported; no destination write sent.`;
       log($('regionStatus').textContent);
       return;
     }
@@ -3220,9 +3221,9 @@ async function setUS() {
     await enterPcMode5(s);
     assertCurrent(s);
     log('Protected PC mode 5 accepted by the motor.');
-    const stageRecord=await readRegulationStageRecord(s);
+    const lightingTime=await readLightingTime(s);
     assertCurrent(s);
-    await stageRegulationRecord(s,stageRecord);
+    await stageLightingTime(s,lightingTime);
     assertCurrent(s);
 
     // Save a salted same-device restart expectation after every prerequisite
@@ -3240,7 +3241,7 @@ async function setUS() {
     s.currentDestination = undefined;
     $('region').textContent = 'Write in progress; value unverified';
     $('regionStatus').textContent = 'Attempting US destination…';
-    const reply = await writeUsDestination(s,before.record);
+    const reply = await writeUsDestination(s,before);
     assertCurrent(s);
     if (reply.errorCode !== undefined) {
       const code = reply.errorCode.toString(16).padStart(2, '0').toUpperCase();
@@ -3250,11 +3251,11 @@ async function setUS() {
     log(reply.acknowledged ? 'Destination AA reply received; US value not yet verified.'
       : 'No destination acknowledgement within 20 seconds. Reading current value; no retry.');
     const after = await readDestination('Destination after US write');
-    if (after.value === 1) {
+    if (after === 1) {
       log('MILESTONE: US (1) read back after destination write. Persistence and assistance speed remain unverified.');
       $('regionStatus').textContent = 'US readback confirmed. Copy log, disconnect, turn bike off/on, reconnect and read region again.';
     } else {
-      $('regionStatus').textContent = `${regionName(after.value)} read back; US change not verified. No retry sent.`;
+      $('regionStatus').textContent = `${regionName(after)} read back; US change not verified. No retry sent.`;
       log($('regionStatus').textContent);
     }
   } catch (error) {
