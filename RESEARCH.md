@@ -2997,6 +2997,18 @@ shifting; RD protection reset requires an electronic rear derailleur. Their
 presence in the menu does not imply a region configuration path.
 Source: https://si.shimano.com/en/pdfs/um/79H0B/UM-79H0B-000-ENG.pdf
 
+Offline review after the .73 result corrected the proposed A0 prerequisite.
+Shimano's desktop inspection UI calls `SetDestination` directly from its OEM
+destination button; its lighting button separately calls `SetLightingTime`.
+The Android region task in `C0545qj.java` also sends `00 16 A8 01 <value>`
+directly. No observed client call site stages unchanged lighting time before
+changing destination. We inferred the A0 stage from D4.5's A8 one-shot flag,
+but have not established how Shimano's region workflow sets that flag through
+the SC-E7000 bridge. The A3/3A reply after mode-4 completion narrows the
+failure to a mode/target gate only if the response came from the D handler;
+the exact bridge mapping remains unknown. No more A0 payload variations or
+bike mutation tests are justified by the current evidence.
+
 The local E-TUBE metadata lists Shimano's SC-E7000 4.1.0 display image as
 `SCE7000.4.1.0.dat` (126,508 bytes, catalog MD5
 `4974d4f471b126be9f9657510e6bef55`). A read-only download from its
