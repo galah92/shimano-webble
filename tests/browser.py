@@ -457,7 +457,7 @@ class BrowserTests(unittest.TestCase):
             self.assertIn('not verified', self.page.locator('#regionStatus').inner_text())
             self.context.close()
 
-    def test_exact_original_pair_enables_only_the_guided_command_path(self):
+    def test_exact_original_pair_reports_rejected_setting_stage(self):
         self.ready_for_identify(motorModel=34, motorFirmware=69, motorPatch=0,
             nativeReplies={0:[0,1,134,69,0,0],1:[0,1,134,68,8,0]})
         self.wait_batch()
@@ -465,15 +465,29 @@ class BrowserTests(unittest.TestCase):
         self.assertTrue(self.page.locator('#setUS').is_disabled())
         self.assertTrue(self.page.evaluate('canSetUS(session)'))
         self.assertTrue(self.page.evaluate('session.commandWriteEligible'))
-        self.assertIn('Command-only US path ready', self.page.locator('#regionStatus').inner_text())
+        self.assertIn('A0 staging returned 3A', self.page.locator('#regionStatus').inner_text())
 
-    def test_reported_motor_firmware_describes_the_protected_command_path(self):
+    def test_reported_motor_firmware_describes_the_unverified_command_path(self):
         self.open()
         result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
-        self.assertIn('authenticated PC mode 4', result)
-        self.assertIn('lighting-time A0 stage', result)
+        self.assertIn('A0 stage returned 3A', result)
+        self.assertIn('US change remains unverified', result)
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
+
+    def test_guided_bike_check_never_enters_motor_pc_mode_or_sets_region(self):
+        self.open(requireSetup=True,motorModel=34,motorFirmware=69,motorPatch=0,
+            nativeReplies={0:[0,1,134,69,0,0],1:[0,1,134,68,8,0]})
+        self.page.locator('#passkey').fill('123456')
+        self.page.locator('#guidedUS').click()
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('guided bike-status check end')",timeout=65000)
+        writes=self.writes()
+        self.assertFalse(any(p[1]=='2afe' and p[2][1] in (0x16,0x32) and p[2][2] in (0xa0,0xa8,0xe8,0x10,0x30)
+            for p in writes))
+        self.assertIn('Current destination: EU',self.page.locator('#log').inner_text())
+        self.assertIn('No motor unlock or setting write sent',self.page.locator('#log').inner_text())
+        self.assertIn('Bike check complete: EU',self.page.locator('#guidedUSStatus').inner_text())
+        self.assertFalse(self.errors)
 
     def test_query_traffic_is_scoped_and_tracks_other_channels(self):
         self.ready_for_identify()

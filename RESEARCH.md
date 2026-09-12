@@ -1,22 +1,16 @@
 # Shimano US-region workflow investigation
 
-Current status (2026-09-11, build .73): SC-E7000 display; motor reports
-E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU. D4.5.0 decompilation
-explains the earlier `AB 3A` response: its destination setter is present, has no
-version gate, and requires protected PC mode 4/5 plus an `A0` one-shot staging
-flag. The .65 bike test verified the `E8`/`EA` regulation unlock. The .68 and
-.69 bike tests reported wireless application slot `0D` and completed both PC
-modes exactly. Builds .68 through .70 then received `A3 3A` from `A0`; `A8` was
-never sent. Build .71 then showed that the first zero-selector prefix is also
-rejected immediately after an exact mode-5 completion. D4.5.0 has a separate
-five-word key for mode 4, and build .72 verified its exact completion before a
-nine-byte `A0` was rejected. A cross-check against the successful `AC 01` query
-shows that normalized offset `+4` is target address 0 and command parameters
-begin at `+5`; the earlier zero-selector interpretation was wrong. Build .73
-therefore combines accepted mode 4 with Shimano's exact seven-byte same-value
-lighting setter. Only a normal `A2` permits the Android destination frame
-`00 16 A8 01 01`. Corrected staging, US write, persistence and assistance-speed
-result remain live gates.
+Current status (2026-09-12, build .74): SC-E7000 display; motor reports
+E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU before the latest
+experiment. D4.5.0 implements the US destination setter but gates it on PC
+mode 4/5 plus an A0 one-shot staging flag. The bike accepted the motor unlock
+and normal PC mode 1, as well as modes 4 and 5 in separate trials. Build .73
+paired mode 4 with Shimano's seven-byte unchanged-lighting A0 frame. The bike
+still replied `A3 3A`, exited PC mode, and disconnected without receiving an
+A8 destination write. The user reported a display reset during that process;
+the log does not locate it in time. Build .74 parks the setter and offers a
+guided firmware/region readback only. US readback, persistence, and assistance
+speed remain unverified.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -2967,3 +2961,45 @@ creates the pending restart record and permits the at-most-once Android region
 write `00 16 A8 01 01`. Every failure exits mode and disconnects without `A8`.
 Immediate selector-1 US readback and a separate reconnect remain mandatory;
 assistance cutoff still requires a separate physical measurement.
+
+## Build .73 live result and .74 verification-only UI
+
+The 2026-09-12 bike run confirmed the D4.5.0/M4.4.8 pair, EU destination,
+wireless slot `0D`, motor challenge-response and `E8/EA` unlock. It received
+exact mode-1 and mode-4 completion responses. The page read lighting time 10,
+then sent the single seven-byte unchanged stage
+`00 16 A0 0A 00 FF FF`. The motor replied `A3 3A`; mode 0 exit completed and
+the page disconnected. No `A8` destination command or firmware command was
+sent. The user also observed a screen reset during the process, without a
+timestamp relative to the command stages. The compact log does not establish
+whether this was a display UI reset or a bike power cycle.
+
+The A0 handler at D4.5.0 address `0x252a8` has two immediate gates: active PC
+mode 4/5 and a zero target field at normalized offset `+4`. The observed
+mode-4 completion does not prove that the mode remained active when A0 was
+handled. The working `AC 01` query supports a zero target field in this BLE
+route, but the bridge's exact internal A0 record is not observed. Consequently
+`A3 3A` does not identify which gate failed. Repeating A0 with another guessed
+packet would add no evidence.
+
+Build .74 changes the primary button to a verification-only status check. It
+does the established BLE authentication and information batch, then reports
+motor firmware and region. It never calls motor authentication, PC mode entry,
+A0 or A8 from that button. The historical setter code remains available to
+synthetic tests but is disabled in the page UI. The next live action, if
+needed, is only a readback of the original firmware and EU region.
+
+The SC-E7000 setting-menu items the user observed are not region controls.
+Shimano's user manual describes Adjust as electronic-shifting adjustment,
+Shift timing as gear-shift timing, and RD protection reset as recovery for an
+electronic rear derailleur after an impact. The first two depend on electronic
+shifting; RD protection reset requires an electronic rear derailleur. Their
+presence in the menu does not imply a region configuration path.
+Source: https://si.shimano.com/en/pdfs/um/79H0B/UM-79H0B-000-ENG.pdf
+
+The local E-TUBE metadata lists Shimano's SC-E7000 4.1.0 display image as
+`SCE7000.4.1.0.dat` (126,508 bytes, catalog MD5
+`4974d4f471b126be9f9657510e6bef55`). A read-only download from its
+published Shimano URL returned HTTP 403 on 2026-09-12, so display bridge
+firmware could not yet be compared with the live A0 response. No alternative
+image was assumed equivalent.

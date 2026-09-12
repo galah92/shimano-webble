@@ -17,9 +17,10 @@ configuration protocol to support legitimate configuration workflows without
 requiring SM-PCE hardware.
 
 The historical page described below was intentionally read-only. The current
-guided workflow uses the normal authenticated command channel and does not
-install firmware. It verifies the exact D4.5.0/M4.4.8 pair before one guarded
-destination write. Preserve a staged approach:
+guided workflow uses the authenticated BLE channel to read the exact motor,
+firmware pair, and region after the failed build .73 setting stage. It sends
+no motor unlock, PC-mode, destination, or firmware command. Preserve a staged
+approach:
 1) establish BLE access,
 2) identify / validate Shimano session authentication,
 3) map authenticated configuration transport,
@@ -283,7 +284,7 @@ END HANDOFF NOTES
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Shimano E5000 US-region workflow</title>
+<title>Shimano E5000 bike-status check</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; }
   body { margin: 0; padding: 16px; max-width: 760px; margin-inline: auto; }
@@ -309,7 +310,7 @@ END HANDOFF NOTES
 </style>
 </head>
 <body>
-<h1>Shimano E5000 US-region workflow</h1>
+<h1>Shimano E5000 bike-status check</h1>
 <div class="muted" id="build"></div>
 <p>This guided command-only workflow checks the exact motor and firmware, unlocks Shimano's protected setting mode, safely identifies the accepted D4.5 staging frame, changes the OEM destination to US only after a complete stage, and reads it back. It does not install firmware or enter the bootloader.</p>
 <div class="card"><div class="kv">
@@ -321,7 +322,7 @@ END HANDOFF NOTES
 <div>2AF3 indications</div><div id="notify">—</div>
 <div>2AF4 challenge</div><div><code id="challenge">—</code></div>
 <div>Current region</div><div id="region">Not read</div>
-<div>US-region workflow</div><div id="regionStatus">Read bike information first</div>
+<div>US-region status</div><div id="regionStatus">Read bike information first</div>
 <div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div></div>
@@ -331,11 +332,11 @@ END HANDOFF NOTES
 <div class="muted" id="passkeyStatus">Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.</div>
 </div>
 <div class="card">
-<strong>Change region to US</strong>
-<p>Enter the passkey, keep the bike powered on and press the button once. If US is read back, fully power-cycle the bike and press it once more to verify persistence.</p>
-<div class="row"><button id="guidedUS" disabled>Connect, verify, and set US</button></div>
+<strong>Check the bike after the rejected setting command</strong>
+<p>Build 73 received error 3A when staging the unchanged lighting time. Enter the passkey and press once to verify the motor firmware and current region. This check does not enter PC mode or try to change the region.</p>
+<div class="row"><button id="guidedUS" disabled>Connect and check bike</button></div>
 <div id="guidedUSStatus" role="status">Enter the six-digit Shimano passkey.</div>
-<div class="muted">Command-only: no firmware image, erase, bootloader, or downgrade command is sent.</div>
+<div class="muted">No motor unlock, PC mode, region setter, firmware image, erase, bootloader, or downgrade command is sent by this check.</div>
 </div>
 <div class="card" hidden aria-hidden="true">
 <strong>Retired firmware preparation workflow</strong>
@@ -370,7 +371,7 @@ END HANDOFF NOTES
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-11.73';
+const BUILD = '2026-09-12.74';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2263,19 +2264,13 @@ function controls() {
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || session?.authenticated;
   $('guidedUS').disabled = busy || commandWorkflowRunning || !passkeyReady ||
-    (!connected&&(!navigator.bluetooth||!window.isSecureContext)) || commandRecord?.verified===true;
-  $('guidedUS').textContent = commandRecord&&!commandRecord.verified
-    ? (connected?'Verify US after power cycle':'Connect and verify US after power cycle')
-    : (connected?'Verify bike and set US':'Connect, verify, and set US');
-  $('guidedUSStatus').textContent = commandRecord?.verified
-    ? commandRecord.outcome==='us'
-      ? 'Complete: US persisted on the same D4.5.0/M4.4.8 motor after reconnect.'
-      : 'Complete: the post-reconnect read remained non-US. No destination retry was sent.'
-    : commandRecord
-      ? 'Fully power-cycle the bike, then press once to verify US on the same motor.'
-      : !passkeyReady
-        ? 'Enter the six-digit Shimano passkey.'
-        : 'Ready. The page will use BLE setting commands only; it will not install firmware.';
+    (!connected&&(!navigator.bluetooth||!window.isSecureContext));
+  $('guidedUS').textContent = connected?'Check bike status':'Connect and check bike';
+  $('guidedUSStatus').textContent = !passkeyReady
+    ? 'Enter the six-digit Shimano passkey.'
+    : connected && session?.batchDone && !busy
+      ? `Bike check complete: ${Number.isInteger(session.currentDestination)?regionName(session.currentDestination):'region not verified'}. Copy the log.`
+    : 'Ready to verify motor firmware and region. The rejected setting command will not be repeated.';
   $('bootProbe').disabled = busy || firmwareWorkflowRunning || !filesReady || !passkeyReady ||
     (!connected&&(!navigator.bluetooth||!window.isSecureContext)) ||
     workflowPlan.action==='complete'||workflowPlan.action==='inspect'||
@@ -2688,7 +2683,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 command path identified: authenticated PC mode 4 and Shimano’s lighting-time A0 stage are required before the US setter.';
+    return 'D4.5.0 confirmed; the unchanged-lighting A0 stage returned 3A in build 73. US change remains unverified.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -2797,7 +2792,7 @@ async function identifyDrive() {
       : 'Protected access requires the exact D4.5.0/M4.4.8 E50X0 pair and destination readback.';
     const readiness = results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'Command-only US path ready after protected motor unlock; success is not yet verified on the bike.'
+      : s.directWriteEligible ? 'D4.5.0 verified. A0 staging returned 3A in build 73; command-only US change remains under investigation.'
       : regionReadiness(model, firmware, destination);
     $('regionStatus').textContent = readiness;
     log(readiness);
@@ -3293,7 +3288,7 @@ async function continueCommandWorkflow() {
     $('passkey').focus();controls();return;
   }
   commandWorkflowRunning=true;controls();
-  log('--- guided command-only US workflow start; firmware and bootloader writes disabled ---');
+  log('--- guided bike-status check start; motor unlock and setting writes disabled ---');
   try {
     if(!session?.device.gatt.connected) {
       $('guidedUSStatus').textContent='Connecting to the bike…';
@@ -3313,31 +3308,13 @@ async function continueCommandWorkflow() {
       s=session;
       if(!s?.device.gatt.connected||!s.batchDone)throw new Error('Bike information check did not complete');
     }
-    if(probeRecord?.kind==='command-us-region') {
-      if(probeRecord.verified)return;
-      $('guidedUSStatus').textContent='US persistence was not verified. No destination retry was sent; copy the log.';
-      return;
-    }
-    if(s.currentDestination===1) {
-      $('guidedUSStatus').textContent='The bike already reports US. No destination write was sent.';
-      return;
-    }
-    if(!s.commandWriteEligible||!s.motorEligible||s.currentDestination!==0)
-      throw new Error('Exact D4.5.0/M4.4.8 EU baseline was not verified');
-    if(!s.motorAuthenticated) {
-      $('guidedUSStatus').textContent='Unlocking protected motor settings…';
-      await authenticateMotor();
-      s=session;
-      if(!s?.motorAuthenticated)throw new Error('Protected motor unlock did not complete');
-    }
-    if(!canSetUS(s))throw new Error('Guarded US transaction is not ready');
-    $('guidedUSStatus').textContent='Preserving settings and applying US once…';
-    await setUS();
+    $('guidedUSStatus').textContent=`Bike check complete: ${Number.isInteger(s.currentDestination)?regionName(s.currentDestination):'region not verified'}. Copy the log.`;
+    log(`Guided bike-status check: ${$('drive').textContent}; region ${Number.isInteger(s.currentDestination)?regionName(s.currentDestination):'unverified'}. No motor unlock or setting write sent.`);
   } catch(error) {
-    log(`Guided command-only US workflow stopped: ${error.message}`);
+    log(`Guided bike-status check stopped: ${error.message}`);
     $('guidedUSStatus').textContent=`Stopped: ${error.message}. Copy the log.`;
   } finally {
-    log('--- guided command-only US workflow end ---');
+    log('--- guided bike-status check end ---');
     commandWorkflowRunning=false;controls();
   }
 }
@@ -3770,7 +3747,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · guided US-region workflow`;
+$('build').textContent = `Build ${BUILD} · bike-status verification`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

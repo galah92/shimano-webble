@@ -1,104 +1,48 @@
 # Shimano WebBLE
 
-A single-file Web Bluetooth guided candidate workflow for Shimano STEPS. It
-checks the exact tested E5000 motor and D4.5.0/M4.4.8 firmware, completes the
-protected setting sequence found by decompiling D4.5.0 and Shimano's desktop
-library, attempts one US-destination write, and verifies it again after a power
-cycle. The primary workflow sends no firmware, erase, bootloader, or downgrade
-command.
+A single-file Web Bluetooth diagnostic page for Shimano STEPS. The current
+guided button verifies the tested E5000 motor, D4.5.0/M4.4.8 firmware, and
+current destination. It does not enter motor PC mode or attempt a region write.
+The earlier command-only US experiment remains in the source for offline
+analysis and synthetic regression tests.
 
 **Live site:** https://galah92.github.io/shimano-webble/
 
-## Current next step (build .73)
+## Current result (build .73)
 
-Decompilation explains the earlier `00 16 AB 3A 00` results. The D4.5.0
-destination setter is present and has no firmware-version gate. It returns
-`3A` when protected PC mode 4/5 and the one-shot setting stage are absent or
-when persistence fails.
+The bike reported the wireless application slot `0D`, D4.5.0/M4.4.8 firmware,
+and EU destination. Motor authentication and regulation unlock completed, and
+the motor acknowledged normal PC mode 1 and authenticated mode 4. Build .73
+then read lighting time 10 and sent Shimano's seven-byte unchanged-lighting
+stage, `00 16 A0 0A 00 FF FF`. The motor rejected that stage with `A3 3A`.
+The page exited PC mode and disconnected; it never sent the US destination
+command `A8`. The user observed a screen reset during the process, but the
+compact log does not establish exactly when it happened or whether bike power
+was interrupted.
 
-The .68 through .71 bike tests validated the live slot and protected lifecycle:
-the motor reported slot `0D` and returned exact completions for modes 1 and 5.
-Build .72 then validated the separately keyed authenticated mode 4. Its
-nine-byte `A0` experiment returned `A3 3A`, so the destination command remained
-unsent and the bike stayed at EU.
+The D4.5.0 A0 handler can reject a command if its PC-mode state is no longer
+active or its internal target field is unexpected. The mode-4 acknowledgement
+does not prove the mode remained active at the instant A0 ran. We are tracing
+that gap before another setting experiment. The US region and assistance speed
+are not verified.
 
-The live `AC 01` destination query corrects the earlier firmware-field mapping:
-the D handler accepts that query even though its byte at normalized offset `+4`
-must be zero. That byte is the motor target address, while public command
-parameters start at `+5`. The D4.5.0 `A0` handler therefore consumes Shimano's
-ordinary four lighting-time parameters plus one bridge-supplied byte; it does
-not require a public zero selector or a five-byte BLE record. Both the Android
-and desktop applications construct the same seven-byte frame:
-`00 16 A0 <low> <high> FF FF`.
-
-Build .70 tested that official frame in mode 5. Build .72 tested mode 4 with a
-nine-byte frame. Build .73 combines the two established halves for the first
-time: it requires the exact mode-4/slot-`0D` completion, reads only the declared
-16-bit lighting value from `A4/A6`, and sends one same-value seven-byte `A0`
-stage. That stage only updates the transient RAM candidate; it does not persist
-a region. Any rejection exits PC mode without sending `A8`.
-
-The destination command is the exact five-byte form used by Shimano Android
-eTuning 3.0.7: `00 16 A8 01 01`. The page stores a salted same-device
-verification record immediately before `A8`, reads destination selector 1 back,
-and exits protected mode on every path. A later tap after fully power-cycling
-the bike performs readback only and never retries the setter.
-
-Open the live site, enter the six-digit Shimano passkey, and press **Connect,
-verify, and set US**. If the page reports immediate US readback, fully power the
-bike off and on and press the same button once more. Success requires the same
-D4.5.0/M4.4.8 motor pair and US value `1` in that different BLE session.
-Assistance speed must be measured separately.
-
-This is a statically supported candidate and is fully exercised against a
-synthetic BLE device. Modes 1, 4 and 5, slot `0D`, motor authentication, and the
-regulation unlock are verified on the bike; the corrected `A0` stage, `A8`
-commit, and persistence still require one controlled bike run. The retired firmware preparation implementation
-remains hidden and inert for regression and recovery reference; it is not used
-by the primary workflow.
-
-## Use
+## Use build .74
 
 Open the site in Chrome on Android, enable Bluetooth, make the Shimano endpoint
-discoverable, enter the six-digit passkey, and tap **Connect, verify, and set
-US**. That is the only control needed for the command-only workflow. It connects,
-authenticates, verifies the exact baseline, completes the protected motor
-sequence, sends at most one destination write, and reports the readback.
+discoverable, enter the six-digit passkey, and tap **Connect and check bike**.
+The button authenticates the BLE session and reads motor identity, firmware,
+and destination. It does not perform motor unlock, PC-mode entry, a setting
+write, or a firmware command. Copy the compact log after it reports the result.
 
-The controls under **Advanced diagnostics** expose those stages individually
-for investigation. The initial connection subscribes to 2AF3 indications and
-probes 2AF4, 2AF6, and 2AF7 without application writes.
+The controls under **Advanced diagnostics** expose earlier read and
+session-authentication steps. The destination setter is disabled in the UI.
+The previous setting workflow remains only for offline analysis and synthetic
+regression tests. The retired firmware preparation implementation is hidden
+and inert.
 
-To test session access, enter the six-digit passkey configured in E-TUBE and tap
-**Authenticate session**. This sends the two reconstructed authentication
-messages, waits for their acknowledgements, then waits 500 ms and checks whether
-2AF7 identifies the SC-E7000. If the read fails, it sends the captured `FF 00`
-setup command to 2AFF once, waits another 500 ms, and checks again. The passkey is used locally, cleared after the attempt, and never
-saved or logged. **Copy log** exports the diagnostic results for analysis.
-
-Build .4 verified both authentication stages and SC-E7000 identification on the
-real bike after the captured setup command. If authentication fails, reconnect
-before retrying.
-
-Tap **Read region and compatibility** after session verification.
-It runs the verified connection setup plus an experimental seven-step setup
-sequence found in both supplied eTuning versions. It then reads motor information
-and destination slots against the US target (value 1). Replies are required at
-every setup step; AF/3A stops destination checks with the region unknown.
-Keep Chrome foregrounded until **information batch end**, then copy the log.
-Allow up to 80 seconds if queries go unanswered.
-
-Build .7 confirmed motor communication and reported E50X0 / 4.5.0. Builds .15
-and .16 received AB/3A after an incomplete motor/setting sequence, and the next
-connection still reported EU. Later D4.5.0 decompilation established that `3A`
-is the setter's missing-state branch. Build .73 enables the current guarded
-command candidate on the exact D4.5.0/M4.4.8 baseline. The US-region goal remains
-incomplete until the bike reports US after the write and again after a power
-cycle.
-
-Build .16 returned seven zero model-descriptor bytes. Together with series 22
-and unit 00, this matches the base DU-E5000 entry in the older desktop model
-table. It does not certify a particular firmware image's compatibility.
+The US-region goal remains incomplete until a future command path yields US
+readback on the same motor and that value persists after a physical power
+cycle. Assistance cutoff requires a separate physical measurement.
 
 ## Develop
 

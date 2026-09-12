@@ -272,7 +272,7 @@ class RegionWriteTests(unittest.TestCase):
         self.assertTrue(record['verified'])
         self.assertEqual(record['outcome'],'us')
         self.assertIn('US destination persisted',self.page.locator('#log').inner_text())
-        self.assertTrue(self.page.locator('#guidedUS').is_disabled())
+        self.assertFalse(self.page.locator('#guidedUS').is_disabled())  # Read-only status check remains available.
 
     def test_non_us_persistence_result_is_terminal_and_never_retries(self):
         self.prepare(after=0);self.run_attempt()
@@ -293,7 +293,7 @@ class RegionWriteTests(unittest.TestCase):
         self.assertEqual(record['outcome'],'not-us')
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),destination_writes)
         self.assertIn('US did not persist. No retry sent',self.page.locator('#log').inner_text())
-        self.assertTrue(self.page.locator('#guidedUS').is_disabled())
+        self.assertFalse(self.page.locator('#guidedUS').is_disabled())  # No destination retry is reachable from the UI.
 
 
 if __name__=='__main__':
