@@ -1,0 +1,13 @@
+# Local Python/browser test state
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Vendor packages, firmware, and private capture exports: use ASSETS.md hashes.
+*.apk
+*.xapk
+*.dat
+*.zip
+*.log
+bugreport*
+btsnoop*

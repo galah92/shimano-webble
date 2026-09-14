@@ -1,0 +1,11 @@
+Source: user-supplied eTuning 3.0.7 XAPK, decompiled classes.dex,
+       defpackage/C0545qj.java, method a(), switch case 0.
+Exact source-package SHA-256: see source-artifact-hashes.json.
+
+Relevant packet constructor (JADX expression):
+    new byte[]{0, 22, -88, 1, (byte) i}
+where i = c0610sj.k (requested region value).
+
+Interpretation: 00 16 A8 01 <destination>. The shown call site sends A8 directly;
+it does not call the lighting-time A0 setter first. This is client-side evidence,
+not proof that this tested bike accepts A8 after its particular PC-mode sequence.

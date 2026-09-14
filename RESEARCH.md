@@ -1,5 +1,9 @@
 # Shimano US-region workflow investigation
 
+For the current takeover summary and asset policy, start with [HANDOFF.md](HANDOFF.md)
+and [ASSETS.md](ASSETS.md). This document is a chronological notebook; older
+plans and interpretations below are retained as history, not current advice.
+
 Current status (2026-09-12, build .74): SC-E7000 display; motor reports
 E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU before the latest
 experiment. D4.5.0 implements the US destination setter but gates it on PC
@@ -136,12 +140,14 @@ preparation is implemented. Next: verify the drive-unit identity and firmware
 on the actual bike, then trace configuration authorization and the modern
 app's preparation decision separately.
 
-## Private analysis location
+## Analysis artifacts and privacy
 
-Original files remain in the user's home directory. Extracted APKs, decompiled
-code, capture data, hashes, and an offline browser/capture verifier are in
-`~/shimano-analysis/`, outside this public repository. No raw capture,
-user passkey, device address, or captured authentication ciphertext is committed.
+The selected protocol analysis outputs and source-artifact hashes needed for
+this handoff are committed under [`docs/evidence/`](docs/evidence/). Retrieval
+sources, exact hashes, and excluded large/private artifacts are listed in
+[`ASSETS.md`](ASSETS.md). This repository does not require the former private
+analysis folder. No raw capture, user passkey, device address, or captured
+authentication ciphertext is committed.
 
 ## Live result and build 2026-09-09.4
 
@@ -360,9 +366,10 @@ In eTuning 3.0.7, `w.z` checks `Gh.w` before taking its direct BLE region-write
 path; failing this check routes to firmware/preparation activity `f91a2`.
 `Gh.a` maps DUE50X0 into `Fh.k` (E5000 family, ordinal 10). `Gh.D` allows
 that family's direct path only at firmware integer 430. `Gh.x`, `Gh.g` and
-`Gh.k` contribute the other conditions. A private standalone Java harness
-executing the extracted methods (`~/shimano-analysis/VerifyPolicy.java`)
-confirmed: DUE50X0/430 -> direct gate true; DUE50X0/450 -> false.
+`Gh.k` contribute the other conditions. A standalone Java harness executing
+the extracted methods confirmed: DUE50X0/430 -> direct gate true;
+DUE50X0/450 -> false. Its historical result is recorded here; the harness is
+not a current handoff dependency.
 
 This is the app's policy, not proof that the bike would reject an unsupported
 write or that a downgrade is safe. The policy establishes 4.3.0 as a concrete
