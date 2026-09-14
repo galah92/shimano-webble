@@ -3144,3 +3144,20 @@ If .77 also fails across its samples, the live PC-mode window is provably shorte
 than a single BLE command round-trip and phone-only region-set is not achievable
 on D4.5.0. The reliable paths are then the wired SM-PCE adapter (writes
 destination=US directly, no downgrade) or a firmware downgrade.
+
+## Build .77 live result: phone-only conclusively ruled out
+
+The 2026-09-14 run drove four grant-and-burst cycles, all identical: PC mode 1
+and PC mode 4 completed each time, then `A0` was rejected `A3 3A` at **59, 67,
+63, and 59 ms** after the mode-4 completion (the pipelined `A8` returned `AB` at
+134–212 ms, moot). Region stayed EU on every cycle.
+
+The PC-mode window is therefore consistently shorter than the first BLE
+command's round-trip (~60 ms) and is **deterministic across samples, not
+phase-dependent**. Pipelining and retries cannot help, because `A0` itself
+cannot land before the SC-E7000 reclaims the motor's global PC-mode state. This
+**conclusively rules out phone-only region-set on D4.5.0** over the SC-E7000
+bridge. The reliable paths are the wired SM-PCE adapter (E-TUBE Professional
+writes destination=US directly, no firmware downgrade) or a firmware downgrade.
+Do not iterate further phone-only builds; the ~60 ms reclaim is a bus-ownership
+property of the display, not something a Web Bluetooth client can outrun.

@@ -27,10 +27,14 @@ connected — the SC-E7000 reclaims the motor's single global PC-mode state with
 one of its own poll cycles, faster than the first BLE command after the grant
 can land. This refuted the watchdog-reset theory and matches every commercial
 tool's position that the latest E5000 firmware cannot change region over BLE.
-Build 77 makes the best remaining phone-only attempt (pipelined `A0`→`A8` burst
-plus per-run retries to sample the window). If it also fails, phone-only is
-ruled out on D4.5.0 and the reliable paths are the wired SM-PCE adapter or a
-firmware downgrade.
+Build 77 made the best remaining phone-only attempt (pipelined `A0`→`A8` burst
+plus per-run retries) and its 2026-09-14 live run **conclusively ruled out
+phone-only**: across four cycles `A0` was rejected `A3 3A` at 59–67 ms after each
+mode-4 grant, deterministic, region unchanged. The ~60 ms reclaim is shorter
+than one BLE command round-trip, so no phone-only build can win. The reliable
+paths now are the wired SM-PCE adapter (E-TUBE Professional writes destination=US
+directly, no downgrade) or a firmware downgrade. Do not iterate phone-only
+builds further.
 
 The public page at <https://galah92.github.io/shimano-webble/> (source
 [`index.html`](index.html), build `2026-09-14.77`) offers a guided **Connect and
