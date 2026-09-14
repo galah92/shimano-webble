@@ -19,15 +19,23 @@ comes from the packet's leading `00`, so every past `A0` already had a valid
 offset+4 — **the `A3 3A` was never a framing problem**; and (2) the phone's
 cat-0x32 PC-mode commands do reach the motor (not answered locally by the
 display), so the motor genuinely enters mode 4. The remaining blocker is that
-the motor's PC mode 4/5 is not live when `A0` lands, dominated by the display's
-own hardware watchdog reset (the screen reset seen in build 73). Build 76
-re-enables a tightened, instrumented mode-4 burst attempt; the next step is one
-carefully watched bike test, not more offline framing analysis.
+the motor's PC mode 4/5 is not live when `A0` lands. The build-76 live test
+(2026-09-14) is decisive on the mechanism: after a real mode-4 completion, `A0`
+was rejected `A3 3A` about 74 ms later **with the BLE link still up and no
+display reset**. So the mode is cleared within roughly 55 ms of the grant while
+connected — the SC-E7000 reclaims the motor's single global PC-mode state within
+one of its own poll cycles, faster than the first BLE command after the grant
+can land. This refuted the watchdog-reset theory and matches every commercial
+tool's position that the latest E5000 firmware cannot change region over BLE.
+Build 77 makes the best remaining phone-only attempt (pipelined `A0`→`A8` burst
+plus per-run retries to sample the window). If it also fails, phone-only is
+ruled out on D4.5.0 and the reliable paths are the wired SM-PCE adapter or a
+firmware downgrade.
 
 The public page at <https://galah92.github.io/shimano-webble/> (source
-[`index.html`](index.html), build `2026-09-14.76`) offers a guided **Connect and
+[`index.html`](index.html), build `2026-09-14.77`) offers a guided **Connect and
 check bike** action that authenticates the BLE session and reads identity,
-firmware and region only. Build 76 also re-enables the region setter under the
+firmware and region only. Build 77 re-enables the region setter under the
 **Advanced diagnostics** section as a bounded, instrumented attempt: after
 connect → authenticate session → read region/compatibility → authenticate motor,
 the **Set region to US** button becomes enabled (gated by `canSetUS`: exact
@@ -104,28 +112,30 @@ superseded.
 
 ## What could move the goal forward
 
-The offline bridge mapping that the prior handoff called for is now **done**
-(build 76, `RESEARCH.md` final section,
-[`docs/evidence/bridge-analysis.md`](docs/evidence/bridge-analysis.md)). It cleared the framing dead-end and localized the blocker to
-PC mode 4/5 not being live when `A0` is processed, dominated by the SC-E7000's
-own watchdog reset. The strongest next work is therefore **one instrumented live
-test** of build 76's tightened burst, which is both an attempt and a diagnostic:
+The offline bridge mapping is **done** (build 76,
+[`docs/evidence/bridge-analysis.md`](docs/evidence/bridge-analysis.md)) and the
+build-76 live test settled the mechanism: PC mode 4 is granted but the SC-E7000
+reclaims the motor's global PC-mode state within ~55 ms, connected, so the first
+`A0` after the grant is already too late. Build 77 is the best and last
+phone-only lever: pipeline `A0`→`A8` (wait only for `A0`'s ATT write-response,
+not its motor reply, so both land in one round-trip) and retry the mode-4 →
+burst cycle up to `usBurstAttempts` times per run to sample the display's poll
+phase. Each attempt logs the `A0`/`A8` reply timing relative to the mode-4
+completion.
 
-- If `A0` is accepted, `A8` follows in the same window and the region should read
-  back as US; then a physical power cycle checks persistence and a separate ride
-  measures the assistance cutoff.
-- If `A0` returns `A3 3A` with the BLE link still up, the motor dropped
-  privileged mode silently (mode timeout or an unmodeled clear) — the model
-  needs revisiting.
-- If the BLE link drops during the burst, the display reset is confirmed as the
-  cause; the open question is then whether PC-mode entry deterministically
-  provokes that reset (if so, a phone-only burst may never win and the wired
-  SM-PCE adapter or a firmware downgrade becomes the realistic path).
+- If a sample lands both commands before the reclaim, the region reads back US;
+  then a physical power cycle checks persistence and a separate ride measures
+  the assistance cutoff.
+- If every sample still returns `A3`/`AB` with the link up, the live window is
+  provably shorter than one BLE command round-trip. Phone-only region-set is
+  then not achievable on D4.5.0, and the realistic paths are the wired SM-PCE
+  adapter (writes destination=US directly, no downgrade) or a firmware
+  downgrade. Do not keep iterating phone-only builds past this point.
 
-The build logs the elapsed time from mode-4 completion to `A0` and distinguishes
-these branches. Only after this test should further offline work (e.g.
-obtaining the SC-E7000 **bootloader** image, where the watchdog logic lives) be
-considered. Asset sources and hashes are in [`ASSETS.md`](ASSETS.md).
+Further offline work (e.g. the SC-E7000 **bootloader** image, where the watchdog
+logic lives) would only matter if a future goal needs it; it does not unblock
+the ~55 ms reclaim, which is a bus-ownership property, not a watchdog. Asset
+sources and hashes are in [`ASSETS.md`](ASSETS.md).
 
 Only after a candidate is tied to new evidence should a new live test be
 prepared. It must identify the exact same motor/firmware, send at most the

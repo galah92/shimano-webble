@@ -22,8 +22,10 @@ class RegionWriteTests(unittest.TestCase):
         self.assertTrue(self.page.locator('#setUS').is_disabled())
         self.page.evaluate('''async opts => {
           window.commandDelay=async()=>{};
+          usBurstAttempts=opts.usBurstAttempts??1;
           window.regionWrites=[];window.regionReads=0;window.secureWords=0;
           window.secureWordsByMode={1:0,4:0};window.currentPcMode=0;window.currentPcSlot=0;
+          window.a0Staged=false;window.regionChanged=false;window.pcCycle=0;
           if(opts.storageFailure){
             const original=Storage.prototype.setItem;
             Storage.prototype.setItem=function(k,v){
@@ -48,13 +50,13 @@ class RegionWriteTests(unittest.TestCase):
             if(p[1]===0x32&&p[2]===0x10) {
               currentPcSlot=p[4];
               if(p[3]===1) {
-                currentPcMode=1;
+                currentPcMode=1;secureWordsByMode[1]=0;
                 if(opts.mode1RequestFailure)throw Error('Normal PC-link request ATT failure');
                 if(opts.mode1PreKeyStatus)emit([0,0x32,0x12,1,currentPcSlot]);
                 return;
               }
               if(p[3]===4) {
-                currentPcMode=4;
+                currentPcMode=4;secureWordsByMode[4]=0;window.pcCycle++;window.a0Staged=false;
                 if(opts.modeRequestFailure||opts.mode4RequestFailure)throw Error('Authenticated PC mode request ATT failure');
                 return;
               }
@@ -91,8 +93,9 @@ class RegionWriteTests(unittest.TestCase):
               regionReads++;
               if(opts.readbackWriteFailure&&regionReads===2)throw Error('Readback ATT failure');
               if(opts.shortBefore&&regionReads===1){emit([0,0x16,0xae,1]);return;}
+              const afterValue=opts.after!==undefined?opts.after:(window.regionChanged?1:0);
               emit([0,0x16,0xae,0,1,0x10,0x20,0x30,0x40,0xff]);
-              emit([0,0x16,0xae,1,regionReads===1?(opts.before??0):(opts.after??1),0x21,0x43,0x65,0x87,0xff]);
+              emit([0,0x16,0xae,1,regionReads===1?(opts.before??0):afterValue,0x21,0x43,0x65,0x87,0xff]);
               return;
             }
             if(p[2]===0xa4) {
@@ -103,7 +106,10 @@ class RegionWriteTests(unittest.TestCase):
             }
             if(p[2]===0xa0) {
               if(opts.stageWriteFailure&&(opts.stageFailureLength??7)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
-              emit((opts.stageReject&&(opts.stageFailureLength??7)===p.length)?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
+              const reject=(opts.stageReject&&(opts.stageFailureLength??7)===p.length)||
+                (opts.succeedOnAttempt&&window.pcCycle<opts.succeedOnAttempt);
+              window.a0Staged=!reject;
+              emit(reject?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
               return;
             }
             if(p[2]===0xa8) {
@@ -112,8 +118,12 @@ class RegionWriteTests(unittest.TestCase):
                   record.expected?.destination!==1||record.verified)
                 throw Error('Missing pending restart record before setter');
               if(opts.destinationWriteFailure){emit([0,0x16,0xaa]);throw Error('Destination ATT failure');}
-              emit([0,0x16,0x20,0x4f,0]);
-              emit(opts.destinationReject?[0,0x16,0xab,opts.destinationReject]:[0,0x16,0xaa]);
+              const staged=window.a0Staged;window.a0Staged=false;
+              // A8 changes the region only when A0 staged the one-shot flag in
+              // the same live PC-mode window; otherwise the motor returns 3A and
+              // nothing changes (a harmless blind A8).
+              if(staged&&!opts.destinationReject){window.regionChanged=true;emit([0,0x16,0x20,0x4f,0]);emit([0,0x16,0xaa]);}
+              else emit([0,0x16,0xab,opts.destinationReject||0x3a]);
               return;
             }
             throw Error(`Unexpected opcode ${p[2]}`);
@@ -169,15 +179,34 @@ class RegionWriteTests(unittest.TestCase):
         ])
         self.assertIn('MILESTONE: US (1) read back',self.page.locator('#log').inner_text())
         self.assertIn('using wireless slot 0D',self.page.locator('#log').inner_text())
-        self.assertIn('unchanged lighting time accepted in authenticated mode 4',self.page.locator('#log').inner_text())
+        self.assertIn('A0 stage then A8 US as one burst',self.page.locator('#log').inner_text())
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
 
-    def test_a0_failure_stops_before_destination_write(self):
+    def test_a0_rejection_still_bursts_harmless_a8_and_changes_nothing(self):
+        # Build 77 pipelines A0 then A8 without waiting for A0's reply, so a
+        # rejected A0 still sends A8 — but with no staged flag the motor returns
+        # 3A and the region does not change.
         self.prepare(stageReject=True,stageFailureLength=7);self.run_attempt()
         packets=self.packets()
-        self.assertFalse(any(p[2]==0xa8 for p in packets))
-        self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
         self.assertEqual([len(p) for p in packets if p[2]==0xa0],[7])
+        self.assertEqual(sum(p[2]==0xa8 for p in packets),1)
+        log=self.page.locator('#log').inner_text()
+        self.assertIn('RX A0 A3',log)
+        self.assertIn('RX A8 AB',log)
+        self.assertNotIn('MILESTONE: US',log)
+        self.assertFalse(self.page.evaluate('window.regionChanged'))
+        self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
+
+    def test_retry_succeeds_on_a_later_cycle_and_sets_us_once(self):
+        # PC mode 4 survives long enough only on the 2nd sampled cycle.
+        self.prepare(usBurstAttempts=3,succeedOnAttempt=2);self.run_attempt()
+        packets=self.packets()
+        log=self.page.locator('#log').inner_text()
+        self.assertIn('MILESTONE: US (1) read back',log)
+        self.assertIn('Retry 2/3',log)
+        self.assertEqual(sum(p[:4]==[0,0x32,0x10,4] for p in packets),2)
+        self.assertEqual(sum(p[2]==0xa8 for p in packets),2)
+        self.assertTrue(self.page.evaluate('window.regionChanged'))
 
     def test_restart_record_is_durable_before_the_only_destination_write(self):
         self.prepare();self.run_attempt()
@@ -220,7 +249,7 @@ class RegionWriteTests(unittest.TestCase):
         in_mode=(
             {'mode1RequestFailure':True}, {'mode1Reject':True},
             {'mode4RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
-            {'stageWriteFailure':True}, {'stageReject':True},
+            {'stageWriteFailure':True},
         )
         for options in in_mode:
             with self.subTest(options=options,phase='in-mode'):

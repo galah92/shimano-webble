@@ -3109,3 +3109,38 @@ Still unverified on the bike: whether the tightened window beats the reset;
 whether PC-mode entry deterministically triggers the display reset (if it does,
 the burst may still lose, which itself is the decisive next data point); and
 persistence plus the actual assistance-speed change after a physical power cycle.
+
+## Build .76 live result and .77 pipelined burst
+
+The 2026-09-14 bike run on build .76 completed session authentication, SC-E7000
+identification, the EU baseline, motor authentication with the `E8`/`EA` unlock,
+PC mode 1 completion on wireless slot `0D`, and PC mode 4 completion. `A0` was
+then rejected `A3 3A` about 74 ms after the mode-4 completion, **with the BLE
+link still up** — no disconnect and no display reset this run.
+
+Because the framing is verified correct (offset+4 = the leading `0`), the `A0`
+handler's only other gate — active PC mode 4/5 — was not satisfied: the motor's
+PC mode was cleared within roughly 55 ms of the grant while still connected.
+This **refutes the build-76 hypothesis** that the display's watchdog reset is
+what drops the mode; there was no reset here. The evidence instead points to the
+SC-E7000 continuously owning the motor's single global PC-mode byte over the
+shared internal bus and reclaiming it within one of its own poll cycles (tens of
+ms), fast enough that the first BLE command after the grant is already too late.
+This matches the commercial tools' position that the latest E5000 firmware
+cannot change region over BLE, and it contradicts the earlier analyst claim that
+a stable session does not clobber the mode.
+
+Build .77 makes the best remaining phone-only attempt:
+
+1. **Pipeline `A0` then `A8`** back-to-back, waiting only for `A0`'s ATT
+   write-response, not the motor's `A0` notification, so both land within one
+   BLE round-trip. Sending `A8` without a confirmed `A0` accept is harmless: with
+   no staged flag the motor returns `3A` and nothing changes.
+2. **Retry the mode-4 → burst cycle** up to four times per run (`usBurstAttempts`)
+   to sample the display's poll phase, stopping on a US readback. Each attempt
+   logs the `A0`/`A8` reply and its timing relative to the mode-4 completion.
+
+If .77 also fails across its samples, the live PC-mode window is provably shorter
+than a single BLE command round-trip and phone-only region-set is not achievable
+on D4.5.0. The reliable paths are then the wired SM-PCE adapter (writes
+destination=US directly, no downgrade) or a firmware downgrade.
