@@ -84,14 +84,14 @@
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">The region setter is disabled while its required command sequence remains unverified.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Enabled after motor authentication on the verified D4.5.0/M4.4.8 pair at EU. It enters PC mode, then fires A0 then A8 as one fast burst inside the live mode-4 window, reads the region back, and exits. It sends one destination command at most, then reads back; it never changes firmware. Persistence still needs a power cycle.</div></div>
 </details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-14.75';
+const BUILD = '2026-09-14.76';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1980,7 +1980,7 @@ function controls() {
   $('probe').disabled = busy || !connected;
   $('authenticate').disabled = busy || !connected || session?.authenticated || !crypto.subtle;
   $('motorAuth').disabled = busy || !connected || !session?.motorEligible || session?.motorAttempted;
-  $('setUS').disabled = true;
+  $('setUS').disabled = busy || !canSetUS(session);
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || session?.authenticated;
   $('guidedUS').disabled = busy || commandWorkflowRunning || !passkeyReady ||
@@ -2403,7 +2403,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 confirmed; the unchanged-lighting A0 stage returned 3A in build 73. US change remains unverified.';
+    return 'D4.5.0 confirmed. Build 76 corrects the model: A0 framing was always valid; the 3A came from PC mode lapsing before A0. A tightened mode-4 burst attempt is available under Advanced diagnostics.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -2512,7 +2512,7 @@ async function identifyDrive() {
       : 'Protected access requires the exact D4.5.0/M4.4.8 E50X0 pair and destination readback.';
     const readiness = results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'D4.5.0 verified. A0 staging returned 3A in build 73; command-only US change remains under investigation.'
+      : s.directWriteEligible ? 'D4.5.0 verified. Build 76: A0 framing confirmed valid; the 3A was PC mode lapsing before A0. Authenticate the motor, then use Set region to US for the tightened mode-4 burst attempt.'
       : regionReadiness(model, firmware, destination);
     $('regionStatus').textContent = readiness;
     log(readiness);
@@ -2932,21 +2932,21 @@ async function setUS() {
       log($('regionStatus').textContent);
       return;
     }
-    $('regionStatus').textContent = 'Establishing normal PC link…';
-    pcModeTouched=true;
-    await enterPcMode1(s);
-    assertCurrent(s);
-    $('regionStatus').textContent = 'Entering authenticated setting mode…';
-    await enterPcMode4(s);
-    assertCurrent(s);
-    log('Authenticated PC mode 4 accepted by the motor.');
+
+    // Read the current lighting time BEFORE entering PC mode. A0/A8 both require
+    // active PC mode 4/5, but the A4 lighting read does not, so keeping it out of
+    // the privileged window leaves only the A0 -> A8 pair inside it. Firmware
+    // analysis (build 76) established that the A0 rejection was never a framing
+    // problem: the motor's target byte comes from the packet's leading 0x00, so
+    // offset+4 was always 0. A3/3A means PC mode 4 was not live when A0 arrived,
+    // consistent with the SC-E7000 display's watchdog reset clearing the motor's
+    // privileged mode. The shorter the live window, the less chance a reset lands
+    // between the mode-4 completion and the A8 write.
     const lightingTime=await readLightingTime(s);
     assertCurrent(s);
-    await stageLightingTime(s,lightingTime);
-    assertCurrent(s);
 
-    // Save a salted same-device restart expectation after every prerequisite
-    // succeeds and immediately before the one state-changing destination write.
+    // Save the salted same-device restart expectation BEFORE the privileged
+    // window too, so nothing delays the A0 -> A8 pair once mode 4 is live.
     const salt=crypto.getRandomValues(new Uint8Array(16)),saltHex=hex(salt).replaceAll(' ','').toLowerCase();
     try {
       const record={version:2,kind:'command-us-region',connection:s.probeToken,salt:saltHex,
@@ -2956,9 +2956,33 @@ async function setUS() {
       probeRecord=record;
       log('US restart expectation saved for this browser-selected motor; US write and persistence still unverified.');
     } finally {salt.fill(0);}
+
+    $('regionStatus').textContent = 'Establishing normal PC link…';
+    pcModeTouched=true;
+    await enterPcMode1(s);
+    assertCurrent(s);
+    $('regionStatus').textContent = 'Entering authenticated setting mode…';
+    await enterPcMode4(s);
+    assertCurrent(s);
+    const mode4At=performance.now();
+    log('Authenticated PC mode 4 accepted by the motor. Sending A0 then A8 immediately to stay inside the live PC-mode window.');
     // From here, failures cannot establish whether the stored value changed.
     s.currentDestination = undefined;
     $('region').textContent = 'Write in progress; value unverified';
+    $('regionStatus').textContent = 'Staging then writing US destination…';
+    // TIGHT BURST: stage the one-shot flag (A0), then the region write (A8),
+    // with no reads or delays between the mode-4 completion and A8.
+    try {
+      await stageLightingTime(s,lightingTime);
+    } catch (stageError) {
+      const elapsed=Math.round(performance.now()-mode4At);
+      const dropped=/Disconnected/.test(stageError.message);
+      throw new Error(`${stageError.message} (A0 sent ${elapsed} ms after mode-4 completion). ` + (dropped
+        ? 'The BLE link dropped during A0, consistent with an SC-E7000 watchdog reset clearing the motor PC mode before the write.'
+        : 'Packet framing is verified correct (target byte 0), so a 3A here means the motor PC mode 4 was no longer active when A0 was processed — the privileged mode was cleared with the BLE link still up.'));
+    }
+    assertCurrent(s);
+    log(`A0 accepted ${Math.round(performance.now()-mode4At)} ms after mode-4 completion; sending A8 now.`);
     $('regionStatus').textContent = 'Attempting US destination…';
     const reply = await writeUsDestination(s,before);
     assertCurrent(s);

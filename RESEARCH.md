@@ -3022,3 +3022,90 @@ The local E-TUBE metadata lists Shimano's SC-E7000 4.1.0 display image as
 published Shimano URL returned HTTP 403 on 2026-09-12, so display bridge
 firmware could not yet be compared with the live A0 response. No alternative
 image was assumed equivalent.
+
+## Build .75→.76: SC-E7000 bridge image recovered; A0 framing cleared; mode-loss is the real blocker
+
+### The missing display image was obtained and reverse-engineered
+
+The SC-E7000 4.1.0 display bridge image (`SCE7000.4.1.0.dat`, 126,508 bytes,
+catalog MD5 `4974d4f471b126be9f9657510e6bef55`) was downloaded on 2026-09-14.
+The Akamai edge returns HTTP 403 to a plain GET, but sending the E-TUBE app
+User-Agent (`E-TUBE PROJECT Cyclist/4.1.0 (Android)`) reaches the AmazonS3
+origin and returns the full image; the MD5 matches the catalog exactly. It is
+plaintext ARM Cortex-M (entropy 6.77), loaded at base `0x8000`. It is kept
+private and is not committed (see `ASSETS.md`).
+
+### What the bridge does with drive-unit commands
+
+- **No per-opcode filtering.** The display has no command-id literals for
+  `A0`/`A8`/`AC`; it never originates them and has no code to intercept or
+  rewrite them. They reach the motor through a raw, verbatim forward path
+  (`0x25bb2`→`0x257c4`), which copies the command content byte-for-byte and
+  prepends only two bus-node bytes.
+- **Motor offset+4 is the packet's leading byte, not the first parameter.**
+  Verified byte map: motor offset +2/+3 = phone bytes b1/b2 (category/opcode),
+  offset +4 = phone b0 (the leading slot/target byte), offset +5.. = phone
+  b3, b4, …  This reconciles with the known-working region read `00 16 AC 01`:
+  its leading `00` lands at offset+4 (the value the `AC` handler requires to be
+  0) and the selector `01` lands at offset+5. **Consequence: every `A0` packet
+  sent in builds .68–.73 already had offset+4 == 0. The `A3 3A` rejection was
+  never a target-byte or framing problem.** An earlier analyst model that put
+  the first parameter at offset+4 was falsified by the `AC 01` read, which would
+  then have been rejected but is accepted every session.
+- **PC-mode commands are forwarded to the motor, not answered locally.** The
+  display's own cat-0x32 handler table (`0x21844`, dispatch `0x1964a`) belongs
+  to its connection/handshake state machine for the display's own DU link; it is
+  not the phone-inbound handler and contains no code to synthesize a motor
+  secure-word reply or a slot-routed opcode-0x12 completion. The DU→phone path
+  (`0x131c6`/`0x131e0`→BLE notify `0x10bf4`) tunnels the motor's raw reply words
+  straight back. This matches the live evidence that app-slot `00` produced no
+  completion while slot `0D` did: that is the motor's secure-handler slot
+  routing. So the motor genuinely enters PC mode 4 when the phone drives it.
+
+### Therefore the blocker is PC mode 4/5 not being live when A0 lands
+
+Because offset+4 was always 0, an `A3 3A` from the `A0` handler means only its
+other gate failed: PC mode was not 4 or 5 at the instant `A0` was processed,
+even though a mode-4 completion had just been received. A stable connected
+session does not clobber the motor's active-mode byte — the display sends no
+periodic cat-0x32 mode traffic during steady state (steady state is cat-0x16
+polling). The active-mode byte is knocked out on a (re)connection event,
+dominantly the display's own reset: the app image contains no software-reset
+(no `AIRCR`/`VECTKEY`) and no runtime re-init path, so the screen reset the user
+observed in build .73 is a hardware watchdog/brown-out re-entering via the
+bootloader (the WDT refresh lives in the bootloader, not this app image). A
+reset is abrupt and silent to the motor, which then times out mode 4/5 on its
+own. Whether PC-mode entry itself provokes the reset is unresolved from the app
+image alone (the watchdog behavior is in the bootloader) and is the key open
+question for the live test.
+
+### Market/speed premise confirmed from community sources
+
+Destination `1` (US) unlocks the 32 km/h (~20 mph) cap and keeps the
+speedometer/odometer correct; codes are `0` EU, `1` US, `2` Japan, `3` Taiwan,
+`4` Korea, and all but US are capped at 25 km/h. The current commercial tools
+(eMax bulletin March 2025, STUnlocker, eTuning) report that the latest E5000
+firmware cannot change region over Bluetooth and route it through a wired SM-PCE
+adapter or a firmware downgrade. Build .76 tests whether a tight-window BLE
+burst can nonetheless land the write before the display resets.
+
+### Build .76 changes
+
+The region setter is re-enabled under Advanced diagnostics, gated by the same
+`canSetUS` prerequisites (verified session, exact D4.5.0/M4.4.8 pair, motor
+authenticated, EU destination, no prior attempt). The transaction is
+restructured so the authenticated mode-4 window holds only the `A0`→`A8` pair:
+the `A4` lighting read and the salted restart-record save are moved before PC
+mode entry (both are valid outside privileged mode). After the mode-4
+completion the page fires the unchanged `00 16 A0 <lo> <hi> FF FF` and, on its
+`A2`, the single `00 16 A8 01 01`, with no reads or delays between. It logs the
+elapsed time from mode-4 completion to `A0` and to `A0` acceptance, and on
+rejection it distinguishes a BLE link drop (watchdog reset) from a silent
+in-session mode loss. At-most-once `A8`, immediate readback, mandatory mode
+exit, and the separate power-cycle persistence check are unchanged. No firmware,
+erase, bootloader, or downgrade command is reachable.
+
+Still unverified on the bike: whether the tightened window beats the reset;
+whether PC-mode entry deterministically triggers the display reset (if it does,
+the burst may still lose, which itself is the decisive next data point); and
+persistence plus the actual assistance-speed change after a physical power cycle.

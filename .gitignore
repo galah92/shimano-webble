@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 .venv/
+.venv-tests/
 
 # Vendor packages, firmware, and private capture exports: use ASSETS.md hashes.
 *.apk

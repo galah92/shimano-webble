@@ -5,19 +5,38 @@
 The goal is a reproducible, phone-only HTTPS Web Bluetooth workflow that sets
 this bike's OEM destination to US (`1`), confirms the value on the same motor
 after a physical power cycle, and separately measures the assistance cutoff.
-**No validated US-setting workflow exists yet.** The last verified destination
-is EU (`0`); no speed increase has been demonstrated. The investigation is
-blocked by missing evidence about the SC-E7000-to-motor command path, not by a
-pending user click. Do offline analysis before asking for another bike test.
+Destination `1` is confirmed to unlock the 32 km/h (~20 mph) cap while keeping
+the speedometer correct (codes: `0` EU, `1` US, `2` Japan, `3` Taiwan, `4`
+Korea; all but US are capped at 25 km/h).
+
+**No validated US-setting workflow exists yet, but the command path is now
+mapped and the earlier framing dead-end is cleared.** The last verified
+destination is EU (`0`); no speed increase has been demonstrated. Build 76
+recovered and reverse-engineered the SC-E7000 4.1.0 display image (the evidence
+the prior handoff was blocked on) and established two things: (1) the display
+forwards drive-unit commands verbatim and the motor's target byte at offset+4
+comes from the packet's leading `00`, so every past `A0` already had a valid
+offset+4 — **the `A3 3A` was never a framing problem**; and (2) the phone's
+cat-0x32 PC-mode commands do reach the motor (not answered locally by the
+display), so the motor genuinely enters mode 4. The remaining blocker is that
+the motor's PC mode 4/5 is not live when `A0` lands, dominated by the display's
+own hardware watchdog reset (the screen reset seen in build 73). Build 76
+re-enables a tightened, instrumented mode-4 burst attempt; the next step is one
+carefully watched bike test, not more offline framing analysis.
 
 The public page at <https://galah92.github.io/shimano-webble/> (source
-[`index.html`](index.html), build `2026-09-14.75`) offers a guided **Connect and
-check bike** action. It authenticates the BLE session and reads identity,
-firmware and region. It does not perform motor unlock, PC-mode entry, setting
-writes, or firmware operations. The old setter and firmware code still exists
-inside the single HTML file for synthetic regression tests, but its UI actions
-are disabled/hidden; do not mistake this code for a verified or reachable live
-workflow. After any page edit, verify this invariant in code and browser tests.
+[`index.html`](index.html), build `2026-09-14.76`) offers a guided **Connect and
+check bike** action that authenticates the BLE session and reads identity,
+firmware and region only. Build 76 also re-enables the region setter under the
+**Advanced diagnostics** section as a bounded, instrumented attempt: after
+connect → authenticate session → read region/compatibility → authenticate motor,
+the **Set region to US** button becomes enabled (gated by `canSetUS`: exact
+D4.5.0/M4.4.8 pair, EU destination, no prior attempt). It enters PC mode, then
+fires `A0` then `A8` as one fast burst inside the live mode-4 window, reads the
+region back, and exits; it sends at most one destination command and never
+touches firmware. The firmware-preparation UI remains hidden. Do not confuse the
+setter being *reachable* with the US change being *verified* — it has not yet
+succeeded on the bike. After any page edit, re-run the browser tests.
 
 ## Verified bike baseline
 
@@ -85,15 +104,28 @@ superseded.
 
 ## What could move the goal forward
 
-The strongest next work is **offline**: reconstruct the SC-E7000 bridge's
-translation and routing of category-`16` `A0`/`A8` requests and the lifetime
-of PC mode 4, or obtain a known-good destination-write trace for this firmware
-path. In D4.5.0, `A3 3A` can arise from more than one condition; the current
-BLE log does not reveal which internal branch rejected A0. The display bridge
-image used on this exact endpoint is not in the repo; the recorded catalog URL
-returned HTTP 403 on 2026-09-12. A demonstrably equivalent image or an
-observed write trace would change the evidence. Asset sources and hashes are
-in [`ASSETS.md`](ASSETS.md).
+The offline bridge mapping that the prior handoff called for is now **done**
+(build 76, `RESEARCH.md` final section,
+[`docs/evidence/bridge-analysis.md`](docs/evidence/bridge-analysis.md)). It cleared the framing dead-end and localized the blocker to
+PC mode 4/5 not being live when `A0` is processed, dominated by the SC-E7000's
+own watchdog reset. The strongest next work is therefore **one instrumented live
+test** of build 76's tightened burst, which is both an attempt and a diagnostic:
+
+- If `A0` is accepted, `A8` follows in the same window and the region should read
+  back as US; then a physical power cycle checks persistence and a separate ride
+  measures the assistance cutoff.
+- If `A0` returns `A3 3A` with the BLE link still up, the motor dropped
+  privileged mode silently (mode timeout or an unmodeled clear) — the model
+  needs revisiting.
+- If the BLE link drops during the burst, the display reset is confirmed as the
+  cause; the open question is then whether PC-mode entry deterministically
+  provokes that reset (if so, a phone-only burst may never win and the wired
+  SM-PCE adapter or a firmware downgrade becomes the realistic path).
+
+The build logs the elapsed time from mode-4 completion to `A0` and distinguishes
+these branches. Only after this test should further offline work (e.g.
+obtaining the SC-E7000 **bootloader** image, where the watchdog logic lives) be
+considered. Asset sources and hashes are in [`ASSETS.md`](ASSETS.md).
 
 Only after a candidate is tied to new evidence should a new live test be
 prepared. It must identify the exact same motor/firmware, send at most the

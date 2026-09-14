@@ -457,21 +457,21 @@ class BrowserTests(unittest.TestCase):
             self.assertIn('not verified', self.page.locator('#regionStatus').inner_text())
             self.context.close()
 
-    def test_exact_original_pair_reports_rejected_setting_stage(self):
+    def test_exact_original_pair_enables_tightened_us_attempt(self):
         self.ready_for_identify(motorModel=34, motorFirmware=69, motorPatch=0,
             nativeReplies={0:[0,1,134,69,0,0],1:[0,1,134,68,8,0]})
         self.wait_batch()
         self.page.evaluate('session.motorAuthenticated=true; controls();')
-        self.assertTrue(self.page.locator('#setUS').is_disabled())
         self.assertTrue(self.page.evaluate('canSetUS(session)'))
+        self.assertFalse(self.page.locator('#setUS').is_disabled())
         self.assertTrue(self.page.evaluate('session.commandWriteEligible'))
-        self.assertIn('A0 staging returned 3A', self.page.locator('#regionStatus').inner_text())
+        self.assertIn('A0 framing confirmed valid', self.page.locator('#regionStatus').inner_text())
 
     def test_reported_motor_firmware_describes_the_unverified_command_path(self):
         self.open()
         result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
-        self.assertIn('A0 stage returned 3A', result)
-        self.assertIn('US change remains unverified', result)
+        self.assertIn('A0 framing was always valid', result)
+        self.assertIn('tightened mode-4 burst', result)
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
 

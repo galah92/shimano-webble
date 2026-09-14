@@ -149,6 +149,7 @@ class RegionWriteTests(unittest.TestCase):
         self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
+            [0,0x16,0xa4,0],
             [0,0x32,0x10,1,0x0d,0,0],
             [0,0x32,0x30,0xa2,0x2b,0,0],
             [0,0x32,0x30,0x30,0x0e,0,0],
@@ -161,7 +162,6 @@ class RegionWriteTests(unittest.TestCase):
             [0,0x32,0x30,0xa4,0x73,0,0],
             [0,0x32,0x30,0xb1,0x72,0,0],
             [0,0x32,0x30,0x01,0x10,0,0],
-            [0,0x16,0xa4,0],
             [0,0x16,0xa0,0x34,0x12,0xff,0xff],
             [0,0x16,0xa8,1,1],
             [0,0x16,0xac,1],
@@ -199,15 +199,31 @@ class RegionWriteTests(unittest.TestCase):
                 self.assertEqual(self.packets(),[[0,0x16,0xac,1]])
                 self.context.close()
 
-    def test_each_prerequisite_failure_prevents_destination_write_and_exits_mode(self):
-        failures=(
+    def test_each_prerequisite_failure_prevents_destination_write(self):
+        # Build 76 reads lighting time and saves the restart record BEFORE PC-mode
+        # entry, so these failures never enter privileged mode: no PC-mode command
+        # is sent and there is nothing to exit.
+        pre_mode=(
+            {'lightingReadWriteFailure':True}, {'lightingReadReject':True},
+            {'shortLightingReply':True}, {'storageFailure':True},
+        )
+        for options in pre_mode:
+            with self.subTest(options=options,phase='pre-mode'):
+                self.prepare(**options);self.run_attempt()
+                packets=self.packets()
+                self.assertFalse(any(p[2]==0xa8 for p in packets))
+                self.assertFalse(any(p[1]==0x32 for p in packets))
+                self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
+                self.context.close()
+        # Failures after PC-mode entry always exit privileged mode exactly once
+        # and never reach the destination write.
+        in_mode=(
             {'mode1RequestFailure':True}, {'mode1Reject':True},
             {'mode4RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
-            {'lightingReadWriteFailure':True}, {'lightingReadReject':True}, {'shortLightingReply':True},
-            {'stageWriteFailure':True}, {'stageReject':True}, {'storageFailure':True},
+            {'stageWriteFailure':True}, {'stageReject':True},
         )
-        for options in failures:
-            with self.subTest(options=options):
+        for options in in_mode:
+            with self.subTest(options=options,phase='in-mode'):
                 self.prepare(**options);self.run_attempt()
                 packets=self.packets()
                 self.assertFalse(any(p[2]==0xa8 for p in packets))
