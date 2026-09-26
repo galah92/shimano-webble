@@ -9,9 +9,13 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('https://shimano.test/', lambda route: route.fulfill(body=html, content_type='text/html'))
     page.goto('https://shimano.test/')
-    expect(page.locator('#build')).to_contain_text('2026-09-25.91')
+    expect(page.locator('#build')).to_contain_text('2026-09-26.92')
     expect(page.locator('#guidedUS')).to_be_visible()
     expect(page.locator('#guidedUSStatus')).to_contain_text('six-digit Shimano passkey')
+    expect(page.locator('summary').first).to_have_text('Technical details and log')
+    assert page.locator('button:visible').count() == 1
+    expect(page.locator('#copyLog')).to_be_hidden()
+    expect(page.locator('#connect')).to_be_hidden()
     expect(page.locator('#firmwareFiles')).to_be_hidden()
     assert 'runPreparedUsWriteTransaction' in html
     assert 'writeUsWithDisplayOwnedStage' in html

@@ -4464,3 +4464,33 @@ mode exit, rejection mapping, and timeout propagation. The durable transaction
 and patched-pair lineage suites remain green. This is synthetic evidence only:
 no firmware or setting command was sent, build .91 remains local and unpublished,
 and the physical bike remains verified only at stock D4.5.0/M4.4.8 with EU.
+
+## 2026-09-26 twenty-fourth correction and build .92: one guided control
+
+Build .91 was committed, published to GitHub Pages, and verified byte-for-byte
+against the local `index.html`. Publication did not connect to the bike or send
+any BLE command. The last physical result remains exact stock D4.5.0/M4.4.8 at
+EU, with no verified higher assistance cutoff.
+
+Build .92 changes presentation and orchestration only; the protocol packets,
+eligibility gates, durable journals, exact replies, and no-retry rules are
+unchanged. The normal screen now shows the passkey, one contextual workflow
+button, connection, region, and current assist ceiling. Its first action is the
+same read-only authenticated information batch. Only after that batch proves EU
+and the exact stock pair does the button become **Set US region once**. That
+action has a separate confirmation, performs motor authentication automatically,
+and invokes the existing at-most-once build-.91 transaction. A pending region
+record changes the same control to read-only power-cycle verification rather
+than exposing another write.
+
+After same-device reconnect proves persisted US, a freshly lower B4 and higher
+BC make the same button become the separately confirmed **Set 32 km/h once**
+action. A pending B0 journal again changes it to read-only physical-power-cycle
+verification. A verified target disables the control as complete. Invalid,
+ineligible, non-US, and recorded non-US states fail closed. Detailed telemetry,
+the sanitized log, and legacy manual controls remain available under two
+collapsed disclosure sections for troubleshooting; the firmware card remains
+hidden and unwired. Synthetic browser coverage proves the initial screen has
+one visible button and that the guided control advances from the read-only EU
+check to only the US action, pending verification, and the ceiling action. No
+bike command, setting write, or firmware transfer occurred during this UI work.

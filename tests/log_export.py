@@ -15,6 +15,7 @@ class LogExportTests(unittest.TestCase):
         }});""")
         self.page.route('https://shimano.test/', lambda r: r.fulfill(body=HTML, content_type='text/html'))
         self.page.goto('https://shimano.test/')
+        self.page.locator('summary').filter(has_text='Technical details and log').click()
 
     def tearDown(self):
         self.browser.close()

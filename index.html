@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Shimano E5000 bike-status check</title>
+<title>Shimano E5000 setup</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; }
   body { margin: 0; padding: 16px; max-width: 760px; margin-inline: auto; }
@@ -26,39 +26,29 @@
   .workflow-files label { display:grid; gap:5px; }
   .check { display:flex; gap:8px; align-items:flex-start; margin:10px 0; }
   .check input { margin-top:4px; }
+  .primary { width:100%; font-weight:650; }
+  .result { margin-top:14px; }
+  details details { margin-top:12px; }
+  summary { cursor:pointer; }
   a { overflow-wrap:anywhere; }
 </style>
 </head>
 <body>
-<h1>Shimano E5000 bike-status check</h1>
+<h1>Shimano E5000 setup</h1>
 <div class="muted" id="build"></div>
-<p>This page checks the connected bike’s motor, firmware, current region, and configured assist-speed ceiling. The guided check authenticates the BLE session and reads status; it does not enter motor PC mode or change a setting.</p>
-<div class="card"><div class="kv">
-<div>Secure context</div><div id="secure">—</div>
-<div>Web Bluetooth</div><div id="webbt">—</div>
-<div>Status</div><div id="status">Disconnected</div>
-<div>Device</div><div id="device">—</div>
-<div>18FF service</div><div id="svc">—</div>
-<div>2AF3 indications</div><div id="notify">—</div>
-<div>2AF4 challenge</div><div><code id="challenge">—</code></div>
-<div>Current region</div><div id="region">Not read</div>
-<div>US-region status</div><div id="regionStatus">Read bike information first</div>
-<div>Current assist ceiling</div><div id="assistLimit">Not read</div>
-<div>US-profile ceiling</div><div id="usAssistLimit">Not read</div>
-<div>Drive unit</div><div id="drive">Not tested</div>
-<div>Protected access</div><div id="protected">Not tested</div>
-</div></div>
+<p>Use the single button below. It starts with a read-only check, then offers only the next safe action supported by the bike’s verified state.</p>
 <div class="card">
 <label for="passkey">Shimano passkey (six digits)</label>
 <input id="passkey" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" disabled />
 <div class="muted" id="passkeyStatus">Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.</div>
-</div>
-<div class="card">
-<strong>Check the bike before the experimental write</strong>
-<p>Enter the passkey and press once to verify the motor firmware and current region. This check does not enter PC mode or try to change the region.</p>
-<div class="row"><button id="guidedUS" disabled>Connect and check bike</button></div>
+<div class="row"><button class="primary" id="guidedUS" disabled>Connect and check bike</button></div>
 <div id="guidedUSStatus" role="status">Enter the six-digit Shimano passkey.</div>
-<div class="muted">No motor unlock, PC mode, region setter, firmware image, erase, bootloader, or downgrade command is sent by this check.</div>
+<div class="kv result">
+<div>Connection</div><div id="status">Disconnected</div>
+<div>Current region</div><div id="region">Not read</div>
+<div>Assist ceiling</div><div id="assistLimit">Not read</div>
+</div>
+<p class="muted">The first check is read-only. Region and assist writes are separate, confirmed, at-most-once actions; firmware remains disabled.</p>
 </div>
 <div class="card" hidden aria-hidden="true">
 <strong>Staged stock firmware preparation workflow</strong>
@@ -80,23 +70,38 @@
 <div class="row"><button id="bootProbe" disabled>Continue US workflow</button></div>
 <div id="bootProbeStatus" role="status">Choose the three files, enter the passkey, accept the firmware warning, then continue.</div>
 </div>
-<details class="card"><summary>Advanced diagnostics</summary>
+<details class="card"><summary>Technical details and log</summary>
+<div class="kv result">
+<div>Secure context</div><div id="secure">—</div>
+<div>Web Bluetooth</div><div id="webbt">—</div>
+<div>Device</div><div id="device">—</div>
+<div>18FF service</div><div id="svc">—</div>
+<div>2AF3 indications</div><div id="notify">—</div>
+<div>2AF4 challenge</div><div><code id="challenge">—</code></div>
+<div>US-region status</div><div id="regionStatus">Read bike information first</div>
+<div>US-profile ceiling</div><div id="usAssistLimit">Not read</div>
+<div>Drive unit</div><div id="drive">Not tested</div>
+<div>Protected access</div><div id="protected">Not tested</div>
+</div>
+<div class="row"><button id="copyLog">Copy report</button><button id="clearLog">Clear log</button></div>
+<div class="muted" id="exportStatus" role="status"></div>
+<div class="card"><strong>Log</strong><div id="log"></div></div>
+<details><summary>Manual protocol controls</summary>
+<p class="muted">These controls are for troubleshooting only. The guided button above performs the supported sequence.</p>
 <div class="row"><button id="connect">Connect Shimano</button><button id="disconnect" disabled>Disconnect</button></div>
 <div class="row"><button id="probe" disabled>Run read-only probe</button><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, destination, current assist ceiling, and the motor's US-profile ceiling in one batch. The target is US (value 1). Allow up to 110 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Experimental build 91 path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Build 92 retains build 91's experimental path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
 <div class="card"><button id="setUSMax" disabled>Set assist ceiling to safe US target</button>
 <label class="check"><input id="maxAssistPowerCycle" type="checkbox" /> <span>I physically turned the bike fully off and back on after the recorded assist-ceiling attempt.</span></label>
 <div id="maxAssistWriteStatus" class="muted">Read bike information first. This one-attempt setter is available only after the exact D4.5.0/M4.4.8 pair reports US, a lower current ceiling, and a higher US-profile ceiling. It journals before B0, never retries, and requires a later power-cycle readback.</div></div>
 </details>
-<div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
-<div class="muted" id="exportStatus" role="status"></div>
-<div class="card"><strong>Log</strong><div id="log"></div></div>
+</details>
 <script>
 'use strict';
-const BUILD = '2026-09-25.91';
+const BUILD = '2026-09-26.92';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2452,6 +2457,7 @@ let workflowDevice = null;
 let commandWorkflowRunning = false;
 let maxAssistWriteRunning = false;
 let maxAssistJournalProblem = '';
+let guidedStatusOverride = '';
 function log(message) {
   logEl.textContent += `[${new Date().toISOString()}] ${message}\n`;
   logEl.scrollTop = logEl.scrollHeight;
@@ -2485,6 +2491,52 @@ function guidedButtonLabel(plan,connected) {
   if(plan.powerCycle) return `I power-cycled — ${connected?lower:`connect and ${lower}`}`;
   return connected?plan.label:`Connect and ${lower}`;
 }
+function currentGuidedWorkflowPlan() {
+  const maxJournal=optionalMaxAssistUsJournal();
+  if(maxJournal===undefined)
+    return {action:'blocked',label:'Review stored state',status:`Stored assist-ceiling state is invalid: ${maxAssistJournalProblem||'unknown state'}. Open Technical details; no write is allowed.`};
+  if(maxJournal&&maxJournal.stage!=='persistence-verified') {
+    const retryable=maxJournal.stage==='readback-verified'||maxJournal.stage==='persistence-verification'||
+      maxJournal.stage==='stopped'&&['write-attempt','reply-received','persistence-verification'].includes(maxJournal.lastStage);
+    return retryable
+      ? {action:'verify-max',label:'I power-cycled — verify 32 km/h',status:'Fully turn the bike off and back on, then use the button to perform read-only persistence verification.'}
+      : {action:'blocked',label:'Review stored state',status:'The saved assist-ceiling attempt cannot advance automatically. Open Technical details and copy the report; no write will repeat.'};
+  }
+  if(maxJournal?.stage==='persistence-verified')
+    return {action:'complete',label:'32 km/h setup verified',status:`Complete: ${formatMaxAssistSpeed(maxJournal.expected.targetHundredths)} persisted after a physical power cycle. Real riding cutoff is still unmeasured.`};
+
+  const commandRecord=probeRecord?.kind==='command-us-region'?probeRecord:null;
+  if(commandRecord&&!commandRecord.verified)
+    return {action:'verify-us',label:'I power-cycled — verify US',status:'Fully turn the bike off and back on, then use the button to verify the region without repeating the write.'};
+  if(!session?.batchDone)
+    return {action:'check',label:session?.device.gatt.connected?'Check bike status':'Connect and check bike',
+      status:'Ready for the read-only motor, firmware, region, and assist-ceiling check.'};
+  if(!Number.isInteger(session.currentDestination))
+    return {action:'recheck',label:'Reconnect and check bike',status:'The bike information check did not produce a verified region. Reconnect for one fresh read-only check.'};
+
+  if(session.currentDestination===0) {
+    if(commandRecord?.verified)
+      return {action:'blocked',label:'US write will not repeat',status:'EU persisted after the recorded US attempt. The at-most-once write is blocked; open Technical details and copy the report.'};
+    if(probeRecord)
+      return {action:'blocked',label:'Review stored state',status:'A prior experiment record blocks a new destination write. Open Technical details and copy the report.'};
+    if(session.directWriteEligible&&session.motorEligible)
+      return {action:'set-us',label:'Set US region once',status:'Bike check complete: EU. The exact stock D4.5.0/M4.4.8 pair is verified. The next action authenticates the motor and makes one journaled US attempt.'};
+    return {action:'blocked',label:'Bike is not eligible',status:'This bike or firmware does not match the guarded US workflow. No setting write is available.'};
+  }
+  if(session.currentDestination===1) {
+    if(!validMaxAssistHundredths(session.currentMaxAssistSpeed)||!validMaxAssistHundredths(session.usProfileMaxAssistSpeed))
+      return {action:'recheck',label:'Reconnect and check bike',status:'US is reported, but both assist ceilings were not verified. Reconnect for one fresh read-only check.'};
+    const target=stockMaxAssistUsTarget(session.usProfileMaxAssistSpeed);
+    if(session.currentMaxAssistSpeed<target) {
+      const regionReady=!commandRecord||commandRecord.verified&&commandRecord.outcome==='us';
+      if(regionReady&&session.directWriteEligible&&session.motorEligible)
+        return {action:'set-max',label:`Set ${formatMaxAssistSpeed(target)} once`,status:`US is verified, but the configured ceiling is ${formatMaxAssistSpeed(session.currentMaxAssistSpeed)}. The next action authenticates the motor and makes one journaled ceiling attempt.`};
+      return {action:'blocked',label:'Verify US persistence first',status:'The assist ceiling stays locked until the recorded US change is verified after a physical power cycle.'};
+    }
+    return {action:'complete',label:'US setup already complete',status:`US and a ${formatMaxAssistSpeed(session.currentMaxAssistSpeed)} assist ceiling are reported. Real riding cutoff is still unmeasured.`};
+  }
+  return {action:'blocked',label:'Unsupported region',status:`The freshly read region is ${regionName(session.currentDestination)}; this workflow only changes EU to US.`};
+}
 function controls() {
   const connected = !!session?.device.gatt.connected;
   const workflowPlan=currentFirmwareWorkflowPlan();
@@ -2504,14 +2556,13 @@ function controls() {
   renderMaxAssistWriteStatus(session,maxAssistJournal);
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || session?.authenticated;
-  $('guidedUS').disabled = busy || commandWorkflowRunning || !passkeyReady ||
+  const guidedPlan=currentGuidedWorkflowPlan();
+  $('guidedUS').disabled = busy || commandWorkflowRunning || maxAssistWriteRunning || !passkeyReady ||
+    ['blocked','complete'].includes(guidedPlan.action) ||
     (!connected&&(!navigator.bluetooth||!window.isSecureContext));
-  $('guidedUS').textContent = connected?'Check bike status':'Connect and check bike';
-  $('guidedUSStatus').textContent = !passkeyReady
-    ? 'Enter the six-digit Shimano passkey.'
-    : connected && session?.batchDone && !busy
-      ? `Bike check complete: ${Number.isInteger(session.currentDestination)?regionName(session.currentDestination):'region not verified'}. Copy the log.`
-    : 'Ready to verify motor firmware and region. The rejected setting command will not be repeated.';
+  $('guidedUS').textContent=guidedPlan.label;
+  if(!busy&&!commandWorkflowRunning&&!maxAssistWriteRunning)
+    $('guidedUSStatus').textContent=guidedStatusOverride||(!passkeyReady?'Enter the six-digit Shimano passkey.':guidedPlan.status);
   $('bootProbe').disabled = busy || firmwareWorkflowRunning || !filesReady || !passkeyReady ||
     (!connected&&(!navigator.bluetooth||!window.isSecureContext)) ||
     workflowPlan.action==='complete'||workflowPlan.action==='inspect'||
@@ -2792,7 +2843,7 @@ async function authenticate() {
 // category 16 B4/B6 for the current maximum. Cyclist also uses BC/BE with a
 // destination byte to obtain the factory ceiling for that destination. These
 // feed both the read-only status path and the separately gated stock B0
-// transaction under Advanced diagnostics.
+// transaction behind the guided and manual diagnostic controls.
 function maxAssistSpeedReadPacket() {
   return Uint8Array.of(0,0x16,0xb4,0);
 }
@@ -2963,7 +3014,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 confirmed. Build 91 offers one evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
+    return 'D4.5.0 confirmed. Build 92 retains the evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -3093,7 +3144,7 @@ async function identifyDrive() {
       ? commandAttemptStatus(probeRecord)
       : results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'D4.5.0 verified. Build 91: authenticate the motor and use Set region to US once for the bounded two-handshake display-owned mode-5 experiment.'
+      : s.directWriteEligible ? 'D4.5.0 verified. Build 92: use the guided Set US region once action for the bounded two-handshake display-owned mode-5 experiment.'
       : regionReadiness(model, firmware, destination);
     if(destination?.[4]===1&&Number.isInteger(currentMax)&&Number.isInteger(usMax)) {
       const safeTarget=stockMaxAssistUsTarget(usMax);
@@ -3781,6 +3832,7 @@ $('disconnect').onclick = disconnect;
 $('authenticate').onclick = authenticate;
 async function continueCommandWorkflow() {
   if(busy||commandWorkflowRunning)return;
+  guidedStatusOverride='';
   if(!session?.verified&&!rememberWorkflowPasskey()) {
     $('guidedUSStatus').textContent='Enter the six-digit Shimano passkey first.';
     $('passkey').focus();controls();return;
@@ -3806,17 +3858,70 @@ async function continueCommandWorkflow() {
       s=session;
       if(!s?.device.gatt.connected||!s.batchDone)throw new Error('Bike information check did not complete');
     }
-    $('guidedUSStatus').textContent=`Bike check complete: ${Number.isInteger(s.currentDestination)?regionName(s.currentDestination):'region not verified'}. Copy the log.`;
     log(`Guided bike-status check: ${$('drive').textContent}; region ${Number.isInteger(s.currentDestination)?regionName(s.currentDestination):'unverified'}. No motor unlock or setting write sent.`);
   } catch(error) {
     log(`Guided bike-status check stopped: ${error.message}`);
-    $('guidedUSStatus').textContent=`Stopped: ${error.message}. Copy the log.`;
+    guidedStatusOverride=`Stopped: ${error.message}. Open Technical details and copy the report.`;
   } finally {
     log('--- guided bike-status check end ---');
     commandWorkflowRunning=false;controls();
   }
 }
-$('guidedUS').onclick=continueCommandWorkflow;
+async function runGuidedMutation(action) {
+  const copy=action==='set-us'
+    ? 'This will make the one permitted experimental US-region write. It is journaled before sending and will never retry. Continue?'
+    : 'This will make the one permitted 32 km/h assist-ceiling write. It is journaled before sending and will never retry. Continue?';
+  if(!window.confirm(copy))return;
+  guidedStatusOverride='';
+  commandWorkflowRunning=true;controls();
+  try {
+    let s=session;
+    if(!s?.device.gatt.connected||!s.verified||!s.batchDone)
+      throw new Error('Run the bike check again before a setting action');
+    if(!s.motorAuthenticated) {
+      $('guidedUSStatus').textContent='Authenticating the motor for this one setting action…';
+      await authenticateMotor();
+      s=session;
+      if(!s?.device.gatt.connected||!s.motorAuthenticated)
+        throw new Error('Motor authentication did not complete; reconnect and check the bike again');
+    }
+    if(action==='set-us') {
+      if(!canSetUS(s))throw new Error('The guarded US-region action is no longer eligible');
+      $('guidedUSStatus').textContent='Sending the single journaled US-region transaction…';
+      await setUS();
+    } else {
+      if(!canSetUSMax(s))throw new Error('The guarded 32 km/h action is no longer eligible');
+      $('guidedUSStatus').textContent='Sending the single journaled assist-ceiling transaction…';
+      await setUSMaxAssist();
+    }
+  } catch(error) {
+    log(`Guided setting action stopped: ${error.message}`);
+    guidedStatusOverride=`Stopped: ${error.message}. Open Technical details and copy the report.`;
+  } finally {
+    commandWorkflowRunning=false;controls();
+  }
+}
+async function runGuidedWorkflow() {
+  guidedStatusOverride='';
+  const plan=currentGuidedWorkflowPlan();
+  if(plan.action==='check')return continueCommandWorkflow();
+  if(plan.action==='recheck') {
+    if(session)disconnect();
+    return continueCommandWorkflow();
+  }
+  if(plan.action==='set-us'||plan.action==='set-max')return runGuidedMutation(plan.action);
+  if(plan.action==='verify-us'||plan.action==='verify-max') {
+    if(!window.confirm('Confirm that you fully turned the bike off and back on. Verification is read-only and will not repeat either write.'))return;
+    if(!session?.verified&&!rememberWorkflowPasskey()) {
+      $('guidedUSStatus').textContent='Enter the six-digit Shimano passkey first.';
+      $('passkey').focus();controls();return;
+    }
+    if(plan.action==='verify-max')$('maxAssistPowerCycle').checked=true;
+    if(session)disconnect();
+    return continueCommandWorkflow();
+  }
+}
+$('guidedUS').onclick=runGuidedWorkflow;
 function exportLog() {
   let snapshot = logEl.textContent;
   const starts = [...snapshot.matchAll(/^\[[^\]\n]+\] Connected;.*$/gm)];
@@ -4285,7 +4390,7 @@ async function restoreCachedFirmwareSelection() {
 }
 $('firmwareFiles').onchange=validateFirmwareSelection;
 $('firmwareConsent').onchange=controls;
-$('passkey').oninput=controls;
+$('passkey').oninput=()=>{guidedStatusOverride='';controls();};
 
 
 $('copyLog').onclick = async () => {
@@ -4305,7 +4410,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · display-owned mode experiment`;
+$('build').textContent = `Build ${BUILD} · guided US setup`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

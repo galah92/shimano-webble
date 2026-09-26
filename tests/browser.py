@@ -199,7 +199,8 @@ class BrowserTests(unittest.TestCase):
         self.page.add_init_script(MOCK.replace('OPTIONS', json.dumps(options)))
         self.page.route('https://shimano.test/', lambda route: route.fulfill(body=HTML, content_type='text/html'))
         self.page.goto('https://shimano.test/')
-        self.page.locator('summary').filter(has_text='Advanced diagnostics').click()
+        self.page.locator('summary').filter(has_text='Technical details and log').click()
+        self.page.locator('summary').filter(has_text='Manual protocol controls').click()
         self.page.locator('#connect').click()
         self.page.wait_for_function("!document.getElementById('probe').disabled")
         return self.page
@@ -579,6 +580,35 @@ class BrowserTests(unittest.TestCase):
         self.assertIn('Current destination: EU',self.page.locator('#log').inner_text())
         self.assertIn('No motor unlock or setting write sent',self.page.locator('#log').inner_text())
         self.assertIn('Bike check complete: EU',self.page.locator('#guidedUSStatus').inner_text())
+        self.assertFalse(self.errors)
+
+    def test_guided_button_advances_to_only_the_next_safe_action(self):
+        self.ready_for_identify(motorModel=34,motorFirmware=69,motorPatch=0,
+            maxAssistSpeed=2500,usMaxAssistSpeed=3218,
+            nativeReplies={0:[0,1,134,69,0,0],1:[0,1,134,68,8,0]})
+        self.wait_batch()
+        self.assertEqual(self.page.locator('#guidedUS').inner_text(),'Set US region once')
+        self.assertIn('Bike check complete: EU',self.page.locator('#guidedUSStatus').inner_text())
+        self.page.evaluate("""() => {
+          window.guidedCalls=[];
+          authenticateMotor=async()=>{guidedCalls.push('authenticate-motor');session.motorAuthenticated=true;controls();};
+          setUS=async()=>{
+            guidedCalls.push('set-us');
+            probeRecord={kind:'command-us-region',verified:false,phase:'immediate-us',connection:session.probeToken};
+            session.currentDestination=1;controls();
+          };
+        }""")
+        self.page.on('dialog',lambda dialog: dialog.accept())
+        self.page.locator('#guidedUS').click()
+        self.page.wait_for_function('guidedCalls.length === 2')
+        self.assertEqual(self.page.evaluate('guidedCalls'),['authenticate-motor','set-us'])
+        self.assertEqual(self.page.locator('#guidedUS').inner_text(),'I power-cycled — verify US')
+        self.page.evaluate("""() => {
+          probeRecord={kind:'command-us-region',verified:true,outcome:'us'};
+          session.currentDestination=1;session.currentMaxAssistSpeed=2500;
+          session.usProfileMaxAssistSpeed=3218;controls();
+        }""")
+        self.assertEqual(self.page.locator('#guidedUS').inner_text(),'Set 32 km/h once')
         self.assertFalse(self.errors)
 
     def test_query_traffic_is_scoped_and_tracks_other_channels(self):

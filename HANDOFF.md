@@ -1,4 +1,4 @@
-# Shimano WebBLE handoff — 2026-09-25
+# Shimano WebBLE handoff — 2026-09-26
 
 ## Objective and current answer
 
@@ -26,8 +26,8 @@ ceiling into pending settings and Apply uses a distinct `B0` setter. Therefore
 US destination readback alone does not prove that the separate ceiling is 32
 km/h. A public January 2026 E-TUBE Professional 5.4.4 report independently
 shows D4.5.0 with destination Type 1 and a 25 km/h maximum at the same time.
-Build 91 keeps both getters in the normal information batch and adds an
-Advanced-diagnostics `B0` transaction that can arm only after the exact stock
+Build 91 keeps both getters in the normal information batch and adds a `B0`
+transaction that can arm only after the exact stock
 D4.5.0/M4.4.8 pair has persisted US and still reads a lower configured ceiling
 than the safe 32.00 km/h target. It journals before one write, requires `B2` and immediate fresh
 readback, cannot retry, and separates a later same-device/different-session
@@ -126,10 +126,16 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The local page source is now build `2026-09-25.91`; the public Pages site still
-serves build 77 until a separately authorized publish. The guided **Connect and
-check bike** action remains read-only and now reports both assist-speed ceilings.
-Under **Advanced diagnostics**, build 91's destination branch
+The page source is now build `2026-09-26.92`. Build 91 was published and build
+92 makes no protocol change: it reduces the normal interface to one contextual
+button. **Connect and check bike** remains read-only and reports both
+assist-speed ceilings. Only after those reads prove eligibility does that same
+button become **Set US region once**. Subsequent states expose only read-only
+power-cycle verification, then—if US persisted with a lower ceiling—**Set 32
+km/h once**, followed by its read-only power-cycle verification. Each write has
+a separate confirmation. The detailed telemetry, sanitized log, and old manual
+buttons are collapsed under **Technical details and log** → **Manual protocol
+controls**. Build 91's retained destination branch
 is gated by the exact D4.5.0/M4.4.8 pair, EU readback, motor authentication, and
 no prior attempt. It reads the current lighting value, sends display-local
 `00 0C 05`, requires `2C 00` and the exact motor mode-5/slot completion, sends
@@ -148,8 +154,9 @@ recorded, the setter stays disabled across reloads and after either US or
 non-US reconnect verification. If A0 may have run without A8, the status also
 requires a physical bike power cycle before another setting tool.
 
-Build 91 adds a second, independent Advanced-diagnostics button for the stock
-maximum-assist `B0` setter. It remains disabled at EU and therefore cannot run
+Build 91 adds a second, independent stock maximum-assist `B0` setter, exposed
+by build 92 only when it is the next eligible guided action. It remains disabled
+at EU and therefore cannot run
 in the last verified bike state. Its gate requires a verified/authenticated
 session, motor authentication, the exact stock pair, US destination, both
 speed getters, current below the safe 32.00 km/h target, and—if this page
@@ -394,18 +401,18 @@ The desktop/PCE transport and wired-patch contradiction are in
 ## What could move the goal forward
 
 The offline bridge mapping now identifies a display-owned protected-mode path
-that no previous bike run exercised. Build 91's visible destination setter is the next
+that no previous bike run exercised. Build 92 retains build 91's destination setter as the next
 lower-risk live experiment: it
 changes ownership rather than timing a phone-owned mode, selects mode 5 to
 match Shimano's known desktop destination-setting context, and freshly
 re-establishes that mode after A2 without consuming the A0 gate.
 
-1. After an explicitly authorized publish, open build 91 with the bike
+1. Open build 92 with the bike
    stationary, keep the phone close to the display,
-   use the read-only check first and record current `B4/B6` plus US-profile
-   `BC/BE`, then Advanced diagnostics → connect,
-   authenticate session, read identity/region, authenticate motor, and press
-   **Set region to US** once.
+   enter the passkey, and press **Connect and check bike**. Record current
+   `B4/B6` plus US-profile `BC/BE`. If the guarded action becomes available,
+   press **Set US region once** and confirm it. The page performs the required
+   session and motor authentication automatically.
 2. Preserve the complete sanitized log. A valid transaction needs display
    `2C 00`, exact motor `00 32 12 05 <slot>`, A0 `A2`, a second complete
    mode-5 handshake, A8 `AA`, immediate US readback, and verified `0C 00` exit.
@@ -414,13 +421,13 @@ re-establishes that mode after A2 without consuming the A0 gate.
    measure assistance cutoff on a safe ride.
 4. After a successful US destination readback and its physical-power-cycle
    verification, run the read-only check again. If B4 is below BC 01,
-   authenticate the motor and press **Set assist ceiling to safe US target** once.
+   press the guided **Set 32 km/h once** action and confirm it.
    Build 91 rereads the complete exact context, derives `min(BC 01, 3200)`,
    requires B2 plus immediate B4 equality, and records the attempt before
-   dispatch. On every outcome, do not repeat B0. Fully power-cycle, reconnect,
-   tick the explicit confirmation, and run the read-only batch; only that
+   dispatch. On every outcome, do not repeat B0. Fully power-cycle, then press
+   **I power-cycled — verify 32 km/h**; only that
    separate same-device result can establish persistence.
-5. On `A3 3A` or `AB 3A` plus EU, do not repeat build 91. The next
+5. On `A3 3A` or `AB 3A` plus EU, do not repeat build 92's action. The next
    no-new-hardware candidate is the hidden exact-stock D4.3.0/M4.2.1 paired
    workflow, not the modified-D4.5.0.1 route. Its transfer/recovery coordinator,
    one explicit display-owned A0→A8 transaction, immediate readback, power-cycle persistence gate,
@@ -446,10 +453,11 @@ evidence of a region-setting menu (`RESEARCH.md`, latest section).
 
 ## Repository map and reproducibility
 
-- [`index.html`](index.html): public single-file application source. The guided
-  action is read-only; local build 91's display-owned destination setter and
-  separately gated stock B0 setter are under Advanced diagnostics, while the
-  firmware workflow remains hidden. No build step.
+- [`index.html`](index.html): public single-file application source. Build 92's
+  first guided action is read-only; the same button exposes the display-owned
+  destination setter and separately gated stock B0 setter only when each is the
+  next verified step. Technical controls are collapsed and the firmware
+  workflow remains hidden. No build step.
 - [`tests/`](tests): synthetic browser/BLE and firmware protocol regression
   tests. They verify software guards and parsing, not acceptance by the bike.
 - [`tools/`](tools): offline firmware inspection/planning utilities.

@@ -13,7 +13,8 @@ This is the same display-owned mechanism used by the captured official setup
 command `00 0C 01`; it avoids competing with the display for the motor's single
 global mode byte.
 
-Local build 91 keeps build 82's bounded destination experiment unchanged. It sends `00 0C 05`,
+Build 92 keeps build 91's protocol and build 82's bounded destination
+experiment unchanged. It sends `00 0C 05`,
 requires both display reply `2C 00` and exact motor completion
 `00 32 12 05 <slot>`, then sends one unchanged-lighting A0. Only after A2 does
 it require a second full display-owned mode-5 handshake before one US A8. It
@@ -69,19 +70,23 @@ a separate B0 setter; a public 2026 E-TUBE Professional report independently
 shows D4.5.0 with destination Type 1 and a 25 km/h maximum simultaneously.
 Exact D4.5.0 decompilation now proves explicit B0/B4/BC handlers. B0 requires
 only nonzero ordinary PC mode and accepts any request no higher than the
-current destination's ceiling; US is internally 3218 hundredths. The local
-Advanced-diagnostics path therefore derives `min(fresh BC, 3200)`, which is
+current destination's ceiling; US is internally 3218 hundredths. The guided
+path therefore derives `min(fresh BC, 3200)`, which is
 3200 and matches Shimano's clients. It is gated by the exact stock pair,
 persisted US, a fresh lower B4 value, and motor authentication. It journals
 both BC and target before one dispatch, never retries, requires exact B2 plus
 immediate fresh readback, and permits only read-only persistence verification
 after an explicit power cycle in a different session. It has synthetic tests
-but no bike result and remains unpublished.
+but no bike result and has never been sent to the bike.
 The M4.4.8 image is RX at `0xFFFC0000`; its real entry is `0xFFFC0018` and a
 clean entry-seeded project recovers 904 functions. Its false opcode hits do not
 override the D-side policy.
-The public Pages site still serves build 77 until a separately authorized
-publish.
+Build 91 was published on 2026-09-26. Build 92 changes only the UI and guided
+orchestration: one contextual button performs the read-only check, exposes the
+separately confirmed at-most-once US write when eligible, then read-only
+power-cycle verification, the separately confirmed at-most-once 32 km/h write
+when eligible, and final read-only verification. Detailed telemetry, log, and
+manual protocol controls are collapsed. The firmware card remains hidden.
 
 The last verified destination is EU and no higher-speed result exists. The
 paired BLE downgrade remains the riskier fallback; no image has ever been sent

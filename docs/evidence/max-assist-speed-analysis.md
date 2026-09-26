@@ -9,8 +9,8 @@ itself proof that the separate maximum has been raised to the US ceiling.
 
 The exact read protocol is part of build 91's normal information batch. It
 reads both the configured value and the motor's destination-specific US
-ceiling. Build 91 also exposes a narrowly gated, unpublished implementation of
-Shimano's stock setter under Advanced diagnostics. It cannot arm until fresh
+ceiling. Build 91 also exposes a narrowly gated, bike-untested implementation of
+Shimano's stock setter behind the guided workflow. It cannot arm until fresh
 reads prove the exact stock D4.5.0/M4.4.8 pair, destination US, and a configured
 ceiling below 32 km/h. Exact D4.5.0 decompilation now proves that the stock B0
 handler exists and accepts a requested value no higher than the current
