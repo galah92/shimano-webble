@@ -4,11 +4,11 @@ A single-file Web Bluetooth bike-status page for the tested Shimano SC-E7000
 endpoint and E50X0 motor family. [Open the HTTPS page](https://galah92.github.io/shimano-webble/).
 The first guided action authenticates the BLE session and reads motor identity,
 firmware, current destination, configured assist-speed ceiling, and the motor's
-US-profile ceiling without changing anything. Build 93 then presents only the
+US-profile ceiling without changing anything. Build 94 then presents only the
 next eligible action through the same button: one confirmed, journaled US
 attempt; read-only power-cycle verification; one confirmed, journaled 32 km/h
-ceiling attempt; and final read-only verification. It never enables a retry or
-firmware transfer. Raw controls and the sanitized log are collapsed under
+ceiling attempt; and final read-only verification. It never enables a setting
+retry or firmware transfer. Raw controls and the sanitized log are collapsed under
 **Technical details and log**.
 
 **Current result:** the bike reports native D `4.5.0.0`, M `4.4.8.0`, and EU
@@ -40,7 +40,7 @@ destination's maximum into the pending setting and Apply performs a distinct
 `B0` write. Consequently a US destination can coexist with a lower configured
 ceiling until that second setting is applied. A public 2026 E-TUBE Professional
 report independently shows D4.5.0 with destination Type 1 and a 25 km/h
-maximum together. The browser reads both values normally. Build 93 exposes the
+maximum together. The browser reads both values normally. Build 94 exposes the
 separate at-most-once stock `B0` step only through the guided button
 only after fresh reads prove the exact stock D4.5.0/M4.4.8 pair, persisted US,
 and a configured ceiling below the safe 32.00 km/h target. Exact D4.5.0
@@ -96,8 +96,13 @@ and exits via `00 0C 00`. Its salted same-device attempt record is kept in
 durable browser storage and blocks another write across reloads, including a
 verified non-US result. Synthetic tests validate the ordering and guards, not
 acceptance by the bike. Build 91 was published without a bike write; builds
-92/93 change only presentation, guided orchestration, and failure-report
-retention around the same guards.
+92/93 changed only presentation, guided orchestration, and failure-report
+retention around the same guards. The physical build-93 setting action stopped
+at a motor `DB` challenge reply, before PC mode or any A0/A8/B0 setting command.
+Build 94 retains that reply's non-secret reason byte and follows Shimano's
+inspected bounded lock policy: only exact `DB 46` sends one E8, requires EA,
+and starts one fresh D8 challenge. All other codes and a second rejection stop;
+no setting write is retried.
 
 A separate build-86 research branch constructs, but cannot install, an exact
 five-byte D4.5.0.1 derivative. It adds a native version marker and bypasses

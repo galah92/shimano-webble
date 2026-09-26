@@ -30,15 +30,18 @@ class MotorTests(unittest.TestCase):
           session.verified=true; session.motorEligible=true;
           for (const short of ['2afe','2afd']) session.chars[short]=await session.service.getCharacteristic(UUID(short));
           const tx=session.chars['2afe'], rx=session.chars['2afd'];
-          window.motorWrites=[];
+          window.motorWrites=[]; window.challengeRequests=0;
           const send=a => {rx.value=new DataView(Uint8Array.from(a).buffer);rx.dispatchEvent(new Event('characteristicvaluechanged'));};
           tx.writeValueWithResponse=async packet => {
             const p=[...packet]; motorWrites.push(p);
             const emit=() => {
               if(p[1]===1) {send(opts.shortSerial ? [0,1,62] : [0,1,62,...serial,255]);return;}
               if(p[2]===216) {
+                challengeRequests++;
                 if(opts.disconnect) {bike.gatt.disconnect();return;}
-                if(opts.db) {send([0,22,219,58,0]);return;}
+                if((opts.db||opts.dbCode!==undefined)&&(challengeRequests===1||opts.dbEvery)) {
+                  send([0,22,219,opts.dbCode??58,0]);return;
+                }
                 send([0,22,32,79,0,0,0,0,0,0]); // unrelated telemetry
                 send([0,22,218,38,6,7,8,9,10,11]); // deliberately out of order
                 send([0,22,218,22,0,1,2,3,4,5]);
@@ -111,6 +114,45 @@ class MotorTests(unittest.TestCase):
                 self.assertFalse(any(p[2]==224 for p in self.page.evaluate('motorWrites')))
                 self.assertNotIn('MILESTONE: motor authentication',self.page.locator('#log').inner_text())
                 self.context.close()
+
+    def test_non_lock_db_reason_is_reported_and_never_unlocks(self):
+        self.prepare(dbCode=0x3a);self.wait_motor()
+        self.assertEqual(self.page.evaluate('challengeRequests'),1)
+        self.assertFalse(any(p[2] in (0xe0,0xe8) for p in self.page.evaluate('motorWrites')))
+        log=self.page.locator('#log').inner_text()
+        self.assertIn('challenge rejection DB 3A',log)
+        self.assertIn('only authentication-lock code 46 permits recovery',log)
+        self.assertIn('challenge rejected DB 3A',self.page.evaluate('exportLog()'))
+
+    def test_db46_releases_once_then_restarts_challenge(self):
+        self.prepare(dbCode=0x46);self.wait_motor()
+        packets=self.page.evaluate('motorWrites');v=VECTORS[0];ct=v['ciphertext']
+        self.assertEqual(packets,[[0,1,60,0],[0,22,216]+v['request'],
+            [0,22,232]+v['request'],[0,22,216]+v['request'],
+            [0,22,224,22]+ct[:6],[0,22,224,38]+ct[6:12],[0,22,224,52]+ct[12:]+[255,255]])
+        self.assertEqual(sum(p[2]==0xe8 for p in packets),1)
+        self.assertTrue(self.page.evaluate('session?.motorAuthenticated === true'))
+        log=self.page.locator('#log').inner_text()
+        self.assertIn('DB 46 released by one E8/EA exchange',log)
+        self.assertIn('completed after the bounded DB 46 recovery',log)
+        self.assertIn('no second unlock was sent',log)
+
+    def test_db46_recovery_has_no_loop(self):
+        self.prepare(dbCode=0x46,dbEvery=True);self.wait_motor()
+        packets=self.page.evaluate('motorWrites')
+        self.assertEqual(sum(p[2]==0xd8 for p in packets),2)
+        self.assertEqual(sum(p[2]==0xe8 for p in packets),1)
+        self.assertFalse(any(p[2]==0xe0 for p in packets))
+        self.assertFalse(self.page.evaluate('session?.motorAuthenticated === true'))
+        self.assertIn('no further recovery sent',self.page.locator('#log').inner_text())
+
+    def test_db46_unlock_failure_stops_before_fresh_challenge(self):
+        self.prepare(dbCode=0x46,unlockReject=True);self.wait_motor()
+        packets=self.page.evaluate('motorWrites')
+        self.assertEqual(sum(p[2]==0xd8 for p in packets),1)
+        self.assertEqual(sum(p[2]==0xe8 for p in packets),1)
+        self.assertFalse(any(p[2]==0xe0 for p in packets))
+        self.assertFalse(self.page.evaluate('session?.motorAuthenticated === true'))
 
     def test_write_failure_wins_over_early_arriving_ack(self):
         self.prepare(writeFailure=True);self.wait_motor()

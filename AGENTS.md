@@ -13,7 +13,7 @@ This is the same display-owned mechanism used by the captured official setup
 command `00 0C 01`; it avoids competing with the display for the motor's single
 global mode byte.
 
-Build 93 keeps build 92's UI, build 91's protocol, and build 82's bounded destination
+Build 94 keeps build 93's UI/reporting, build 91's setting protocol, and build 82's bounded destination
 experiment unchanged. It sends `00 0C 05`,
 requires both display reply `2C 00` and exact motor completion
 `00 32 12 05 <slot>`, then sends one unchanged-lighting A0. Only after A2 does
@@ -88,7 +88,13 @@ power-cycle verification, the separately confirmed at-most-once 32 km/h write
 when eligible, and final read-only verification. Detailed telemetry, log, and
 manual protocol controls are collapsed. Build 93 changes only compact-report
 selection so the latest motor-authentication or setting failure is retained
-across a later read-only reconnect. The firmware card remains hidden.
+across a later read-only reconnect. The recovered physical build-93 report
+stopped at a motor `DB` challenge rejection before any PC mode, A0, A8, B0, or
+attempt journal. Build 94 records the non-secret DB reason byte. Only exact
+`DB 46` may send one E8, require EA, and start one fresh D8 challenge, matching
+the inspected Shimano desktop caller; every other code and a second rejection
+stop without a loop. No setting command is retried. The firmware card remains
+hidden.
 
 The last verified destination is EU and no higher-speed result exists. The
 paired BLE downgrade remains the riskier fallback; no image has ever been sent

@@ -4514,3 +4514,38 @@ probe, motor-authentication start, US-region attempt, maximum-assist attempt,
 or guided-setting failure, preserving that failure together with later
 read-only recovery. A regression test covers a mode-5 rejection followed by an
 EU reconnect. No bike command or setting write occurred during this code fix.
+
+## 2026-09-26 twenty-sixth correction and build .94: exact DB-46 authentication-lock recovery
+
+The recovered build-.93 physical report establishes the missing boundary. The
+same bike again returned the exact stock D4.5.0.0/M4.4.8.0 pair, application
+slot 0D, EU destination, configured maximum 25.00 km/h, and destination-1
+ceiling 32.18 km/h. The confirmed setting action then stopped when the first
+motor D8 challenge received opcode DB. It disconnected before PC mode, A0, A8,
+B0, or either durable setting journal. The last verified physical state is
+therefore still EU/25 km/h, and the failed action did not consume the page's
+at-most-once destination attempt.
+
+Build .93 discarded the byte following DB, so that report cannot distinguish
+the desktop library's `3A` command-not-disposed, `3B` authentication-unnecessary,
+or `46` authentication-lock results. Build .94 now retains only that non-secret
+reason byte in the sanitized log. Every code except exact `46` remains a hard
+stop. A short DB, timeout, malformed DA, failed E8, EB, or another DB after
+recovery also stops and disconnects.
+
+For exact `DB 46`, build .94 implements the bounded caller policy already
+recovered from E-TUBE Project 3.4.5: send one serial-derived E8, require a
+normal EA, clear any collected challenge fragments, and start one fresh D8
+exchange. There is no loop. If the fresh D8 succeeds, the normal three E0
+fragments and exact E2 completion continue; because the lock-release E8 has
+already succeeded, no second E8 is sent. The destination workflow can only
+begin after that complete authentication result. A0, A8, and B0 behavior,
+journals, confirmation, and no-retry rules are unchanged.
+
+The motor regression suite proves the unchanged normal path, retained DB-3A
+diagnostic with no E8, exact DB46 wire order (`D8, E8, D8, E0 x3`), one-E8
+invariant, second-DB stop, and unlock-failure stop. These are synthetic
+transport results. Build .94 has not yet received a physical DB reason or sent
+a setting command; the next live run must be treated as a new explicitly
+confirmed action, and its compact report must be preserved whatever the DB
+code or later outcome.

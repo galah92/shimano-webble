@@ -93,7 +93,7 @@
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, destination, current assist ceiling, and the motor's US-profile ceiling in one batch. The target is US (value 1). Allow up to 110 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Build 93 retains build 91's experimental path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Build 94 retains build 91's experimental path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
 <div class="card"><button id="setUSMax" disabled>Set assist ceiling to safe US target</button>
 <label class="check"><input id="maxAssistPowerCycle" type="checkbox" /> <span>I physically turned the bike fully off and back on after the recorded assist-ceiling attempt.</span></label>
 <div id="maxAssistWriteStatus" class="muted">Read bike information first. This one-attempt setter is available only after the exact D4.5.0/M4.4.8 pair reports US, a lower current ceiling, and a higher US-profile ceiling. It journals before B0, never retries, and requires a later power-cycle readback.</div></div>
@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-09-26.93';
+const BUILD = '2026-09-26.94';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -3014,7 +3014,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 confirmed. Build 93 retains the evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
+    return 'D4.5.0 confirmed. Build 94 retains the evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -3144,7 +3144,7 @@ async function identifyDrive() {
       ? commandAttemptStatus(probeRecord)
       : results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'D4.5.0 verified. Build 93: use the guided Set US region once action for the bounded two-handshake display-owned mode-5 experiment.'
+      : s.directWriteEligible ? 'D4.5.0 verified. Build 94: use the guided Set US region once action for the bounded two-handshake display-owned mode-5 experiment.'
       : regionReadiness(model, firmware, destination);
     if(destination?.[4]===1&&Number.isInteger(currentMax)&&Number.isInteger(usMax)) {
       const safeTarget=stockMaxAssistUsTarget(usMax);
@@ -3260,8 +3260,51 @@ async function authenticateMotor() {
   $('motorStatus').textContent = 'Authenticating motor…';
   log('--- motor authentication start; region and firmware unchanged ---');
   let serialReply, serial, material, challenge, encrypted;
+  let authLockRecovered = false;
   const parts = new Map();
   const has = (data, prefix) => prefix.every((b, i) => data[i] === b);
+  const codeHex = code => code.toString(16).padStart(2, '0').toUpperCase();
+  const clearChallengeParts = () => {
+    for (const part of parts.values()) part.fill(0);
+    parts.clear();
+  };
+  const requestChallenge = async label => {
+    clearChallengeParts();
+    const packet = Uint8Array.of(0, 0x16, 0xd8, ...material.request);
+    try {
+      return await motorExchange(s, label, [packet], data => {
+        if (has(data, [0, 0x16, 0xdb])) {
+          if (data.length < 4) throw new Error('Short motor challenge rejection');
+          return {kind: 'rejected', code: data[3]};
+        }
+        if (!has(data, [0, 0x16, 0xda])) return;
+        if (data.length < 10) throw new Error('Short motor challenge fragment');
+        const tag = data[3], size = tag === 0x34 ? 4 : 6;
+        if (![0x16, 0x26, 0x34].includes(tag)) throw new Error('Unexpected motor challenge fragment tag');
+        if (tag === 0x34 && (data[8] !== 255 || data[9] !== 255)) throw new Error('Invalid final motor challenge padding');
+        const part = data.slice(4, 4 + size), old = parts.get(tag);
+        if (old && !old.every((b, i) => b === part[i])) throw new Error('Conflicting motor challenge fragment');
+        parts.set(tag, part);
+        if (!old) log(`RX motor challenge fragment ${tag.toString(16).toUpperCase()} (payload omitted)`);
+        if (parts.size === 3) return {kind: 'challenge', value: Uint8Array.of(
+          ...parts.get(0x16), ...parts.get(0x26), ...parts.get(0x34))};
+      });
+    } finally { packet.fill(0); }
+  };
+  const unlockRegulation = async label => {
+    const packet = Uint8Array.of(0, 0x16, 0xe8, ...material.request);
+    try {
+      await motorExchange(s, label, [packet], data => {
+        if (has(data, [0, 0x16, 0xeb])) {
+          const code=data.length>3?` ${codeHex(data[3])}`:'';
+          throw new Error(`Motor regulation unlock rejected${code}`);
+        }
+        if (!has(data, [0, 0x16, 0xea])) return;
+        if (data.length < 4) throw new Error('Short motor regulation unlock reply');
+        return true;
+      });
+    } finally { packet.fill(0); }
+  };
   try {
     serialReply = await motorExchange(s, 'serial read', [Uint8Array.of(0, 1, 0x3c, 0)], data => {
       if (!has(data, [0, 1, 0x3e])) return;
@@ -3272,19 +3315,23 @@ async function authenticateMotor() {
     if (serial.every(b => b === 0) || serial.every(b => b === 255)) throw new Error('Unavailable motor serial');
     log('Motor serial received (value omitted).');
     material = motorMaterial(serial);
-    challenge = await motorExchange(s, 'challenge request', [Uint8Array.of(0, 0x16, 0xd8, ...material.request)], data => {
-      if (has(data, [0, 0x16, 0xdb])) throw new Error('Motor replied DB; APK fallback requires separate investigation');
-      if (!has(data, [0, 0x16, 0xda])) return;
-      if (data.length < 10) throw new Error('Short motor challenge fragment');
-      const tag = data[3], size = tag === 0x34 ? 4 : 6;
-      if (![0x16, 0x26, 0x34].includes(tag)) throw new Error('Unexpected motor challenge fragment tag');
-      if (tag === 0x34 && (data[8] !== 255 || data[9] !== 255)) throw new Error('Invalid final motor challenge padding');
-      const part = data.slice(4, 4 + size), old = parts.get(tag);
-      if (old && !old.every((b, i) => b === part[i])) throw new Error('Conflicting motor challenge fragment');
-      parts.set(tag, part);
-      if (!old) log(`RX motor challenge fragment ${tag.toString(16).toUpperCase()} (payload omitted)`);
-      if (parts.size === 3) return Uint8Array.of(...parts.get(0x16), ...parts.get(0x26), ...parts.get(0x34));
-    });
+    let challengeResult = await requestChallenge('challenge request');
+    if (challengeResult.kind === 'rejected') {
+      const code = challengeResult.code, printable = codeHex(code);
+      log(`RX motor challenge rejection DB ${printable} (reason code retained; payload omitted).`);
+      if (code !== 0x46)
+        throw new Error(`Motor challenge rejected DB ${printable}; only authentication-lock code 46 permits recovery`);
+      await unlockRegulation('authentication-lock release');
+      authLockRecovered = true;
+      log('MILESTONE: exact authentication-lock response DB 46 released by one E8/EA exchange; starting one fresh D8 challenge. No setting write sent.');
+      challengeResult = await requestChallenge('fresh challenge after DB 46');
+      if (challengeResult.kind === 'rejected') {
+        const repeated = codeHex(challengeResult.code);
+        log(`RX fresh motor challenge rejection DB ${repeated} (reason code retained; payload omitted).`);
+        throw new Error(`Fresh challenge after DB 46 recovery rejected DB ${repeated}; no further recovery sent`);
+      }
+    }
+    challenge = challengeResult.value;
     encrypted = await encryptBlock(material.key, challenge);
     assertCurrent(s);
     const packets = [
@@ -3302,19 +3349,12 @@ async function authenticateMotor() {
       });
     } finally { for (const packet of packets) packet.fill(0); }
     assertCurrent(s);
-    await motorExchange(s, 'regulation unlock',
-      [Uint8Array.of(0, 0x16, 0xe8, ...material.request)], data => {
-        if (has(data, [0, 0x16, 0xeb])) {
-          const code=data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:'';
-          throw new Error(`Motor regulation unlock rejected${code}`);
-        }
-        if (!has(data, [0, 0x16, 0xea])) return;
-        if (data.length < 4) throw new Error('Short motor regulation unlock reply');
-        return data.slice(0,4);
-      });
+    if (!authLockRecovered) await unlockRegulation('regulation unlock');
     assertCurrent(s);
     s.motorAuthenticated = true;
-    log('MILESTONE: motor authentication completed and E8 regulation unlock returned EA. Region and firmware remain unchanged.');
+    log(authLockRecovered
+      ? 'MILESTONE: motor authentication completed after the bounded DB 46 recovery. The one E8/EA exchange preceded the fresh D8 challenge; no second unlock was sent. Region and firmware remain unchanged.'
+      : 'MILESTONE: motor authentication completed and E8 regulation unlock returned EA. Region and firmware remain unchanged.');
     $('motorStatus').textContent = 'Motor regulation setting unlocked for this connection.';
     if (s.currentDestination === 0) $('regionStatus').textContent =
       probeRecord?.kind==='command-us-region'
