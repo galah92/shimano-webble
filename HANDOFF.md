@@ -126,8 +126,8 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The page source is now build `2026-09-26.92`. Build 91 was published and build
-92 makes no protocol change: it reduces the normal interface to one contextual
+The page source is now build `2026-09-26.93`. Build 91 was published and builds
+92/93 make no protocol change: build 92 reduces the normal interface to one contextual
 button. **Connect and check bike** remains read-only and reports both
 assist-speed ceilings. Only after those reads prove eligibility does that same
 button become **Set US region once**. Subsequent states expose only read-only
@@ -135,7 +135,9 @@ power-cycle verification, then—if US persisted with a lower ceiling—**Set 32
 km/h once**, followed by its read-only power-cycle verification. Each write has
 a separate confirmation. The detailed telemetry, sanitized log, and old manual
 buttons are collapsed under **Technical details and log** → **Manual protocol
-controls**. Build 91's retained destination branch
+controls**. Build 93 also keeps the connection containing the latest motor
+authentication or setting attempt in the compact report even after a later
+read-only reconnect. Build 91's retained destination branch
 is gated by the exact D4.5.0/M4.4.8 pair, EU readback, motor authentication, and
 no prior attempt. It reads the current lighting value, sends display-local
 `00 0C 05`, requires `2C 00` and the exact motor mode-5/slot completion, sends
@@ -155,7 +157,7 @@ non-US reconnect verification. If A0 may have run without A8, the status also
 requires a physical bike power cycle before another setting tool.
 
 Build 91 adds a second, independent stock maximum-assist `B0` setter, exposed
-by build 92 only when it is the next eligible guided action. It remains disabled
+by build 93 only when it is the next eligible guided action. It remains disabled
 at EU and therefore cannot run
 in the last verified bike state. Its gate requires a verified/authenticated
 session, motor authentication, the exact stock pair, US destination, both
@@ -401,13 +403,13 @@ The desktop/PCE transport and wired-patch contradiction are in
 ## What could move the goal forward
 
 The offline bridge mapping now identifies a display-owned protected-mode path
-that no previous bike run exercised. Build 92 retains build 91's destination setter as the next
+that no previous bike run exercised. Build 93 retains build 91's destination setter as the next
 lower-risk live experiment: it
 changes ownership rather than timing a phone-owned mode, selects mode 5 to
 match Shimano's known desktop destination-setting context, and freshly
 re-establishes that mode after A2 without consuming the A0 gate.
 
-1. Open build 92 with the bike
+1. Open build 93 with the bike
    stationary, keep the phone close to the display,
    enter the passkey, and press **Connect and check bike**. Record current
    `B4/B6` plus US-profile `BC/BE`. If the guarded action becomes available,
@@ -427,7 +429,7 @@ re-establishes that mode after A2 without consuming the A0 gate.
    dispatch. On every outcome, do not repeat B0. Fully power-cycle, then press
    **I power-cycled — verify 32 km/h**; only that
    separate same-device result can establish persistence.
-5. On `A3 3A` or `AB 3A` plus EU, do not repeat build 92's action. The next
+5. On `A3 3A` or `AB 3A` plus EU, do not repeat build 93's action. The next
    no-new-hardware candidate is the hidden exact-stock D4.3.0/M4.2.1 paired
    workflow, not the modified-D4.5.0.1 route. Its transfer/recovery coordinator,
    one explicit display-owned A0→A8 transaction, immediate readback, power-cycle persistence gate,
@@ -453,7 +455,7 @@ evidence of a region-setting menu (`RESEARCH.md`, latest section).
 
 ## Repository map and reproducibility
 
-- [`index.html`](index.html): public single-file application source. Build 92's
+- [`index.html`](index.html): public single-file application source. Build 93's
   first guided action is read-only; the same button exposes the display-owned
   destination setter and separately gated stock B0 setter only when each is the
   next verified step. Technical controls are collapsed and the firmware

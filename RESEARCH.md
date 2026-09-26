@@ -4494,3 +4494,23 @@ hidden and unwired. Synthetic browser coverage proves the initial screen has
 one visible button and that the guided control advances from the read-only EU
 check to only the US action, pending verification, and the ceiling action. No
 bike command, setting write, or firmware transfer occurred during this UI work.
+
+## 2026-09-26 twenty-fifth correction and build .93: retain failed-attempt reports
+
+A build-.92 compact report from the physical bike freshly verifies the exact
+stock D4.5.0.0/M4.4.8.0 pair, application slot 0D, EU destination, configured
+25.00 km/h maximum, and destination-1 ceiling 32.18 km/h. Its final line proves
+that represented connection was read-only. The user reports that a setting
+action had errored, but the compact report contains no motor-authentication,
+A0, A8, rejection, or setting-attempt line. The outcome of that reported action
+therefore cannot be inferred and it must not be repeated from this evidence.
+
+The mismatch exposed a report-selection defect: after any disconnect and
+read-only reconnect, `exportLog()` began at the newest `Connected` line and
+could omit the entire preceding failed setting session even though the full log
+remained in session storage. Build .93 makes no command or gate change. It
+anchors the compact report at the connection preceding the latest bootloader
+probe, motor-authentication start, US-region attempt, maximum-assist attempt,
+or guided-setting failure, preserving that failure together with later
+read-only recovery. A regression test covers a mode-5 rejection followed by an
+EU reconnect. No bike command or setting write occurred during this code fix.

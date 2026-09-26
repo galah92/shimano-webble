@@ -93,7 +93,7 @@
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, destination, current assist ceiling, and the motor's US-profile ceiling in one batch. The target is US (value 1). Allow up to 110 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Build 92 retains build 91's experimental path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Build 93 retains build 91's experimental path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
 <div class="card"><button id="setUSMax" disabled>Set assist ceiling to safe US target</button>
 <label class="check"><input id="maxAssistPowerCycle" type="checkbox" /> <span>I physically turned the bike fully off and back on after the recorded assist-ceiling attempt.</span></label>
 <div id="maxAssistWriteStatus" class="muted">Read bike information first. This one-attempt setter is available only after the exact D4.5.0/M4.4.8 pair reports US, a lower current ceiling, and a higher US-profile ceiling. It journals before B0, never retries, and requires a later power-cycle readback.</div></div>
@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-09-26.92';
+const BUILD = '2026-09-26.93';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -3014,7 +3014,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 confirmed. Build 92 retains the evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
+    return 'D4.5.0 confirmed. Build 93 retains the evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -3144,7 +3144,7 @@ async function identifyDrive() {
       ? commandAttemptStatus(probeRecord)
       : results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'D4.5.0 verified. Build 92: use the guided Set US region once action for the bounded two-handshake display-owned mode-5 experiment.'
+      : s.directWriteEligible ? 'D4.5.0 verified. Build 93: use the guided Set US region once action for the bounded two-handshake display-owned mode-5 experiment.'
       : regionReadiness(model, firmware, destination);
     if(destination?.[4]===1&&Number.isInteger(currentMax)&&Number.isInteger(usMax)) {
       const safeTarget=stockMaxAssistUsTarget(usMax);
@@ -3925,8 +3925,16 @@ $('guidedUS').onclick=runGuidedWorkflow;
 function exportLog() {
   let snapshot = logEl.textContent;
   const starts = [...snapshot.matchAll(/^\[[^\]\n]+\] Connected;.*$/gm)];
-  const probeStart = snapshot.lastIndexOf('Bootloader entry/exit probe started.');
-  const testStart = probeStart < 0 ? null : starts.filter(item => item.index <= probeStart).at(-1);
+  // A failed mutation can disconnect before a later read-only reconnect. Keep
+  // the connection that began the newest consequential workflow, rather than
+  // silently slicing the failure away at the newest Connected line.
+  const trackedStart=Math.max(
+    snapshot.lastIndexOf('Bootloader entry/exit probe started.'),
+    snapshot.lastIndexOf('--- motor authentication start;'),
+    snapshot.lastIndexOf('--- US-region attempt start;'),
+    snapshot.lastIndexOf('--- one-attempt stock maximum-assist transaction start ---'),
+    snapshot.lastIndexOf('Guided setting action stopped:'));
+  const testStart = trackedStart < 0 ? null : starts.filter(item => item.index <= trackedStart).at(-1);
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
   const lines = snapshot.split('\n').filter(Boolean);
   // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.

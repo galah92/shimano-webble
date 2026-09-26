@@ -45,6 +45,20 @@ class LogExportTests(unittest.TestCase):
         self.assertNotIn('OLD RESULT', copied)
         self.assertIn('END SHIMANO LOG', copied)
 
+    def test_setting_failure_survives_later_read_only_reconnect(self):
+        failed='[one] Connected; setting session\n'
+        failed+='[one] --- motor authentication start; region and firmware unchanged ---\n'
+        failed+='[one] MILESTONE: motor authentication completed and E8 regulation unlock returned EA.\n'
+        failed+='[one] --- US-region attempt start; target OEM slot 1 = US (1) ---\n'
+        failed+='[one] US-region attempt stopped: protected PC mode 5 rejected 3A.\n'
+        latest='[two] Connected; read-only recovery\n[two] Current destination: EU\n'
+        self.set_log(failed+latest)
+        self.page.locator('#copyLog').click()
+        copied=self.page.evaluate('window.copied')
+        self.assertIn('motor authentication completed',copied)
+        self.assertIn('US-region attempt stopped',copied)
+        self.assertIn('Current destination: EU',copied)
+
     def test_report_preserves_entry_failure_and_restart(self):
         source='[one] Connected; test\n[one] Bootloader entry/exit probe started.\n'
         source+='[one] QUERY TRAFFIC setup / 2AFD: noise\n'*1000
