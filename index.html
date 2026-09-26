@@ -32,7 +32,7 @@
 <body>
 <h1>Shimano E5000 bike-status check</h1>
 <div class="muted" id="build"></div>
-<p>This page checks the connected bike’s motor, firmware, and current region. The guided check authenticates the BLE session and reads status; it does not enter motor PC mode or change the region.</p>
+<p>This page checks the connected bike’s motor, firmware, current region, and configured assist-speed ceiling. The guided check authenticates the BLE session and reads status; it does not enter motor PC mode or change a setting.</p>
 <div class="card"><div class="kv">
 <div>Secure context</div><div id="secure">—</div>
 <div>Web Bluetooth</div><div id="webbt">—</div>
@@ -43,6 +43,8 @@
 <div>2AF4 challenge</div><div><code id="challenge">—</code></div>
 <div>Current region</div><div id="region">Not read</div>
 <div>US-region status</div><div id="regionStatus">Read bike information first</div>
+<div>Current assist ceiling</div><div id="assistLimit">Not read</div>
+<div>US-profile ceiling</div><div id="usAssistLimit">Not read</div>
 <div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div></div>
@@ -52,15 +54,15 @@
 <div class="muted" id="passkeyStatus">Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.</div>
 </div>
 <div class="card">
-<strong>Check the bike after the rejected setting command</strong>
-<p>Build 73 received error 3A when staging the unchanged lighting time. Enter the passkey and press once to verify the motor firmware and current region. This check does not enter PC mode or try to change the region.</p>
+<strong>Check the bike before the experimental write</strong>
+<p>Enter the passkey and press once to verify the motor firmware and current region. This check does not enter PC mode or try to change the region.</p>
 <div class="row"><button id="guidedUS" disabled>Connect and check bike</button></div>
 <div id="guidedUSStatus" role="status">Enter the six-digit Shimano passkey.</div>
 <div class="muted">No motor unlock, PC mode, region setter, firmware image, erase, bootloader, or downgrade command is sent by this check.</div>
 </div>
 <div class="card" hidden aria-hidden="true">
-<strong>Retired firmware preparation workflow</strong>
-<p>Kept inert in this build for recovery-code regression tests. It is not part of the US-region workflow.</p>
+<strong>Staged stock firmware preparation workflow</strong>
+<p>Kept hidden pending explicit live authorization. Its exact-file, transfer, one-write, persistence, recovery, and restoration path is available for synthetic regression tests but is not part of the visible US-region workflow.</p>
 <div class="workflow-files">
 <div><strong>1. Download</strong><br />
   <a href="https://etuning-app.com/wp-content/uploads/2024/11/5000_430.zip" target="_blank" rel="noopener">Preparation ZIP</a> ·
@@ -82,16 +84,19 @@
 <div class="row"><button id="connect">Connect Shimano</button><button id="disconnect" disabled>Disconnect</button></div>
 <div class="row"><button id="probe" disabled>Run read-only probe</button><button id="authenticate" disabled>Authenticate session</button></div>
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
-<div class="muted">Read display, drive-unit, and destination information in one batch. The target is US (value 1). Allow up to 80 seconds; copy the log when the summary appears.</div></div>
+<div class="muted">Read display, drive-unit, destination, current assist ceiling, and the motor's US-profile ceiling in one batch. The target is US (value 1). Allow up to 110 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Enabled after motor authentication on the verified D4.5.0/M4.4.8 pair at EU. It enters PC mode, then fires A0 then A8 as one fast burst inside the live mode-4 window, reads the region back, and exits. It sends one destination command at most, then reads back; it never changes firmware. Persistence still needs a power cycle.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Experimental build 91 path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
+<div class="card"><button id="setUSMax" disabled>Set assist ceiling to safe US target</button>
+<label class="check"><input id="maxAssistPowerCycle" type="checkbox" /> <span>I physically turned the bike fully off and back on after the recorded assist-ceiling attempt.</span></label>
+<div id="maxAssistWriteStatus" class="muted">Read bike information first. This one-attempt setter is available only after the exact D4.5.0/M4.4.8 pair reports US, a lower current ceiling, and a higher US-profile ceiling. It journals before B0, never retries, and requires a later power-cycle readback.</div></div>
 </details>
 <div class="row"><button id="copyLog">Copy log</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <script>
 'use strict';
-const BUILD = '2026-09-14.77';
+const BUILD = '2026-09-25.91';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -1046,6 +1051,24 @@ const FIRMWARE_IMAGES = Object.freeze({
   '44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb': 'restoration',
   '9ea350e988345a9d9fb41c1363562ca190f1a8d5e1cc8a38c6373f69b877f033': 'restoration',
 });
+// Unwired research branch: construct a five-byte, same-family D4.5.0.1
+// experiment from the exact reviewed D4.5.0.0 raw image. The two Thumb NOPs
+// remove only the active-PC-mode rejection branches in A0/A8; the A0 zero
+// target and one-shot A0->A8 gate remain. The build-byte marker makes a later
+// native D read distinguish experimental 4.5.0.1 from restored stock 4.5.0.0.
+// This builder never authorizes a transfer and has no UI caller.
+const D450_PC_MODE_PATCH = Object.freeze({
+  name:'D4.5.0 PC-mode gate experiment',size:138072,
+  inputHash:'44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb',
+  outputHash:'0dbbb3d3b634d831d8450d2758d953502bfdc7f16ac8640a4e3ca46fff3fff18',
+  peerHash:'9ea350e988345a9d9fb41c1363562ca190f1a8d5e1cc8a38c6373f69b877f033',
+  outputVersion:'4.5.0.1',
+  sites:Object.freeze([
+    Object.freeze({name:'readback build marker',offset:0x12,original:[0x00],replacement:[0x01]}),
+    Object.freeze({name:'A0 active-mode rejection',offset:0x152c8,original:[0x2d,0xd1],replacement:[0x00,0xbf]}),
+    Object.freeze({name:'A8 active-mode rejection',offset:0x15394,original:[0x24,0xd1],replacement:[0x00,0xbf]}),
+  ]),
+});
 // The current official D4.5.0 download is a container. Accept only this exact
 // reviewed container, decrypt it locally, then require the reviewed raw hash.
 // The bytes never leave the browser and the container itself is never flashed.
@@ -1072,6 +1095,46 @@ function firmwareHex(data) {
 }
 async function firmwareSha256(data) {
   return firmwareHex(new Uint8Array(await crypto.subtle.digest('SHA-256',data)));
+}
+async function applyReviewedFirmwarePatch(data,profile) {
+  if(!(data instanceof Uint8Array)||!profile||!Number.isInteger(profile.size)||data.length!==profile.size||
+      typeof profile.inputHash!=='string'||typeof profile.outputHash!=='string'||!Array.isArray(profile.sites))
+    throw new Error('Firmware patch input or profile is incomplete');
+  const input=Uint8Array.from(data),inputHash=await firmwareSha256(input);
+  if(inputHash!==profile.inputHash) {input.fill(0);throw new Error('Firmware patch requires the exact reviewed input image');}
+  const output=input.slice(),expectedChanges=[];
+  try {
+    for(const site of profile.sites) {
+      if(!Number.isInteger(site.offset)||!Array.isArray(site.original)||!Array.isArray(site.replacement)||
+          site.original.length!==site.replacement.length||site.offset<0||site.offset+site.original.length>output.length)
+        throw new Error('Invalid reviewed firmware patch site');
+      for(let index=0;index<site.original.length;index++) {
+        const offset=site.offset+index;
+        if(output[offset]!==site.original[index])throw new Error(`Firmware patch site mismatch: ${site.name}`);
+        if(site.original[index]!==site.replacement[index])expectedChanges.push(offset);
+        output[offset]=site.replacement[index];
+      }
+    }
+    const changes=[];
+    for(let index=0;index<input.length;index++)if(input[index]!==output[index])changes.push(index);
+    if(changes.length!==expectedChanges.length||changes.some((value,index)=>value!==expectedChanges[index]))
+      throw new Error('Firmware patch changed bytes outside the reviewed sites');
+    const outputHash=await firmwareSha256(output);
+    if(outputHash!==profile.outputHash)throw new Error('Firmware patch output fingerprint mismatch');
+    return {data:output,inputHash,outputHash,changedBytes:changes.length,
+      sites:profile.sites.map(site=>({name:site.name,offset:site.offset,bytes:site.replacement.length}))};
+  } catch(error) {output.fill(0);throw error;}
+  finally {input.fill(0);}
+}
+async function buildPatchedD450Image(data) {
+  const result=await applyReviewedFirmwarePatch(data,D450_PC_MODE_PATCH);
+  try {
+    const header=firmwareHeader(result.data),version=header.version.join('.');
+    if(header.component!=='D'||version!==D450_PC_MODE_PATCH.outputVersion||header.minimum.join('.')!=='4.4.8.0')
+      throw new Error('Patched D4.5 image header or peer requirement mismatch');
+    return {...result,source:'pc-mode-patch',component:'D',version,
+      checksum:firmwareSum(result.data),geometry:firmwareTransferGeometry(result.data,'D'),installable:false};
+  } catch(error) {result.data.fill(0);throw error;}
 }
 function firmwareWrapperKey(digest) {
   if(!(digest instanceof Uint8Array)||digest.length!==16) throw new Error('Invalid firmware container digest');
@@ -1183,6 +1246,30 @@ async function loadFirmwarePair(files) {
   if (d.source !== m.source || !firmwarePairRequirements(d, m)) throw new Error('Mixed or incompatible component pair');
   return {d, m, source: d.source};
 }
+// No UI caller and no transfer authorization. Load the exact stock restoration
+// pair, derive only the reviewed D image in memory, retain stock M unchanged,
+// and return a non-installable pair for coordinator/unit-test development.
+async function loadPatchedD450FirmwarePair(files) {
+  let stockPair,patched;
+  try {
+    stockPair=await loadFirmwarePair(files);
+    if(stockPair.source!=='restoration'||stockPair.d.hash!==D450_PC_MODE_PATCH.inputHash||
+        stockPair.m.hash!==D450_PC_MODE_PATCH.peerHash||stockPair.d.version.join('.')!=='4.5.0.0'||
+        stockPair.m.version.join('.')!=='4.4.8.0')
+      throw new Error('PC-mode patch requires the exact reviewed D4.5.0/M4.4.8 restoration pair');
+    patched=await buildPatchedD450Image(stockPair.d.data);
+    const dHeader=firmwareHeader(patched.data);
+    const d={...dHeader,source:'pc-mode-patch',hash:patched.outputHash,containerHash:null,archiveHash:null,
+      data:patched.data,geometry:patched.geometry,patchedFrom:patched.inputHash,changedBytes:patched.changedBytes};
+    const m={...stockPair.m,source:'pc-mode-patch'};
+    if(!firmwarePairRequirements(d,m))throw new Error('Patched D4.5.0.1/M4.4.8 peer requirements failed');
+    stockPair.d.data.fill(0);
+    return {d,m,source:'pc-mode-patch',installable:false,
+      restoration:{dHash:stockPair.d.hash,mHash:stockPair.m.hash,dVersion:'4.5.0.0',mVersion:'4.4.8.0'}};
+  } catch(error) {
+    patched?.data.fill(0);stockPair?.d.data.fill(0);stockPair?.m.data.fill(0);throw error;
+  }
+}
 async function loadFirmwareBundle(files) {
   if(files.length!==3&&files.length!==4)
     throw new Error('Choose the preparation ZIP plus both restoration DAT files together');
@@ -1228,6 +1315,7 @@ const FIRMWARE_RECOVERY_JOURNAL_KEY = 'shimano-firmware-recovery-v1';
 const FIRMWARE_JOURNAL_STAGES = new Set(['ready','M-update-entry','M-slot-selection','M-transfer','M-finished',
   'D-update-entry','D-bootloader-entry','D-identity-and-transfer','paired-transfer-finished',
   'reset-request','reset-write-completed','prepared-readback-verification','prepared-readback-verified',
+  'patch-readback-verification','patch-readback-verified',
   'US-write-ready','US-write-attempt','US-readback-verified','US-persistence-verification',
   'US-persistence-verified','restoration-readback-verification','restoration-readback-verified','stopped']);
 function firmwareJournalStorage(storage) {
@@ -1241,18 +1329,23 @@ function validFirmwareJournalComponent(value, component) {
     Number.isInteger(value.size) && value.size>=256 && value.size<=32*1024*1024;
 }
 function validateFirmwareRecoveryJournal(value) {
-  const sourceVersions={preparation:['4.3.0.0','4.2.1.0'],restoration:['4.5.0.0','4.4.8.0']};
+  const sourceVersions={preparation:['4.3.0.0','4.2.1.0'],
+    'pc-mode-patch':['4.5.0.1','4.4.8.0'],restoration:['4.5.0.0','4.4.8.0']};
   const versions=sourceVersions[value?.pair?.source];
+  const effectiveStage=value?.stage==='stopped'?value?.lastStage:value?.stage;
   const baselinePair=`${value?.baseline?.dVersion}/${value?.baseline?.mVersion}`;
   const usStages=['US-write-ready','US-write-attempt','US-readback-verified','US-persistence-verification',
     'US-persistence-verified'];
   const hasUsStage=usStages.includes(value?.stage)||(value?.stage==='stopped'&&usStages.includes(value?.lastStage));
   const validUs=value?.us && typeof value.us.writeConnection==='string' && /^[a-f0-9]{64}$/.test(value.us.writeConnection);
   const resetStages=['reset-request','reset-write-completed','prepared-readback-verification',
-    'prepared-readback-verified',...usStages,'restoration-readback-verification','restoration-readback-verified'];
+    'prepared-readback-verified','patch-readback-verification','patch-readback-verified',...usStages,
+    'restoration-readback-verification','restoration-readback-verified'];
   const hasResetStage=resetStages.includes(value?.stage)||(value?.stage==='stopped'&&resetStages.includes(value?.lastStage));
   const validResetConnection=typeof value?.resetConnection==='string'&&/^[a-f0-9]{64}$/.test(value.resetConnection);
-  const expectedBaseline=value?.pair?.source==='preparation'?'4.5.0.0/4.4.8.0/0':'4.3.0.0/4.2.1.0/1';
+  const expectedBaselines=value?.pair?.source==='restoration'
+    ?new Set(['4.3.0.0/4.2.1.0/1','4.5.0.1/4.4.8.0/1'])
+    :new Set(['4.5.0.0/4.4.8.0/0']);
   if (value?.version!==1 || !Number.isInteger(value.revision) || value.revision<0 ||
       !Number.isInteger(value.attempt) || value.attempt<0 ||
       typeof value.deviceBinding!=='string' || !/^[a-f0-9]{64}$/.test(value.deviceBinding) ||
@@ -1263,17 +1356,22 @@ function validateFirmwareRecoveryJournal(value) {
       !versions || value.pair.d.version!==versions[0] || value.pair.m.version!==versions[1] ||
       !value.baseline || value.baseline.family!==34 || value.baseline.unit!==0 ||
       ![0,1].includes(value.baseline.destination) || !/^[a-f0-9]{64}$/.test(value.baseline.identity||'') ||
-      `${baselinePair}/${value.baseline.destination}`!==expectedBaseline ||
+      !expectedBaselines.has(`${baselinePair}/${value.baseline.destination}`) ||
       typeof value.identitySalt!=='string' || !/^[a-f0-9]{32}$/.test(value.identitySalt) ||
       !validBootloaderFingerprint(value.bootloaderIdentity) ||
       typeof value.completed?.m!=='boolean' || typeof value.completed?.d!=='boolean' ||
       value.completed.d && !value.completed.m ||
-      value.stage==='M-finished' && !value.completed.m ||
+      effectiveStage==='M-finished' && !value.completed.m ||
       ['paired-transfer-finished','reset-request','reset-write-completed','prepared-readback-verification',
-        'prepared-readback-verified','restoration-readback-verification','restoration-readback-verified',
-        ...usStages].includes(value.stage) && (!value.completed.m || !value.completed.d) ||
-      ['prepared-readback-verified',...usStages].includes(value.stage) && value.pair.source!=='preparation' ||
-      ['restoration-readback-verification','restoration-readback-verified'].includes(value.stage) &&
+        'prepared-readback-verified','patch-readback-verification','patch-readback-verified',
+        'restoration-readback-verification','restoration-readback-verified',
+        ...usStages].includes(effectiveStage) && (!value.completed.m || !value.completed.d) ||
+      ['prepared-readback-verification','prepared-readback-verified'].includes(effectiveStage) &&
+        value.pair.source!=='preparation' ||
+      ['patch-readback-verification','patch-readback-verified'].includes(effectiveStage) &&
+        value.pair.source!=='pc-mode-patch' ||
+      usStages.includes(effectiveStage) && !['preparation','pc-mode-patch'].includes(value.pair.source) ||
+      ['restoration-readback-verification','restoration-readback-verified'].includes(effectiveStage) &&
         value.pair.source!=='restoration' ||
       hasResetStage&&!validResetConnection || value.resetConnection!==undefined&&!validResetConnection ||
       hasUsStage && !validUs || value.us!==undefined && !validUs)
@@ -1351,24 +1449,28 @@ function validFirmwareIdentityReference(identityReference,baseline) {
     typeof identityReference.salt==='string'&&/^[a-f0-9]{32}$/.test(identityReference.salt)&&
     validBootloaderFingerprint(identityReference.bootloaderIdentity);
 }
-// Preparation starts only from the observed stock EU pair. Restoration starts
-// only after this journal has proved US through a separate physical-power-cycle
-// readback. This function runs before any update-mode write.
+// Preparation and the bounded PC-mode patch both start only from the observed
+// stock EU pair. Restoration starts only after the preceding temporary pair has
+// proved US through a separate physical-power-cycle readback. This function
+// runs before any update-mode write.
 async function authorizeFirmwarePairTransfer({pair,baseline,identityReference,deviceId,journalStorage}) {
-  if(pair.source==='preparation') {
+  if(['preparation','pc-mode-patch'].includes(pair.source)) {
     if(`${baseline.dVersion}/${baseline.mVersion}/${baseline.destination}`!=='4.5.0.0/4.4.8.0/0')
-      throw new Error('Preparation requires the reviewed original D4.5.0/M4.4.8 EU baseline');
+      throw new Error('Temporary firmware requires the reviewed original D4.5.0/M4.4.8 EU baseline');
     if(!validFirmwareIdentityReference(identityReference,baseline))
       throw new Error('Paired transfer requires a verified bootloader reference for the baseline motor');
     return identityReference;
   }
+  const baselineVersion=`${baseline.dVersion}/${baseline.mVersion}/${baseline.destination}`;
   if(pair.source!=='restoration'||
-      `${baseline.dVersion}/${baseline.mVersion}/${baseline.destination}`!=='4.3.0.0/4.2.1.0/1')
-    throw new Error('Restoration requires the verified prepared D4.3.0/M4.2.1 US baseline');
+      !['4.3.0.0/4.2.1.0/1','4.5.0.1/4.4.8.0/1'].includes(baselineVersion))
+    throw new Error('Restoration requires a verified prepared or patched firmware US baseline');
   const previous=readFirmwareRecoveryJournal(journalStorage);
   if(await firmwareDeviceBinding(deviceId,previous.identitySalt)!==previous.deviceBinding)
     throw new Error('Recovery journal belongs to a different Web Bluetooth device');
-  if(previous.stage!=='US-persistence-verified'||previous.pair.source!=='preparation'||
+  if(previous.stage!=='US-persistence-verified'||
+      !['preparation','pc-mode-patch'].includes(previous.pair.source)||
+      `${previous.pair.d.version}/${previous.pair.m.version}/1`!==baselineVersion||
       previous.baseline.identity!==baseline.identity)
     throw new Error('Restoration requires the journaled US power-cycle verification');
   return {version:1,verified:true,expected:{identity:baseline.identity},salt:previous.identitySalt,
@@ -1378,9 +1480,10 @@ async function authorizeFirmwarePairTransfer({pair,baseline,identityReference,de
 // No UI caller. Authenticated E5000 transport, private credentials and an
 // exact, durable recovery journal are required. Baseline is reread before entry.
 const firmwarePairTransports = new WeakSet();
-async function transferFirmwarePair({files, baseline, credentials, characteristics, subscribe, signal, onStage,
-  identityReference,deviceId,journalStorage}) {
-  const knownVersions = ['4.5.0.0/4.4.8.0', '4.3.0.0/4.2.1.0'];
+async function transferFirmwarePairWithLoader(loadPair,{files, baseline, credentials, characteristics, subscribe, signal,
+  onStage,identityReference,deviceId,journalStorage}) {
+  if(typeof loadPair!=='function')throw new Error('Exact firmware pair loader is required');
+  const knownVersions = ['4.5.0.0/4.4.8.0', '4.3.0.0/4.2.1.0', '4.5.0.1/4.4.8.0'];
   if (!baseline || baseline.family !== 34 || baseline.unit !== 0 || ![0,1].includes(baseline.destination) ||
       !knownVersions.includes(`${baseline.dVersion}/${baseline.mVersion}`))
     throw new Error('Paired transfer requires a fresh reviewed E5000 component baseline');
@@ -1395,7 +1498,7 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
   firmwarePairTransports.add(owner);
   const expectedBaseline={...baseline};
   const keys=credentials.slice();
-  let identitySalt,expectedBootloaderIdentity;
+  let pair,identitySalt,expectedBootloaderIdentity;
   let writer, journal=null, stage = 'file-validation', mFinished = false, dFinished = false;
   const advance = name => {
     stage = name; if (signal?.aborted) throw new Error('Aborted'); onStage?.(name);
@@ -1404,7 +1507,8 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
   try {
     advance('file-validation');
     // Hash and peer-check both actual snapshots before the first bike write.
-    const {d, m, source} = await loadFirmwarePair(files);
+    pair = await loadPair(files);
+    const {d, m, source} = pair;
     const reference=await authorizeFirmwarePairTransfer({pair:{d,m,source},baseline:expectedBaseline,
       identityReference,deviceId,journalStorage});
     expectedBootloaderIdentity={...reference.bootloaderIdentity};
@@ -1452,7 +1556,20 @@ async function transferFirmwarePair({files, baseline, credentials, characteristi
     Object.assign(error, {stage, mFinished, dFinished, deviceStateUnknown: stage !== 'file-validation',
       journalPersisted,reset: false, recoveryVerified: false});
     throw error;
-  } finally { writer?.close(); keys.fill(0); identitySalt?.fill(0); firmwarePairTransports.delete(owner); }
+  } finally {
+    writer?.close(); keys.fill(0); identitySalt?.fill(0);
+    pair?.d.data.fill(0); pair?.m.data.fill(0);
+    firmwarePairTransports.delete(owner);
+  }
+}
+async function transferFirmwarePair(options) {
+  return transferFirmwarePairWithLoader(loadFirmwarePair,options);
+}
+// Unwired build-85 branch. The caller supplies the exact stock restoration
+// files; the only accepted transfer candidate is derived by the reviewed
+// five-byte constructor. No UI control calls this function.
+async function transferPatchedD450Pair(options) {
+  return transferFirmwarePairWithLoader(loadPatchedD450FirmwarePair,options);
 }
 
 // Source Th.q4 recovery_install replays the complete M worker, renegotiates
@@ -1466,8 +1583,11 @@ async function recoverFirmwarePair({files,credentials,characteristics,subscribe,
   if(typeof deviceId!=='string'||!deviceId) throw new Error('Recovery requires the selected Web Bluetooth device ID');
   for (const [name,method] of [['2afa','writeValueWithResponse'],['2afa','writeValueWithoutResponse'],['2afe','writeValueWithResponse']])
     if(typeof characteristics?.[name]?.[method]!=='function') throw new Error(`Missing ${name} ${method}`);
-  const pair=await loadFirmwarePair(files),owner=characteristics['2afa'];
-  let journal=await verifyFirmwareRecoveryInputs({storage:journalStorage,deviceId,pair});
+  let journal=readFirmwareRecoveryJournal(journalStorage);
+  const loadPair=journal.pair.source==='pc-mode-patch'?loadPatchedD450FirmwarePair:loadFirmwarePair;
+  const pair=await loadPair(files),owner=characteristics['2afa'];
+  try {
+  journal=await verifyFirmwareRecoveryInputs({storage:journalStorage,deviceId,pair});
   if(journal.stage==='paired-transfer-finished'&&journal.completed.m&&journal.completed.d)
     return {state:'paired-transfer-finished',source:pair.source,dVersion:pair.d.version.join('.'),mVersion:pair.m.version.join('.'),
       mFinished:true,dFinished:true,reset:false,firmwareVerified:false,regionVerified:false,recoveryVerified:false,installable:false};
@@ -1514,6 +1634,7 @@ async function recoverFirmwarePair({files,credentials,characteristics,subscribe,
     Object.assign(error,{stage,mFinished,dFinished,deviceStateUnknown:stage!=='recovery-validation',journalPersisted,reset:false,recoveryVerified:false});
     throw error;
   } finally {writer?.close();keys.fill(0);salt.fill(0);firmwarePairTransports.delete(owner);}
+  } finally {pair.d.data.fill(0);pair.m.data.fill(0);}
 }
 
 // Reset and readback are separate transactions. The reset write is permitted
@@ -1552,22 +1673,23 @@ async function requestFirmwarePairReset({characteristics,signal,deviceId,connect
     Object.assign(error,{stage,journalPersisted,deviceStateUnknown:resetAttempted,reset:false,rebootVerified:false});throw error;
   } finally {writer?.close();firmwarePairTransports.delete(owner);}
 }
-async function verifyPreparedFirmwareAfterReconnect({journalStorage,deviceId,connection,...transport}) {
+async function verifyTemporaryFirmwareAfterReconnect({expectedSource,verificationStage,verifiedStage,
+  mismatchStage,verifiedKey,journalStorage,deviceId,connection,...transport}) {
   firmwareJournalStorage(journalStorage);
   if(typeof deviceId!=='string'||!deviceId) throw new Error('Verification requires the selected Web Bluetooth device ID');
   let journal=readFirmwareRecoveryJournal(journalStorage);
   if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
     throw new Error('Recovery journal belongs to a different Web Bluetooth device');
-  const retryableReadback=journal.stage==='prepared-readback-verification'||
-    journal.stage==='stopped'&&['reset-request','prepared-readback-verification'].includes(journal.lastStage);
-  if(journal.pair.source!=='preparation'||(journal.stage!=='reset-write-completed'&&!retryableReadback)||
+  const retryableReadback=journal.stage===verificationStage||
+    journal.stage==='stopped'&&['reset-request',verificationStage].includes(journal.lastStage);
+  if(journal.pair.source!==expectedSource||(journal.stage!=='reset-write-completed'&&!retryableReadback)||
       !journal.completed.m||!journal.completed.d)
-    throw new Error('Prepared readback requires a completed preparation reset');
+    throw new Error('Temporary-firmware readback requires a completed reset');
   const expected={identity:journal.baseline.identity,dVersion:journal.pair.d.version,
     mVersion:journal.pair.m.version,destination:journal.baseline.destination};
   const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
-  if(currentConnection===journal.resetConnection) throw new Error('Prepared readback requires a different BLE session');
-  let stage='prepared-readback-verification';
+  if(currentConnection===journal.resetConnection) throw new Error('Temporary-firmware readback requires a different BLE session');
+  const stage=verificationStage;
   const salt=Uint8Array.from(journal.identitySalt.match(/../g),b=>parseInt(b,16));
   try {
     journal=advanceFirmwareRecoveryJournal(journalStorage,journal,stage);
@@ -1575,14 +1697,26 @@ async function verifyPreparedFirmwareAfterReconnect({journalStorage,deviceId,con
       identitySalt:salt});
     if(result.state!=='reconnected-readback-matches') {
       journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});
-      return {...result,state:'prepared-readback-mismatch',preparationVerified:false,journalRetained:true};
+      return {...result,state:mismatchStage,[verifiedKey]:false,journalRetained:true};
     }
-    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'prepared-readback-verified');
-    return {...result,state:'prepared-readback-verified',preparationVerified:true,journalRetained:true};
+    journal=advanceFirmwareRecoveryJournal(journalStorage,journal,verifiedStage);
+    return {...result,state:verifiedStage,[verifiedKey]:true,journalRetained:true};
   } catch(cause) {
     try {journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'stopped',{lastStage:stage});} catch {}
-    throw new Error('Prepared firmware readback failed; journal retained for recovery');
+    throw new Error('Temporary-firmware readback failed; journal retained for recovery');
   } finally {salt.fill(0);}
+}
+async function verifyPreparedFirmwareAfterReconnect(options) {
+  return verifyTemporaryFirmwareAfterReconnect({expectedSource:'preparation',
+    verificationStage:'prepared-readback-verification',verifiedStage:'prepared-readback-verified',
+    mismatchStage:'prepared-readback-mismatch',verifiedKey:'preparationVerified',...options});
+}
+// Requires a different BLE session to report the explicit D4.5.0.1 marker and
+// unchanged M4.4.8 before any destination command can become eligible.
+async function verifyPatchedD450FirmwareAfterReconnect(options) {
+  return verifyTemporaryFirmwareAfterReconnect({expectedSource:'pc-mode-patch',
+    verificationStage:'patch-readback-verification',verifiedStage:'patch-readback-verified',
+    mismatchStage:'patch-readback-mismatch',verifiedKey:'patchVerified',...options});
 }
 
 // Restoration is complete only when a later authenticated connection proves
@@ -1627,9 +1761,10 @@ function preparedUsBaselineMatches(journal,baseline,destination) {
     baseline.identity===journal.baseline.identity && baseline.dVersion===journal.pair.d.version &&
     baseline.mVersion===journal.pair.m.version && baseline.destination===destination;
 }
-// No UI caller. This transaction is valid only after the preparation pair was
-// installed, reset and independently read back. It persists the uncertain-write
-// state before the one allowed destination mutation; readback remains decisive.
+// No UI caller. This transaction is valid only after one of the two exact
+// temporary pairs was installed, reset and independently read back. It persists
+// the uncertain-write state before the one allowed destination mutation;
+// readback remains decisive.
 async function runPreparedUsWriteTransaction({journalStorage,deviceId,connection,readBaseline,writeDestination}) {
   firmwareJournalStorage(journalStorage);
   if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
@@ -1638,12 +1773,14 @@ async function runPreparedUsWriteTransaction({journalStorage,deviceId,connection
   let journal=readFirmwareRecoveryJournal(journalStorage),stage='US-write-validation';
   if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
     throw new Error('Recovery journal belongs to a different Web Bluetooth device');
-  if(journal.stage!=='prepared-readback-verified'||journal.pair.source!=='preparation'||
+  const verifiedTemporary=(journal.stage==='prepared-readback-verified'&&journal.pair.source==='preparation')||
+    (journal.stage==='patch-readback-verified'&&journal.pair.source==='pc-mode-patch');
+  if(!verifiedTemporary||
       !journal.completed.m||!journal.completed.d)
-    throw new Error('US write requires verified preparation firmware');
+    throw new Error('US write requires verified preparation firmware or the reviewed PC-mode patch');
   const before=await readBaseline();
   if(!preparedUsBaselineMatches(journal,before,0))
-    throw new Error('Fresh US-write baseline differs from the verified preparation state');
+    throw new Error('Fresh US-write baseline differs from the verified temporary state');
   const writeConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
   const us={writeConnection};
   journal=advanceFirmwareRecoveryJournal(journalStorage,journal,'US-write-ready',{us});
@@ -1719,7 +1856,8 @@ async function resolveUncertainUsWriteAfterReconnect({journalStorage,deviceId,co
   let journal=readFirmwareRecoveryJournal(journalStorage);
   if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
     throw new Error('Recovery journal belongs to a different Web Bluetooth device');
-  if(journal.stage!=='stopped'||journal.lastStage!=='US-write-attempt'||journal.pair.source!=='preparation')
+  if(journal.stage!=='stopped'||journal.lastStage!=='US-write-attempt'||
+      !['preparation','pc-mode-patch'].includes(journal.pair.source))
     throw new Error('No uncertain US write is available for read-only resolution');
   const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
   if(currentConnection===journal.us.writeConnection)
@@ -1735,6 +1873,378 @@ async function resolveUncertainUsWriteAfterReconnect({journalStorage,deviceId,co
       mutationRetried:false,journalRetained:true};
   return {state:'US-write-outcome-mismatch',destination:actual?.destination,regionVerified:false,
     persistenceVerified:false,mutationRetried:false,journalRetained:true};
+}
+
+// Unwired D4.3.0 fallback. Shimano's old-generation setting protocol reads the
+// circumference with 00 35 04 00 -> 00 35 06 lo hi and writes it with
+// 00 35 00 lo hi -> 00 35 02. Unlike destination=US, a smaller represented
+// circumference makes the displayed speed and accumulated distance inaccurate.
+// Keep this transaction and its journal separate from the preferred US path.
+const WHEEL_FALLBACK_JOURNAL_KEY='shimano-wheel-fallback-v1';
+const WHEEL_FALLBACK_STAGES=new Set(['write-attempt','readback-verified',
+  'persistence-verification','persistence-verified','stopped']);
+function validWheelCircumference(value) {
+  return Number.isInteger(value)&&value>=1300&&value<=3000;
+}
+function wheelFallbackTargetMm(actualMm,{nominalSpeedKph=25,targetSpeedKph=32}={}) {
+  if(!validWheelCircumference(actualMm)||!Number.isFinite(nominalSpeedKph)||
+      !Number.isFinite(targetSpeedKph)||nominalSpeedKph<=0||targetSpeedKph<=nominalSpeedKph)
+    throw new Error('Wheel fallback requires a 1300-3000 mm actual circumference and a higher positive target speed');
+  const targetMm=Math.round(actualMm*nominalSpeedKph/targetSpeedKph);
+  if(!validWheelCircumference(targetMm))
+    throw new Error('Calculated wheel fallback is outside the motor\'s 1300-3000 mm range');
+  return {actualMm,targetMm,nominalSpeedKph,targetSpeedKph,
+    displayRatio:targetMm/actualMm,estimatedRealCutoffKph:nominalSpeedKph*actualMm/targetMm};
+}
+function wheelReadPacket() {return Uint8Array.of(0,0x35,0x04,0);}
+function wheelWritePacket(circumferenceMm) {
+  if(!validWheelCircumference(circumferenceMm))throw new Error('Wheel circumference must be 1300-3000 mm');
+  return Uint8Array.of(0,0x35,0,circumferenceMm&255,circumferenceMm>>>8);
+}
+function parseWheelReadReply(value) {
+  const data=value instanceof Uint8Array?value:Uint8Array.from(value||[]);
+  if(data.length<5||data[0]!==0||data[1]!==0x35||data[2]!==0x06)
+    throw new Error('Malformed wheel-circumference read reply');
+  const circumferenceMm=data[3]|data[4]<<8;
+  if(!validWheelCircumference(circumferenceMm))throw new Error('Wheel readback is outside the accepted range');
+  return circumferenceMm;
+}
+function validateWheelFallbackJournal(value) {
+  const effectiveStage=value?.stage==='stopped'?value?.lastStage:value?.stage;
+  if(value?.version!==1||!Number.isInteger(value.revision)||value.revision<0||
+      !WHEEL_FALLBACK_STAGES.has(value.stage)||value.lastStage!==null&&!WHEEL_FALLBACK_STAGES.has(value.lastStage)||
+      (value.stage==='stopped')!==(value.lastStage!==null)||value.lastStage==='stopped'||
+      typeof value.deviceBinding!=='string'||!/^[a-f0-9]{64}$/.test(value.deviceBinding)||
+      typeof value.identitySalt!=='string'||!/^[a-f0-9]{32}$/.test(value.identitySalt)||
+      typeof value.motorIdentity!=='string'||!/^[a-f0-9]{64}$/.test(value.motorIdentity)||
+      typeof value.writeConnection!=='string'||!/^[a-f0-9]{64}$/.test(value.writeConnection)||
+      !validWheelCircumference(value.originalMm)||!validWheelCircumference(value.targetMm)||
+      value.originalMm===value.targetMm||
+      !['write-attempt','readback-verified','persistence-verification','persistence-verified'].includes(effectiveStage))
+    throw new Error('Invalid wheel fallback journal');
+  return value;
+}
+function writeWheelFallbackJournal(storage,value) {
+  const target=firmwareJournalStorage(storage),journal=validateWheelFallbackJournal(value),encoded=JSON.stringify(journal);
+  target.setItem(WHEEL_FALLBACK_JOURNAL_KEY,encoded);
+  if(target.getItem(WHEEL_FALLBACK_JOURNAL_KEY)!==encoded)throw new Error('Wheel fallback journal did not persist');
+  return journal;
+}
+function readWheelFallbackJournal(storage) {
+  const encoded=firmwareJournalStorage(storage).getItem(WHEEL_FALLBACK_JOURNAL_KEY);
+  if(typeof encoded!=='string'||!encoded)throw new Error('No wheel fallback journal is available');
+  try {return validateWheelFallbackJournal(JSON.parse(encoded));}
+  catch {throw new Error('Invalid wheel fallback journal');}
+}
+function advanceWheelFallbackJournal(storage,journal,stage,{lastStage=null}={}) {
+  return writeWheelFallbackJournal(storage,{...journal,revision:journal.revision+1,stage,lastStage});
+}
+function preparedWheelBaselineMatches(firmwareJournal,baseline) {
+  return !!baseline&&baseline.family===34&&baseline.unit===0&&baseline.destination===0&&
+    baseline.identity===firmwareJournal.baseline.identity&&baseline.dVersion==='4.3.0.0'&&baseline.mVersion==='4.2.1.0';
+}
+async function requirePreparedWheelContext({journalStorage,deviceId,readBaseline}) {
+  const firmwareJournal=readFirmwareRecoveryJournal(journalStorage);
+  if(await firmwareDeviceBinding(deviceId,firmwareJournal.identitySalt)!==firmwareJournal.deviceBinding)
+    throw new Error('Recovery journal belongs to a different Web Bluetooth device');
+  if(firmwareJournal.stage!=='prepared-readback-verified'||firmwareJournal.pair.source!=='preparation'||
+      !firmwareJournal.completed.m||!firmwareJournal.completed.d)
+    throw new Error('Wheel fallback requires the verified stock D4.3.0/M4.2.1 preparation pair');
+  const baseline=await readBaseline();
+  if(!preparedWheelBaselineMatches(firmwareJournal,baseline))
+    throw new Error('Fresh wheel-write baseline differs from the verified prepared EU state');
+  return {firmwareJournal,baseline};
+}
+// The mutation is journaled before dispatch and is never retried here. The
+// caller's readWheel function must issue the exact getter and return an integer.
+async function runPreparedWheelWriteTransaction({journalStorage,deviceId,connection,
+  readBaseline,readWheel,writeWheel,targetMm}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      typeof readBaseline!=='function'||typeof readWheel!=='function'||typeof writeWheel!=='function'||
+      !validWheelCircumference(targetMm))
+    throw new Error('Wheel fallback requires device, connection, target, read and write transports');
+  if(journalStorage.getItem(WHEEL_FALLBACK_JOURNAL_KEY)!==null)
+    throw new Error('A wheel fallback attempt is already journaled; only read-only resolution is allowed');
+  const {firmwareJournal,baseline}=await requirePreparedWheelContext({journalStorage,deviceId,readBaseline});
+  const originalMm=await readWheel();
+  if(!validWheelCircumference(originalMm))throw new Error('Original wheel circumference was not verified');
+  if(originalMm===targetMm)throw new Error('Target wheel circumference already reads back; no mutation is needed');
+  const writeConnection=await firmwareConnectionBinding(connection,firmwareJournal.identitySalt);
+  let wheelJournal={version:1,revision:0,stage:'write-attempt',lastStage:null,
+    deviceBinding:firmwareJournal.deviceBinding,identitySalt:firmwareJournal.identitySalt,
+    motorIdentity:baseline.identity,originalMm,targetMm,writeConnection};
+  writeWheelFallbackJournal(journalStorage,wheelJournal);
+  try {
+    const reply=await writeWheel(targetMm);
+    if(!reply||typeof reply.acknowledged!=='boolean'||
+        reply.errorCode!==undefined&&(!Number.isInteger(reply.errorCode)||reply.errorCode<0||reply.errorCode>255))
+      throw new Error('Wheel write returned an invalid result');
+    if(reply.errorCode!==undefined)
+      throw new Error(`Wheel write rejected with device status ${reply.errorCode.toString(16).padStart(2,'0').toUpperCase()}`);
+    const afterMm=await readWheel();
+    if(afterMm!==targetMm) {
+      wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'stopped',{lastStage:'write-attempt'});
+      return {state:'wheel-readback-mismatch',acknowledged:reply.acknowledged,originalMm,targetMm,
+        circumferenceVerified:false,persistenceVerified:false,journalRetained:true};
+    }
+    wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'readback-verified');
+    return {state:'wheel-readback-verified',acknowledged:reply.acknowledged,originalMm,targetMm,
+      circumferenceVerified:true,persistenceVerified:false,journalRetained:true};
+  } catch(cause) {
+    try {wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'stopped',{lastStage:'write-attempt'});} catch {}
+    const error=new Error('Wheel write outcome is uncertain; reconnect and read the circumference without repeating the mutation');
+    Object.assign(error,{stage:'write-attempt',deviceStateUnknown:true,journalRetained:true});throw error;
+  }
+}
+async function resolveUncertainWheelWriteAfterReconnect({journalStorage,deviceId,connection,readBaseline,readWheel}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      typeof readBaseline!=='function'||typeof readWheel!=='function')
+    throw new Error('Wheel-write resolution requires device, connection and read transports');
+  let wheelJournal=readWheelFallbackJournal(journalStorage);
+  if(wheelJournal.stage!=='stopped'||wheelJournal.lastStage!=='write-attempt')
+    throw new Error('No uncertain wheel write is available for read-only resolution');
+  if(await firmwareDeviceBinding(deviceId,wheelJournal.identitySalt)!==wheelJournal.deviceBinding)
+    throw new Error('Wheel fallback journal belongs to a different Web Bluetooth device');
+  const currentConnection=await firmwareConnectionBinding(connection,wheelJournal.identitySalt);
+  if(currentConnection===wheelJournal.writeConnection)throw new Error('Wheel-write resolution requires a different BLE session');
+  const firmwareJournal=readFirmwareRecoveryJournal(journalStorage),baseline=await readBaseline();
+  if(!preparedWheelBaselineMatches(firmwareJournal,baseline)||baseline.identity!==wheelJournal.motorIdentity)
+    throw new Error('Wheel-write resolution baseline differs from the journaled prepared motor');
+  const circumferenceMm=await readWheel();
+  if(circumferenceMm===wheelJournal.targetMm) {
+    wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'readback-verified');
+    return {state:'wheel-readback-verified',circumferenceMm,mutationRetried:false,
+      circumferenceVerified:true,persistenceVerified:false,journalRetained:true};
+  }
+  if(circumferenceMm===wheelJournal.originalMm)
+    return {state:'wheel-write-not-applied',circumferenceMm,mutationRetried:false,
+      circumferenceVerified:false,persistenceVerified:false,journalRetained:true};
+  return {state:'wheel-write-outcome-mismatch',circumferenceMm,mutationRetried:false,
+    circumferenceVerified:false,persistenceVerified:false,journalRetained:true};
+}
+async function verifyWheelPersistenceAfterPowerCycle({journalStorage,deviceId,connection,
+  powerCycleConfirmed,readBaseline,readWheel}) {
+  firmwareJournalStorage(journalStorage);
+  if(powerCycleConfirmed!==true)throw new Error('Explicit physical power-cycle confirmation is required');
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      typeof readBaseline!=='function'||typeof readWheel!=='function')
+    throw new Error('Wheel persistence verification requires device, connection and read transports');
+  let wheelJournal=readWheelFallbackJournal(journalStorage);
+  const retryable=wheelJournal.stage==='persistence-verification'||
+    wheelJournal.stage==='stopped'&&wheelJournal.lastStage==='persistence-verification';
+  if(wheelJournal.stage!=='readback-verified'&&!retryable)
+    throw new Error('Wheel persistence verification requires a verified write readback');
+  if(await firmwareDeviceBinding(deviceId,wheelJournal.identitySalt)!==wheelJournal.deviceBinding)
+    throw new Error('Wheel fallback journal belongs to a different Web Bluetooth device');
+  const currentConnection=await firmwareConnectionBinding(connection,wheelJournal.identitySalt);
+  if(currentConnection===wheelJournal.writeConnection)throw new Error('Wheel persistence verification requires a different BLE session');
+  const firmwareJournal=readFirmwareRecoveryJournal(journalStorage),stage='persistence-verification';
+  try {
+    wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,stage);
+    const baseline=await readBaseline(),circumferenceMm=await readWheel();
+    const matches=preparedWheelBaselineMatches(firmwareJournal,baseline)&&
+      baseline.identity===wheelJournal.motorIdentity&&circumferenceMm===wheelJournal.targetMm;
+    if(!matches) {
+      wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'stopped',{lastStage:stage});
+      return {state:'wheel-persistence-mismatch',circumferenceMm,powerCycleConfirmed:true,
+        persistenceVerified:false,journalRetained:true};
+    }
+    wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'persistence-verified');
+    return {state:'wheel-persistence-verified',circumferenceMm,powerCycleConfirmed:true,
+      persistenceVerified:true,journalRetained:true};
+  } catch(cause) {
+    try {wheelJournal=advanceWheelFallbackJournal(journalStorage,wheelJournal,'stopped',{lastStage:stage});} catch {}
+    throw new Error('Wheel persistence readback failed; journal retained for another read-only verification');
+  }
+}
+
+// Shimano Cyclist 5.0.2's stock DUUnitDataLink sends category 16 B0 with a
+// little-endian hundredths-of-km/h value and FF FF padding, then expects B2
+// (B3 is the matching setting-error opcode). This path is intentionally
+// independent of destination writes and firmware workflows. It is limited to
+// the exact observed stock E5000 pair after destination=US, saves a salted
+// same-device journal before dispatch, and never repeats a mutation.
+const MAX_ASSIST_US_JOURNAL_KEY='shimano-max-assist-us-v1';
+const MAX_ASSIST_US_STAGES=new Set(['write-attempt','reply-received','readback-verified',
+  'persistence-verification','persistence-verified','stopped']);
+function validMaxAssistHundredths(value) {
+  return Number.isInteger(value)&&value>=1000&&value<=5000;
+}
+function maxAssistSpeedWritePacket(hundredths) {
+  if(!validMaxAssistHundredths(hundredths))
+    throw new Error('Maximum assist speed must be 10.00-50.00 km/h');
+  return Uint8Array.of(0,0x16,0xb0,hundredths&255,hundredths>>>8,0xff,0xff);
+}
+// D4.5.0's exact B0 handler permits a request no higher than the current
+// destination's internal ceiling. For US, BC reports 3218 while Shimano's
+// clients request the user-facing 3200. Never exceed either limit.
+function stockMaxAssistUsTarget(usProfileHundredths) {
+  if(!validMaxAssistHundredths(usProfileHundredths))
+    throw new Error('The motor US-profile ceiling is invalid');
+  return Math.min(usProfileHundredths,3200);
+}
+function validateMaxAssistUsJournal(value) {
+  const effective=value?.stage==='stopped'?value?.lastStage:value?.stage;
+  const expected=value?.expected;
+  if(value?.version!==1||!Number.isInteger(value.revision)||value.revision<0||
+      !MAX_ASSIST_US_STAGES.has(value.stage)||
+      value.lastStage!==null&&!MAX_ASSIST_US_STAGES.has(value.lastStage)||
+      (value.stage==='stopped')!==(value.lastStage!==null)||value.lastStage==='stopped'||
+      !['write-attempt','reply-received','readback-verified','persistence-verification','persistence-verified'].includes(effective)||
+      typeof value.deviceBinding!=='string'||!/^[a-f0-9]{64}$/.test(value.deviceBinding)||
+      typeof value.identitySalt!=='string'||!/^[a-f0-9]{32}$/.test(value.identitySalt)||
+      typeof value.writeConnection!=='string'||!/^[a-f0-9]{64}$/.test(value.writeConnection)||
+      expected?.family!==34||expected?.unit!==0||expected?.dVersion!=='4.5.0.0'||
+      expected?.mVersion!=='4.4.8.0'||expected?.destination!==1||
+      !validMaxAssistHundredths(expected?.usProfileHundredths)||
+      !validMaxAssistHundredths(expected?.targetHundredths)||
+      expected.targetHundredths!==stockMaxAssistUsTarget(expected.usProfileHundredths)||
+      !validMaxAssistHundredths(value.beforeHundredths)||value.beforeHundredths>=expected.targetHundredths)
+    throw new Error('Invalid maximum-assist-speed journal');
+  return value;
+}
+function writeMaxAssistUsJournal(storage,value) {
+  const target=firmwareJournalStorage(storage),journal=validateMaxAssistUsJournal(value),encoded=JSON.stringify(journal);
+  target.setItem(MAX_ASSIST_US_JOURNAL_KEY,encoded);
+  if(target.getItem(MAX_ASSIST_US_JOURNAL_KEY)!==encoded)
+    throw new Error('Maximum-assist-speed journal did not persist');
+  return journal;
+}
+function readMaxAssistUsJournal(storage) {
+  const encoded=firmwareJournalStorage(storage).getItem(MAX_ASSIST_US_JOURNAL_KEY);
+  if(typeof encoded!=='string'||!encoded)throw new Error('No maximum-assist-speed journal is available');
+  try {return validateMaxAssistUsJournal(JSON.parse(encoded));}
+  catch {throw new Error('Invalid maximum-assist-speed journal');}
+}
+function advanceMaxAssistUsJournal(storage,journal,stage,{lastStage=null}={}) {
+  return writeMaxAssistUsJournal(storage,{...journal,revision:journal.revision+1,stage,lastStage});
+}
+function requireFreshMaxAssistUsContext(snapshot,{requireLower=true,targetHundredths,
+  usProfileHundredths}={}) {
+  if(!snapshot||snapshot.family!==34||snapshot.unit!==0||snapshot.dVersion!=='4.5.0.0'||
+      snapshot.mVersion!=='4.4.8.0'||snapshot.destination!==1||
+      !validMaxAssistHundredths(snapshot.currentHundredths)||
+      !validMaxAssistHundredths(snapshot.usProfileHundredths))
+    throw new Error('Fresh exact D4.5.0/M4.4.8 US assist-speed context was not verified');
+  const safeTarget=stockMaxAssistUsTarget(snapshot.usProfileHundredths);
+  if(usProfileHundredths!==undefined&&snapshot.usProfileHundredths!==usProfileHundredths)
+    throw new Error('The motor US-profile ceiling changed from the journaled observation');
+  if(targetHundredths!==undefined&&safeTarget!==targetHundredths)
+    throw new Error('The safe US assist target changed from the journaled target');
+  if(requireLower&&snapshot.currentHundredths>=safeTarget)
+    throw new Error('Current assist ceiling is not lower than the safe US target');
+  return snapshot;
+}
+function maxAssistUsContextMatchesJournal(journal,snapshot) {
+  try {
+    requireFreshMaxAssistUsContext(snapshot,{requireLower:false,
+      targetHundredths:journal.expected.targetHundredths,
+      usProfileHundredths:journal.expected.usProfileHundredths});
+    return snapshot.family===journal.expected.family&&snapshot.unit===journal.expected.unit&&
+      snapshot.dVersion===journal.expected.dVersion&&snapshot.mVersion===journal.expected.mVersion&&
+      snapshot.destination===journal.expected.destination;
+  } catch {return false;}
+}
+// readSnapshot must perform fresh AC/B4/BC reads. writeMaximum must dispatch
+// exactly once and return {acknowledged:boolean,errorCode?:byte}; it is never
+// called unless the durable write-attempt record can be read back byte-for-byte.
+async function runMaxAssistUsWriteTransaction({journalStorage,deviceId,connection,readSnapshot,writeMaximum}) {
+  firmwareJournalStorage(journalStorage);
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      typeof readSnapshot!=='function'||typeof writeMaximum!=='function')
+    throw new Error('Maximum-assist write requires device, connection, read and write transports');
+  if(journalStorage.getItem(MAX_ASSIST_US_JOURNAL_KEY)!==null)
+    throw new Error('A maximum-assist attempt is already journaled; only read-only resolution is allowed');
+  const before=requireFreshMaxAssistUsContext(await readSnapshot());
+  const targetHundredths=stockMaxAssistUsTarget(before.usProfileHundredths);
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  let journal,journalPersisted=false,phase='write-attempt';
+  try {
+    const identitySalt=Array.from(salt,b=>b.toString(16).padStart(2,'0')).join('');
+    journal={version:1,revision:0,stage:'write-attempt',lastStage:null,
+      deviceBinding:await firmwareDeviceBinding(deviceId,identitySalt),identitySalt,
+      writeConnection:await firmwareConnectionBinding(connection,identitySalt),
+      expected:{family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:1,
+        usProfileHundredths:before.usProfileHundredths,targetHundredths},
+      beforeHundredths:before.currentHundredths};
+    writeMaxAssistUsJournal(journalStorage,journal);
+    journalPersisted=true;
+    const reply=await writeMaximum(journal.expected.targetHundredths);
+    if(!reply||typeof reply.acknowledged!=='boolean'||
+        reply.errorCode!==undefined&&(!Number.isInteger(reply.errorCode)||reply.errorCode<0||reply.errorCode>255))
+      throw new Error('Maximum-assist write returned an invalid result');
+    if(!reply.acknowledged||reply.errorCode!==undefined) {
+      journal=advanceMaxAssistUsJournal(journalStorage,journal,'stopped',{lastStage:phase});
+      return {state:'max-assist-write-rejected',errorCode:reply.errorCode,
+        targetHundredths:journal.expected.targetHundredths,mutationRetried:false,
+        ceilingVerified:false,persistenceVerified:false,journalRetained:true};
+    }
+    phase='reply-received';
+    journal=advanceMaxAssistUsJournal(journalStorage,journal,phase);
+    const after=await readSnapshot();
+    if(!maxAssistUsContextMatchesJournal(journal,after)||
+        after.currentHundredths!==journal.expected.targetHundredths) {
+      journal=advanceMaxAssistUsJournal(journalStorage,journal,'stopped',{lastStage:phase});
+      return {state:'max-assist-readback-mismatch',currentHundredths:after?.currentHundredths,
+        targetHundredths:journal.expected.targetHundredths,mutationRetried:false,
+        ceilingVerified:false,persistenceVerified:false,journalRetained:true};
+    }
+    journal=advanceMaxAssistUsJournal(journalStorage,journal,'readback-verified');
+    return {state:'max-assist-readback-verified',currentHundredths:after.currentHundredths,
+      targetHundredths:journal.expected.targetHundredths,mutationRetried:false,
+      ceilingVerified:true,persistenceVerified:false,journalRetained:true};
+  } catch(cause) {
+    if(journalPersisted&&journal&&journal.stage!=='stopped') {
+      try {journal=advanceMaxAssistUsJournal(journalStorage,journal,'stopped',{lastStage:phase});} catch {}
+      const error=new Error('Maximum-assist write outcome is uncertain; power-cycle, reconnect, and read without repeating B0');
+      Object.assign(error,{stage:phase,deviceStateUnknown:true,mutationRetried:false,journalRetained:true,cause});
+      throw error;
+    }
+    throw cause;
+  } finally {salt.fill(0);}
+}
+// A later physical power cycle and different BLE connection are mandatory.
+// This routine contains no write callback, so uncertain outcomes can only be
+// resolved by reading the exact same selected device and stock component pair.
+async function verifyMaxAssistUsPersistenceAfterPowerCycle({journalStorage,deviceId,connection,
+  powerCycleConfirmed,readSnapshot}) {
+  firmwareJournalStorage(journalStorage);
+  if(powerCycleConfirmed!==true)throw new Error('Explicit physical power-cycle confirmation is required');
+  if(typeof deviceId!=='string'||!deviceId||typeof connection!=='string'||!connection||
+      typeof readSnapshot!=='function')
+    throw new Error('Maximum-assist persistence verification requires device, connection and read transport');
+  let journal=readMaxAssistUsJournal(journalStorage);
+  const retryable=journal.stage==='readback-verified'||journal.stage==='persistence-verification'||
+    journal.stage==='stopped'&&['write-attempt','reply-received','persistence-verification'].includes(journal.lastStage);
+  if(!retryable)throw new Error('No maximum-assist outcome is awaiting read-only persistence verification');
+  if(await firmwareDeviceBinding(deviceId,journal.identitySalt)!==journal.deviceBinding)
+    throw new Error('Maximum-assist journal belongs to a different Web Bluetooth device');
+  const currentConnection=await firmwareConnectionBinding(connection,journal.identitySalt);
+  if(currentConnection===journal.writeConnection)
+    throw new Error('Maximum-assist persistence verification requires a different BLE session');
+  const phase='persistence-verification';
+  try {
+    journal=advanceMaxAssistUsJournal(journalStorage,journal,phase);
+    const snapshot=await readSnapshot();
+    const matches=maxAssistUsContextMatchesJournal(journal,snapshot)&&
+      snapshot.currentHundredths===journal.expected.targetHundredths;
+    if(!matches) {
+      journal=advanceMaxAssistUsJournal(journalStorage,journal,'stopped',{lastStage:phase});
+      return {state:'max-assist-persistence-mismatch',currentHundredths:snapshot?.currentHundredths,
+        targetHundredths:journal.expected.targetHundredths,powerCycleConfirmed:true,
+        mutationRetried:false,persistenceVerified:false,journalRetained:true};
+    }
+    journal=advanceMaxAssistUsJournal(journalStorage,journal,'persistence-verified');
+    return {state:'max-assist-persistence-verified',currentHundredths:snapshot.currentHundredths,
+      targetHundredths:journal.expected.targetHundredths,powerCycleConfirmed:true,
+      mutationRetried:false,persistenceVerified:true,journalRetained:true};
+  } catch(cause) {
+    try {journal=advanceMaxAssistUsJournal(journalStorage,journal,'stopped',{lastStage:phase});} catch {}
+    const error=new Error('Maximum-assist persistence readback failed; journal retained for another read-only verification');
+    Object.assign(error,{mutationRetried:false,journalRetained:true,cause});throw error;
+  }
 }
 
 // First-use preflight records the application identity and D-loader identity,
@@ -1767,6 +2277,11 @@ async function createPreparationPreflightJournal({files,credentials,characterist
 function firmwareWorkflowPlan(journal) {
   if(!journal) return {action:'preflight',label:'Start verified preparation',pair:'preparation',mutation:true,powerCycle:false};
   validateFirmwareRecoveryJournal(journal);
+  // The reviewed patch coordinator is intentionally not connected to the
+  // browser action router. Its journal remains visible but cannot become an
+  // accidental install button through this generic plan.
+  if(journal.pair.source==='pc-mode-patch')
+    return {action:'inspect',label:'Unwired PC-mode patch state',pair:'pc-mode-patch',mutation:false,powerCycle:false};
   const transferStages=['ready','M-update-entry','M-slot-selection','M-transfer','M-finished',
     'D-update-entry','D-bootloader-entry','D-identity-and-transfer'];
   const stopped=journal.stage==='stopped',stage=stopped?journal.lastStage:journal.stage;
@@ -1935,11 +2450,8 @@ let connectionAttempt = 0;
 let workflowPasskey = '';
 let workflowDevice = null;
 let commandWorkflowRunning = false;
-// Number of mode-4 -> A0+A8 burst cycles setUS samples per run, trying to catch
-// a moment the SC-E7000 leaves the motor's PC mode live long enough for the
-// burst to land. Tests override this to 1 for deterministic single-cycle runs.
-let usBurstAttempts = 4;
-
+let maxAssistWriteRunning = false;
+let maxAssistJournalProblem = '';
 function log(message) {
   logEl.textContent += `[${new Date().toISOString()}] ${message}\n`;
   logEl.scrollTop = logEl.scrollHeight;
@@ -1985,6 +2497,11 @@ function controls() {
   $('authenticate').disabled = busy || !connected || session?.authenticated || !crypto.subtle;
   $('motorAuth').disabled = busy || !connected || !session?.motorEligible || session?.motorAttempted;
   $('setUS').disabled = busy || !canSetUS(session);
+  const maxAssistJournal=optionalMaxAssistUsJournal();
+  $('setUSMax').disabled = busy || !canSetUSMax(session,maxAssistJournal);
+  $('maxAssistPowerCycle').disabled = busy || maxAssistJournal===null || maxAssistJournal===undefined ||
+    maxAssistJournal?.stage==='persistence-verified';
+  renderMaxAssistWriteStatus(session,maxAssistJournal);
   $('identify').disabled = busy || !connected || !session?.verified || session?.batchDone;
   $('passkey').disabled = busy || session?.authenticated;
   $('guidedUS').disabled = busy || commandWorkflowRunning || !passkeyReady ||
@@ -2004,7 +2521,8 @@ function controls() {
     ?'Passkey ready for required reconnects in this open tab. It is not saved or logged.'
     :'Enter it once. The guided workflow keeps it only in this open tab through required reconnects; it is never saved or logged.';
   if(!firmwareWorkflowRunning) renderFirmwareWorkflowStatus(workflowPlan,connected,filesReady,passkeyReady);
-  if (firmwareWorkflowRunning||commandWorkflowRunning) for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS']) $(id).disabled = true;
+  if (firmwareWorkflowRunning||commandWorkflowRunning||maxAssistWriteRunning)
+    for (const id of ['connect','probe','authenticate','motorAuth','identify','setUS','setUSMax']) $(id).disabled = true;
 }
 function protectedStatus(message, css = '') {
   $('protected').textContent = message;
@@ -2028,6 +2546,8 @@ function resetSession(s) {
   $('drive').textContent = 'Not tested';
   $('region').textContent = 'Not read';
   $('regionStatus').textContent = 'Read bike information first';
+  $('assistLimit').textContent = 'Not read';
+  $('usAssistLimit').textContent = 'Not read';
   $('motorStatus').textContent = 'Read bike information first.';
   protectedStatus('Not tested');
   controls();
@@ -2267,6 +2787,38 @@ async function authenticate() {
     if (session === s) { busy = false; controls(); }
   }
 }
+// BEGIN MAX ASSIST SPEED READS
+// Shimano Cyclist 5.0.2 DUUnitDataLink and independent eMax code agree on
+// category 16 B4/B6 for the current maximum. Cyclist also uses BC/BE with a
+// destination byte to obtain the factory ceiling for that destination. These
+// feed both the read-only status path and the separately gated stock B0
+// transaction under Advanced diagnostics.
+function maxAssistSpeedReadPacket() {
+  return Uint8Array.of(0,0x16,0xb4,0);
+}
+function destinationMaxAssistSpeedReadPacket(destination) {
+  if(!Number.isInteger(destination)||destination<0||destination>5)
+    throw new Error('Expected a known destination value');
+  return Uint8Array.of(0,0x16,0xbc,destination);
+}
+function parseMaxAssistSpeedReply(reply,destination) {
+  const data=bytes(reply),destinationRead=destination!==undefined;
+  const opcode=destinationRead?0xbe:0xb6,offset=destinationRead?4:3;
+  if(data[0]!==0||data[1]!==0x16||data[2]!==opcode||
+      destinationRead&&data[3]!==destination||data.length<offset+2)
+    throw new Error('Malformed maximum-assist-speed reply');
+  const hundredths=data[offset]|data[offset+1]<<8;
+  if(hundredths<1000||hundredths>5000)
+    throw new Error('Maximum-assist-speed value is outside the reviewed range');
+  return hundredths;
+}
+function formatMaxAssistSpeed(hundredths) {
+  if(!Number.isInteger(hundredths)||hundredths<1000||hundredths>5000)
+    throw new Error('Invalid maximum-assist-speed value');
+  return `${(hundredths/100).toFixed(hundredths%100?2:0)} km/h`;
+}
+// END MAX ASSIST SPEED READS
+
 // Fixed connection-setup and information commands from both APKs and capture.
 // Native D/M reads share a prefix: stop the batch on any incomplete native read.
 const INFO_QUERIES = [
@@ -2291,6 +2843,10 @@ const INFO_QUERIES = [
   // ten-byte BLE notification belong to the bridge envelope, not this setting.
   {name: 'Destination slot 0', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 0], prefix: [0, 0x16, 0xae, 0], destination: true, fieldBytes: 5, minLength: 5},
   {name: 'Current destination', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0xac, 1], prefix: [0, 0x16, 0xae, 1], destination: true, fieldBytes: 5, minLength: 5},
+  {name: 'Current maximum assist speed', tx: '2afe', rx: '2afd', packet: maxAssistSpeedReadPacket(),
+    prefix: [0,0x16,0xb6], errorPrefix: [0,0x16,0xb7], fieldBytes: 5, minLength: 5},
+  {name: 'US-profile maximum assist speed', tx: '2afe', rx: '2afd', packet: destinationMaxAssistSpeedReadPacket(1),
+    prefix: [0,0x16,0xbe,1], fieldBytes: 6, minLength: 6},
   // Q5 connection state 43; Shimano names this PU_MD_MODEL_GET.
   // Keep the raw descriptor separate from the independently decoded family code.
   {name: 'Motor model descriptor', tx: '2afe', rx: '2afd', packet: [0, 0x16, 0x7c, 0], prefix: [0, 0x16, 0x7e], errorPrefix: [0, 0x16, 0x7f], fieldBytes: 10, minLength: 10},
@@ -2387,8 +2943,8 @@ function regionName(value) {
     || `Unknown/unavailable (0x${value.toString(16).padStart(2, '0')})`;
 }
 // BEGIN REGION COMPATIBILITY
-// The D4.5.0 setter is present in firmware and gated by PC mode 4/5 plus an A0
-// staging flag. Require the exact bike pair used for the static analysis.
+// The D4.5.0 setter is present in firmware and gated by PC mode 4/5 plus a
+// volatile one-shot flag. Require the exact bike pair used for static analysis.
 function regionCompatibility(results) {
   const field=name=>results.find(r=>r.name===name && r.status==='reply received')?.fields;
   const matches=(value,expected)=>value?.length>=expected.length && expected.every((b,i)=>value[i]===b);
@@ -2407,7 +2963,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 confirmed. Build 76 corrects the model: A0 framing was always valid; the 3A came from PC mode lapsing before A0. A tightened mode-4 burst attempt is available under Advanced diagnostics.';
+    return 'D4.5.0 confirmed. Build 91 offers one evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -2421,7 +2977,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; nine reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
+  log(`--- information batch start; build ${BUILD}; eleven reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -2509,15 +3065,43 @@ async function identifyDrive() {
       $('region').textContent = regionName(destination[4]);
       log(`Current destination: ${regionName(destination[4])} (value ${destination[4]}); target US = 1`);
     }
+    const currentMaxReply=results.find(item=>item.name==='Current maximum assist speed');
+    const usMaxReply=results.find(item=>item.name==='US-profile maximum assist speed');
+    let currentMax,usMax;
+    if(currentMaxReply?.status==='reply received') {
+      try {
+        currentMax=parseMaxAssistSpeedReply(currentMaxReply.fields);
+        $('assistLimit').textContent=formatMaxAssistSpeed(currentMax);
+        log(`Current maximum assist speed: ${formatMaxAssistSpeed(currentMax)} (read-only B4/B6)`);
+      } catch(error) {log(`Current maximum assist speed not decoded: ${error.message}`);}
+    }
+    if(usMaxReply?.status==='reply received') {
+      try {
+        usMax=parseMaxAssistSpeedReply(usMaxReply.fields,1);
+        $('usAssistLimit').textContent=formatMaxAssistSpeed(usMax);
+        log(`US-profile maximum assist speed: ${formatMaxAssistSpeed(usMax)} (read-only BC/BE for destination 1)`);
+      } catch(error) {log(`US-profile maximum assist speed not decoded: ${error.message}`);}
+    }
+    s.currentMaxAssistSpeed=currentMax;
+    s.usProfileMaxAssistSpeed=usMax;
     Object.assign(s,regionCompatibility(results));
     s.currentDestination = destination?.length >= 5 ? destination[4] : undefined;
     $('motorStatus').textContent = s.motorEligible
       ? 'Exact motor pair verified. Protected motor unlock is available; no firmware change is required.'
       : 'Protected access requires the exact D4.5.0/M4.4.8 E50X0 pair and destination readback.';
-    const readiness = results.some(item => item.alternate)
+    let readiness = probeRecord?.kind==='command-us-region'
+      ? commandAttemptStatus(probeRecord)
+      : results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'D4.5.0 verified. Build 76: A0 framing confirmed valid; the 3A was PC mode lapsing before A0. Authenticate the motor, then use Set region to US for the tightened mode-4 burst attempt.'
+      : s.directWriteEligible ? 'D4.5.0 verified. Build 91: authenticate the motor and use Set region to US once for the bounded two-handshake display-owned mode-5 experiment.'
       : regionReadiness(model, firmware, destination);
+    if(destination?.[4]===1&&Number.isInteger(currentMax)&&Number.isInteger(usMax)) {
+      const safeTarget=stockMaxAssistUsTarget(usMax);
+      const internal=usMax===safeTarget?'':` (internal bound ${formatMaxAssistSpeed(usMax)})`;
+      readiness += currentMax<safeTarget
+        ? ` US is reported, but the configured ceiling ${formatMaxAssistSpeed(currentMax)} is below the safe ${formatMaxAssistSpeed(safeTarget)} US target${internal}; no setter was sent.`
+        : ` The configured ceiling is at least the safe ${formatMaxAssistSpeed(safeTarget)} US target${internal}; persistence and real assistance cutoff remain unverified.`;
+    }
     $('regionStatus').textContent = readiness;
     log(readiness);
     if (probeRecord && !probeRecord.verified) {
@@ -2526,6 +3110,7 @@ async function identifyDrive() {
       if(failed.length) throw new Error(`Restart verification incomplete: ${failed.join(', ')}. No additional verification reads sent`);
     }
     await verifyPendingBootloaderProbe(s,results);
+    await verifyPendingMaxAssistUs(s,results);
   } catch (e) {
     if (session === s) {
       log(`Information batch stopped: ${e.message}. Reconnect before retrying.`);
@@ -2680,7 +3265,10 @@ async function authenticateMotor() {
     s.motorAuthenticated = true;
     log('MILESTONE: motor authentication completed and E8 regulation unlock returned EA. Region and firmware remain unchanged.');
     $('motorStatus').textContent = 'Motor regulation setting unlocked for this connection.';
-    if (s.currentDestination === 0) $('regionStatus').textContent = 'Protected motor access unlocked. Ready for the guarded command-only US transaction.';
+    if (s.currentDestination === 0) $('regionStatus').textContent =
+      probeRecord?.kind==='command-us-region'
+        ? commandAttemptStatus(probeRecord)
+        : 'Protected motor access unlocked. Ready for the guarded command-only US transaction.';
   } catch (error) {
     log(`Motor authentication stopped: ${error.message}. Reconnect before retrying.`);
     if (session === s) disconnect();
@@ -2691,10 +3279,80 @@ async function authenticateMotor() {
     if (session === s) { busy = false; controls(); }
   }
 }
+function commandAttemptStatus(record=probeRecord) {
+  if(record?.kind!=='command-us-region')return '';
+  if(record.outcome==='us')return 'A prior US attempt is durably recorded as US on reconnect. No repeat is enabled; assistance cutoff remains unmeasured.';
+  if(record.outcome==='not-us')return 'A prior US attempt is durably recorded as not-US on reconnect. No repeat is enabled; review the saved log before any new experiment.';
+  if(['a0-started','a0-accepted'].includes(record.phase))
+    return 'A prior attempt reached A0 but not A8. The one-shot gate may remain armed; physically power-cycle the bike before another setting tool. This page will not repeat it.';
+  if(['a8-started','a8-replied','immediate-us','immediate-not-us'].includes(record.phase))
+    return 'A prior destination attempt is durably recorded. Use read-only reconnect verification; this page will not repeat the write.';
+  return 'A prior command-only attempt is durably recorded. No repeat is enabled; use the read-only bike check and review the saved log.';
+}
 function canSetUS(s) {
   return !!(s?.verified && s.directWriteEligible === true && s.motorEligible && s.motorAuthenticated
     && s.currentDestination === 0 && !s.regionWriteAttempted &&
-    !(probeRecord && !probeRecord.verified));
+    probeRecord?.kind!=='command-us-region' && !(probeRecord && !probeRecord.verified));
+}
+function optionalMaxAssistUsJournal() {
+  maxAssistJournalProblem='';
+  try {
+    if(localStorage.getItem(MAX_ASSIST_US_JOURNAL_KEY)===null)return null;
+    return readMaxAssistUsJournal(localStorage);
+  } catch(error) {maxAssistJournalProblem=error.message;return undefined;}
+}
+function canSetUSMax(s,journal=optionalMaxAssistUsJournal()) {
+  const commandRecord=probeRecord?.kind==='command-us-region'?probeRecord:null;
+  const regionPersistenceReady=!commandRecord||commandRecord.verified===true&&commandRecord.outcome==='us';
+  let target;
+  try {target=stockMaxAssistUsTarget(s?.usProfileMaxAssistSpeed);}
+  catch {return false;}
+  return !!(journal===null&&regionPersistenceReady&&s?.verified&&s.batchDone&&
+    s.directWriteEligible===true&&s.motorEligible&&s.motorAuthenticated&&
+    s.currentDestination===1&&!s.maxAssistWriteAttempted&&
+    validMaxAssistHundredths(s.currentMaxAssistSpeed)&&
+    s.currentMaxAssistSpeed<target);
+}
+function renderMaxAssistWriteStatus(s,journal=optionalMaxAssistUsJournal()) {
+  const el=$('maxAssistWriteStatus');
+  if(journal===undefined) {
+    el.textContent=`Stored assist-ceiling state is invalid: ${maxAssistJournalProblem||'unknown state'}. No write is allowed.`;
+    return;
+  }
+  if(journal) {
+    const target=formatMaxAssistSpeed(journal.expected.targetHundredths);
+    if(journal.stage==='persistence-verified') {
+      el.textContent=`Verified after a physical power cycle: the same stock motor still reports ${target}. Real riding cutoff remains to be measured.`;
+      return;
+    }
+    if(journal.stage==='readback-verified') {
+      el.textContent=`Immediate ${target} readback was verified. Fully power-cycle the bike, reconnect, tick the confirmation, and run Read region and compatibility. B0 cannot repeat.`;
+      return;
+    }
+    el.textContent=`An assist-ceiling attempt is durably recorded at stage ${journal.stage==='stopped'?journal.lastStage:journal.stage}. B0 cannot repeat. Fully power-cycle, reconnect, tick the confirmation, and run the read-only bike check.`;
+    return;
+  }
+  if(!s?.device.gatt.connected) {el.textContent='Connect, authenticate, and read bike information first.';return;}
+  if(!s.batchDone) {el.textContent='Read bike information first.';return;}
+  if(s.currentDestination!==1) {el.textContent='The current destination must first be freshly verified as US.';return;}
+  if(probeRecord?.kind==='command-us-region'&&!(probeRecord.verified&&probeRecord.outcome==='us')) {
+    el.textContent='The recorded US destination attempt must first persist across a reconnect; no ceiling write is enabled.';
+    return;
+  }
+  if(!s.directWriteEligible) {el.textContent='This setter is limited to the exact stock D4.5.0/M4.4.8 E5000 pair.';return;}
+  if(!validMaxAssistHundredths(s.currentMaxAssistSpeed)||!validMaxAssistHundredths(s.usProfileMaxAssistSpeed)) {
+    el.textContent='Both the current and US-profile assist ceilings must be freshly read.';return;
+  }
+  const target=stockMaxAssistUsTarget(s.usProfileMaxAssistSpeed);
+  if(s.currentMaxAssistSpeed>=target) {
+    el.textContent=`No write needed: current ${formatMaxAssistSpeed(s.currentMaxAssistSpeed)} is not below the safe US target ${formatMaxAssistSpeed(target)}.`;return;
+  }
+  if(!s.motorAuthenticated) {
+    el.textContent=`US with a lower ${formatMaxAssistSpeed(s.currentMaxAssistSpeed)} ceiling is verified. Authenticate the motor to arm the one-attempt stock B0 setter.`;return;
+  }
+  const internal=s.usProfileMaxAssistSpeed===target?'':
+    ` (motor internal ceiling ${formatMaxAssistSpeed(s.usProfileMaxAssistSpeed)})`;
+  el.textContent=`Ready for one journaled attempt: set ${formatMaxAssistSpeed(s.currentMaxAssistSpeed)} to Shimano's safe US target ${formatMaxAssistSpeed(target)}${internal}. This has synthetic coverage only.`;
 }
 function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength=3,timeout=8000,privatePacket=false}) {
   assertCurrent(s);
@@ -2738,17 +3396,110 @@ function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength
     } catch(error){finish(error);}
   });
 }
-// The desktop opens ordinary PC-link mode 1 before its inspection UI can enter
-// mode 5. D4.5.0 also defines a separately keyed mode 4, and both A0 and A8
-// explicitly require mode 4 or 5. Its tables store each UInt16 as [high, low],
-// then its transmit loop sends column 1 before column 0. D4.5.0 parses the wire
-// pair little-endian.
-const PC_MODE1_WORDS=Object.freeze([[0xa2,0x2b],[0x30,0x0e],[0x7a,0x4d],[0x62,0x2b],[0x85,0xb4]]);
-const PC_MODE4_WORDS=Object.freeze([[0x19,0xb2],[0x73,0xd8],[0xa4,0x73],[0xb1,0x72],[0x01,0x10]]);
-// The supplied official eTuning BLE capture announces mode 1 to application
-// slot 0x0d immediately after display setup 0C. Desktop adapter slot 0 yielded
-// no completion in the live SC-E7000 test. Prefer the bike's live announcement
-// and use the captured wireless-slot candidate only when it is not relayed.
+function maxAssistSnapshotFromResults(results) {
+  const field=name=>results.find(result=>result.name===name&&result.status==='reply received')?.fields;
+  const compatibility=regionCompatibility(results),destination=field('Current destination');
+  if(!compatibility.directWriteEligible||destination?.length<5||destination[4]>5)
+    throw new Error('Exact stock E5000 pair and destination were not freshly verified');
+  return {family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:destination[4],
+    currentHundredths:parseMaxAssistSpeedReply(field('Current maximum assist speed')),
+    usProfileHundredths:parseMaxAssistSpeedReply(field('US-profile maximum assist speed'),1)};
+}
+async function readFreshMaxAssistUsSnapshot(s) {
+  assertCurrent(s);
+  const names=['Drive-unit model','Drive-unit firmware','Current destination',
+    'Current maximum assist speed','US-profile maximum assist speed','Native D firmware','Native M firmware'];
+  const results=[];
+  for(const name of names) {
+    const query=INFO_QUERIES.find(item=>item.name===name);
+    const result=await queryInfo(s,{...query,name:`Fresh ${name}`});
+    assertCurrent(s);
+    // Restore the canonical name so the shared exact-pair parser cannot accept
+    // a missing or differently-attributed result.
+    results.push({...result,name});
+    if(result.status!=='reply received'||result.alternate)
+      throw new Error(`${name} was not freshly verified`);
+  }
+  const snapshot=maxAssistSnapshotFromResults(results);
+  s.currentDestination=snapshot.destination;
+  s.currentMaxAssistSpeed=snapshot.currentHundredths;
+  s.usProfileMaxAssistSpeed=snapshot.usProfileHundredths;
+  $('region').textContent=regionName(snapshot.destination);
+  $('assistLimit').textContent=formatMaxAssistSpeed(snapshot.currentHundredths);
+  $('usAssistLimit').textContent=formatMaxAssistSpeed(snapshot.usProfileHundredths);
+  log(`Fresh maximum-assist context: ${snapshot.dVersion}/${snapshot.mVersion}, ${regionName(snapshot.destination)}, current ${formatMaxAssistSpeed(snapshot.currentHundredths)}, US profile ${formatMaxAssistSpeed(snapshot.usProfileHundredths)}.`);
+  return snapshot;
+}
+async function writeMaxAssistSpeedOnce(s,hundredths) {
+  try {
+    await driveSettingExchange(s,{label:`stock maximum-assist B0 = ${formatMaxAssistSpeed(hundredths)}`,
+      packet:maxAssistSpeedWritePacket(hundredths),normalOpcode:0xb2,errorOpcode:0xb3,minLength:3});
+    return {acknowledged:true};
+  } catch(error) {
+    const rejected=/ rejected(?: ([0-9A-F]{2}))?$/.exec(error.message);
+    if(rejected)return {acknowledged:false,...(rejected[1]===undefined?{}:{errorCode:parseInt(rejected[1],16)})};
+    throw error;
+  }
+}
+async function setUSMaxAssist() {
+  const journal=optionalMaxAssistUsJournal();
+  if(busy||maxAssistWriteRunning||!canSetUSMax(session,journal))return;
+  const s=session;
+  busy=true;maxAssistWriteRunning=true;s.maxAssistWriteAttempted=true;
+  $('maxAssistPowerCycle').checked=false;
+  controls();
+  log('--- one-attempt stock maximum-assist transaction start ---');
+  try {
+    const result=await runMaxAssistUsWriteTransaction({journalStorage:localStorage,
+      deviceId:s.device.id,connection:s.probeToken,readSnapshot:()=>readFreshMaxAssistUsSnapshot(s),
+      writeMaximum:value=>writeMaxAssistSpeedOnce(s,value)});
+    assertCurrent(s);
+    if(result.state==='max-assist-readback-verified') {
+      s.currentMaxAssistSpeed=result.currentHundredths;
+      $('assistLimit').textContent=formatMaxAssistSpeed(result.currentHundredths);
+      log(`MILESTONE: immediate stock B0 readback verified ${formatMaxAssistSpeed(result.currentHundredths)}; persistence and real cutoff remain unverified.`);
+    } else {
+      log(`Maximum-assist transaction stopped as ${result.state}; B0 will not repeat.`);
+    }
+  } catch(error) {
+    log(`Maximum-assist transaction stopped: ${error.message}. B0 will not repeat.`);
+    if(error.deviceStateUnknown&&session===s)disconnect();
+  } finally {
+    log('--- one-attempt stock maximum-assist transaction end ---');
+    maxAssistWriteRunning=false;
+    if(session===s){busy=false;controls();}
+  }
+}
+$('setUSMax').onclick=setUSMaxAssist;
+$('maxAssistPowerCycle').onchange=controls;
+// Exact eTuning 3.0.7 old-generation E5000 wheel protocol. These adapters are
+// deliberately unwired: a caller must first satisfy the durable D4.3.0
+// transaction gates above.
+async function readWheelCircumference(s) {
+  const reply=await driveSettingExchange(s,{label:'wheel circumference read',packet:wheelReadPacket(),
+    normalOpcode:0x06,errorOpcode:0x07,minLength:5});
+  return parseWheelReadReply(reply);
+}
+async function writeWheelCircumferenceOnce(s,circumferenceMm) {
+  try {
+    await driveSettingExchange(s,{label:'wheel circumference write',packet:wheelWritePacket(circumferenceMm),
+      normalOpcode:0x02,errorOpcode:0x03,minLength:3});
+    return {acknowledged:true};
+  } catch(error) {
+    const rejected=/ rejected ([0-9A-F]{2})$/.exec(error.message);
+    if(rejected)return {acknowledged:false,errorCode:parseInt(rejected[1],16)};
+    throw error;
+  }
+}
+// The SC-E7000's local 0C handler accepts modes 0, 1, 4 and 5. For 4/5 it
+// performs the motor's secure-word exchange itself. Keeping the display as the
+// owner of the motor's one global PC-mode byte avoids the mode-1 reclaim that
+// defeated direct phone-to-motor mode requests in builds 76/77.
+//
+// The supplied official eTuning BLE capture announces the display-owned mode-1
+// completion on application slot 0x0d immediately after setup command 0C.
+// Prefer the bike's live announcement and use that captured slot only when the
+// live announcement was not relayed.
 const CAPTURED_WIRELESS_PC_APPLICATION_SLOT=0x0d;
 function pcApplicationSlot(s) {
   if(s.pcApplicationSlotConflict)throw new Error('Conflicting PC application slots observed; reconnect before privileged commands');
@@ -2757,39 +3508,45 @@ function pcApplicationSlot(s) {
   log('PC application slot was not observed live; using wireless slot 0D from the supplied official eTuning capture.');
   return s.pcApplicationSlot;
 }
-window.commandDelay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
+function setDisplayPcMode(s,{mode,label,timeout=12000}) {
   assertCurrent(s);
+  if(mode===5)delete s.displayPcMode5CompletionAt;
   const applicationSlot=pcApplicationSlot(s);
   return new Promise((resolve,reject)=>{
     const routes=['2af9','2afb','2afd'].map(short=>[short,s.chars[short]]).filter(([,ch])=>ch);
-    let written=false,settled=false,response,wordsSent=0,secureEchoes=0;
+    let written=false,settled=false,displayAck=false,completion,responseError;
     const finish=(error)=>{
       if(settled)return;
       settled=true;clearTimeout(timer);
       for(const [short,ch]of routes)ch.removeEventListener('characteristicvaluechanged',listeners.get(short));
       s.controller.signal.removeEventListener('abort',onAbort);
-      if(error)reject(error);else resolve(response);
+      if(error)reject(error);else resolve(completion);
     };
-    const onAbort=()=>finish(new Error(`Disconnected while entering ${label}`));
+    const maybeFinish=()=>{
+      if(responseError&&written)return finish(responseError);
+      if(written&&displayAck&&completion)finish();
+    };
+    const onAbort=()=>finish(new Error(`Disconnected during ${label}`));
     const onValue=(short,event)=>{
-      if(settled||response)return;
+      if(settled)return;
       const data=bytes(event.target.value);
-      if(data[0]!==0||data[1]!==0x32)return;
-      if(data[2]===0x30) {
-        secureEchoes++;
-        log(`RX ${label} secure echo ${secureEchoes} via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
+      if(short==='2af9'&&data[0]===0x2c) {
+        if(data.length<2)return finish(new Error(`${label} returned a short display reply`));
+        if(data[1]!==0) {
+          responseError=new Error(`${label} rejected by display with status ${data[1].toString(16).padStart(2,'0').toUpperCase()}`);
+          maybeFinish();return;
+        }
+        displayAck=true;
+        log(`RX ${label} display acknowledgement via 2AF9: ${hex(data.slice(0,2))}`);
+        maybeFinish();
         return;
       }
-      if(![0x12,0x13].includes(data[2]))return;
-      // Mode 1 emits an immediate mode-status message before the secure words.
-      // Only a completion/error after the fifth word can satisfy this gate.
-      if(wordsSent<words.length) {
-        log(`RX ${label} pre-key status via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))}; waiting for secure completion.`);
-        return;
+      if(data[0]!==0||data[1]!==0x32||![0x12,0x13].includes(data[2]))return;
+      if(data[2]===0x13) {
+        responseError=new Error(`${label} motor handshake rejected${data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:''}`);
+        maybeFinish();return;
       }
-      if(data[2]===0x13)return finish(new Error(`${label} rejected${data.length>3?` ${data[3].toString(16).padStart(2,'0').toUpperCase()}`:''}`));
-      if(data.length<5)return finish(new Error(`${label} returned a short reply`));
+      if(data.length<5)return finish(new Error(`${label} returned a short motor completion`));
       if(data[3]!==mode) {
         log(`RX ${label} ignored mode ${data[3].toString(16).padStart(2,'0').toUpperCase()} status via ${short.toUpperCase()}; expected ${mode.toString(16).padStart(2,'0').toUpperCase()}.`);
         return;
@@ -2798,112 +3555,85 @@ function enterPcMode(s,{mode,words,label,initialDelay=1000,timeout=12000}) {
         log(`RX ${label} ignored application slot ${data[4].toString(16).padStart(2,'0').toUpperCase()} via ${short.toUpperCase()}; expected ${applicationSlot.toString(16).padStart(2,'0').toUpperCase()}.`);
         return;
       }
-      response=data.slice();
-      log(`RX ${label} completion via ${short.toUpperCase()}: ${hex(data.slice(0,Math.min(data.length,5)))} (${data.length} bytes total; header only)`);
-      if(written)finish();
+      completion=data.slice();
+      if(mode===5)s.displayPcMode5CompletionAt=performance.now();
+      log(`RX ${label} motor completion via ${short.toUpperCase()}: ${hex(data.slice(0,5))} (${data.length} bytes total; header only)`);
+      maybeFinish();
     };
     const listeners=new Map(routes.map(([short,ch])=>{
       const listener=event=>onValue(short,event);
       ch.addEventListener('characteristicvaluechanged',listener);
       return [short,listener];
     }));
-    const timer=setTimeout(()=>finish(new Error(`${label}: ${written?'completion reply':'ATT write'} timed out; ${secureEchoes} secure echoes observed`)),timeout);
+    const timer=setTimeout(()=>finish(new Error(`${label}: ${written?'display acknowledgement or motor completion':'ATT write'} timed out`)),timeout);
     s.controller.signal.addEventListener('abort',onAbort,{once:true});
-    (async()=>{
-      try {
-        const slotHex=applicationSlot.toString(16).padStart(2,'0').toUpperCase();
-        log(`TX 2AFE ${label} request: 00 32 10 ${mode.toString(16).padStart(2,'0').toUpperCase()} ${slotHex} 00 00`);
-        await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x10,mode,applicationSlot,0,0));
+    const slotHex=applicationSlot.toString(16).padStart(2,'0').toUpperCase();
+    log(`TX 2AFA ${label}: 00 0C ${mode.toString(16).padStart(2,'0').toUpperCase()} (expect motor slot ${slotHex})`);
+    try {
+      s.chars['2afa'].writeValueWithResponse(Uint8Array.of(0,0x0c,mode)).then(()=>{
         if(settled)return;
-        assertCurrent(s);
-        if(initialDelay)await window.commandDelay(initialDelay);
-        for(let i=0;i<words.length;i++) {
-          if(i)await window.commandDelay(100);
-          assertCurrent(s);
-          const word=words[i];
-          wordsSent=i+1;
-          log(`TX 2AFE ${label} secure word ${i+1}/5: 7 bytes (payload omitted)`);
-          await s.chars['2afe'].writeValueWithResponse(Uint8Array.of(0,0x32,0x30,...word,0,0));
-          if(settled)return;
-        }
-        written=true;
-        if(response)finish();
-      } catch(error){finish(error);}
-    })();
+        written=true;log(`ATT write completed: ${label}`);maybeFinish();
+      },error=>finish(error instanceof Error?error:new Error(String(error))));
+    } catch(error){finish(error);}
   });
 }
-async function enterPcMode1(s) {
-  const response=await enterPcMode(s,{mode:1,words:PC_MODE1_WORDS,label:'normal PC-link mode 1'});
-  log('MILESTONE: normal PC-link mode 1 accepted; entering authenticated setting mode next.');
+async function enterDisplayPcMode5(s,label) {
+  const response=await setDisplayPcMode(s,{mode:5,label});
+  log(`MILESTONE: ${label} received the display acknowledgement and exact motor completion; the firmware records mode 5 before this completion.`);
   return response;
 }
-async function enterPcMode4(s) {
-  return enterPcMode(s,{mode:4,words:PC_MODE4_WORDS,label:'authenticated PC mode 4'});
+async function exitDisplayPcMode(s) {
+  await setDisplayPcMode(s,{mode:0,label:'SC-E7000-owned PC mode exit',timeout:5000});
+  log('SC-E7000-owned protected PC mode exited.');
 }
-async function exitPcMode(s) {
-  await enterPcMode(s,{mode:0,words:[],label:'exit PC mode',initialDelay:0,timeout:3000});
-  log('Protected PC mode exited.');
-}
-async function readLightingTime(s) {
-  const data=await driveSettingExchange(s,{label:'Read lighting time',packet:Uint8Array.of(0,0x16,0xa4,0),
-    normalOpcode:0xa6,errorOpcode:0xa7,minLength:5});
-  const value=data[3]|data[4]<<8;
-  log(`Lighting time read for same-value staging: ${value}.`);
-  return value;
-}
-// Pipelined US write: fire A0 (stage the one-shot flag) then A8 (region=US)
-// back-to-back, waiting only for A0's ATT write-response — NOT the motor's A0
-// reply notification — before sending A8. That puts both commands on the wire
-// within one BLE round-trip, the tightest window before the SC-E7000 reclaims
-// the motor's single global PC-mode state (build 77; build 76 confirmed the
-// framing was always valid and the loss is PC mode being cleared within tens of
-// ms of the grant, with the link still up). Both packets carry the leading 0x00
-// that becomes the motor's offset+4 target. A8 with no staged flag is harmless
-// (motor returns 3A, no change), so sending it unconditionally cannot cause an
-// unintended write. Lighting value is the unchanged current value.
-function burstUsWrite(s, lightingValue) {
+// Complete the motor's verified two-half destination record rather than rely
+// on the undocumented retained state used by commercial D4.3 clients. The
+// caller must durably journal the attempt before invoking this helper. A0 and
+// A8 are each dispatched at most once; any ambiguous outcome is terminal for
+// that journal and must be resolved by read-only reconnect.
+async function writeUsWithDisplayOwnedStage(s,{context='destination write'}={}) {
   assertCurrent(s);
-  if (!Number.isInteger(lightingValue) || lightingValue < 0 || lightingValue > 0xffff)
-    throw new Error('Invalid lighting-time value');
-  const a0 = Uint8Array.of(0, 0x16, 0xa0, lightingValue & 0xff, (lightingValue >>> 8) & 0xff, 0xff, 0xff);
-  const a8 = Uint8Array.of(0, 0x16, 0xa8, 1, 1);
-  return new Promise((resolve, reject) => {
-    const rx = s.chars['2afd'];
-    const start = performance.now();
-    const ms = () => Math.round(performance.now() - start);
-    let a0r, a8r, a8Sent = false, settled = false;
-    const finish = (error, value) => {
-      if (settled) return;
-      settled = true; clearTimeout(timer);
-      rx.removeEventListener('characteristicvaluechanged', onValue);
-      s.controller.signal.removeEventListener('abort', onAbort);
-      if (error) reject(error); else resolve(value);
-    };
-    const onAbort = () => finish(new Error('Disconnected during US burst write; outcome unknown'));
-    const onValue = event => {
-      if (settled) return;
-      const d = bytes(event.target.value);
-      if (d[0] !== 0 || d[1] !== 0x16) return;
-      if (!a0r && (d[2] === 0xa2 || d[2] === 0xa3)) {
-        a0r = {ok: d[2] === 0xa2, code: d[2] === 0xa3 ? d[3] : undefined, ms: ms()};
-        log(`RX A0 ${a0r.ok ? 'A2 accepted' : `A3 ${(a0r.code ?? 0).toString(16).padStart(2,'0').toUpperCase()}`} at ${a0r.ms} ms`);
-      } else if (!a8r && (d[2] === 0xaa || d[2] === 0xab)) {
-        a8r = {ok: d[2] === 0xaa, code: d[2] === 0xab ? d[3] : undefined, ms: ms()};
-        log(`RX A8 ${a8r.ok ? 'AA acknowledged' : `AB ${(a8r.code ?? 0).toString(16).padStart(2,'0').toUpperCase()}`} at ${a8r.ms} ms`);
+  let pcModeTouched=false,operationError=null,a8Started=false;
+  try {
+    const lightingReply=await driveSettingExchange(s,{label:`current lighting time before ${context}`,
+      packet:Uint8Array.of(0,0x16,0xa4,0),normalOpcode:0xa6,errorOpcode:0xa7,minLength:5});
+    if(lightingReply[3]===undefined||lightingReply[4]===undefined)
+      throw new Error(`${context}: current lighting time was not verified`);
+    const lightingLow=lightingReply[3],lightingHigh=lightingReply[4];
+    log(`${context}: retaining lighting value ${lightingLow} + (${lightingHigh} << 8) in the A0 half.`);
+
+    pcModeTouched=true;
+    await enterDisplayPcMode5(s,`${context}: SC-E7000-owned PC mode 5 before A0`);
+    assertCurrent(s);
+    await driveSettingExchange(s,{label:`${context}: unchanged-lighting A0`,
+      packet:Uint8Array.of(0,0x16,0xa0,lightingLow,lightingHigh,0xff,0xff),
+      normalOpcode:0xa2,errorOpcode:0xa3});
+    assertCurrent(s);
+    log(`MILESTONE: ${context} A0 returned A2; its one-shot destination gate is now armed.`);
+
+    await enterDisplayPcMode5(s,`${context}: SC-E7000-owned PC mode 5 refreshed before A8`);
+    assertCurrent(s);
+    a8Started=true;
+    await driveSettingExchange(s,{label:`${context}: A8 US`,
+      packet:Uint8Array.of(0,0x16,0xa8,1,1),normalOpcode:0xaa,errorOpcode:0xab});
+    assertCurrent(s);
+    log(`MILESTONE: ${context} A8 returned AA after an explicit accepted A0 stage.`);
+    return {acknowledged:true};
+  } catch(error) {
+    operationError=error;
+    const rejected=a8Started?/ rejected ([0-9A-F]{2})$/.exec(error.message):null;
+    if(rejected)return {acknowledged:false,errorCode:parseInt(rejected[1],16)};
+    throw error;
+  } finally {
+    if(pcModeTouched&&session===s) {
+      try {await exitDisplayPcMode(s);}
+      catch(exitError) {
+        log(`${context}: protected PC-mode exit was not verified: ${exitError.message}.`);
+        if(session===s)disconnect();
+        if(!operationError)throw exitError;
       }
-      if (a0r && a8r) finish(null, {a0: a0r, a8: a8r});
-    };
-    const timer = setTimeout(() => finish(null, {a0: a0r, a8: a8r, timedOut: true}), 8000);
-    rx.addEventListener('characteristicvaluechanged', onValue);
-    s.controller.signal.addEventListener('abort', onAbort, {once: true});
-    log(`TX 2AFE A0 stage then A8 US as one burst: ${hex(a0)} | ${hex(a8)}`);
-    s.chars['2afe'].writeValueWithResponse(a0).then(() => {
-      if (settled) return;
-      a8Sent = true;
-      return s.chars['2afe'].writeValueWithResponse(a8);
-    }, error => finish(error instanceof Error ? error : new Error(String(error))))
-    .then(() => {}, error => { if (a8Sent) finish(error instanceof Error ? error : new Error(String(error))); });
-  });
+    }
+  }
 }
 async function setUS() {
   if (busy || !canSetUS(session)) return;
@@ -2922,7 +3652,7 @@ async function setUS() {
     $('region').textContent = regionName(s.currentDestination);
     return s.currentDestination;
   };
-  let pcModeTouched=false,failed=false;
+  let pcModeTouched=false,stageAccepted=false,destinationWriteStarted=false,failed=false;
   try {
     const before = await readDestination('Destination before US write');
     if (before !== 0) {
@@ -2931,76 +3661,107 @@ async function setUS() {
       return;
     }
 
-    // Read the current lighting time BEFORE entering PC mode. A0/A8 both require
-    // active PC mode 4/5, but the A4 lighting read does not, so keeping it out of
-    // the privileged window leaves only the A0 -> A8 pair inside it. Firmware
-    // analysis (build 76) established that the A0 rejection was never a framing
-    // problem: the motor's target byte comes from the packet's leading 0x00, so
-    // offset+4 was always 0. A3/3A means PC mode 4 was not live when A0 arrived,
-    // consistent with the SC-E7000 display's watchdog reset clearing the motor's
-    // privileged mode. The shorter the live window, the less chance a reset lands
-    // between the mode-4 completion and the A8 write.
-    const lightingTime=await readLightingTime(s);
-    assertCurrent(s);
+    const lightingReply=await driveSettingExchange(s,{label:'current lighting time before US write',
+      packet:Uint8Array.of(0,0x16,0xa4,0),normalOpcode:0xa6,errorOpcode:0xa7,minLength:5});
+    if(lightingReply[3]===undefined||lightingReply[4]===undefined)
+      throw new Error('Current lighting time was not verified');
+    const lightingLow=lightingReply[3],lightingHigh=lightingReply[4];
+    log(`Current lighting value retained for unchanged A0 stage: ${lightingLow} + (${lightingHigh} << 8).`);
 
-    // Save the salted same-device restart expectation BEFORE the privileged
-    // window too, so nothing delays the A0 -> A8 pair once mode 4 is live.
+    // Save the salted same-device restart expectation before privileged mode.
     const salt=crypto.getRandomValues(new Uint8Array(16)),saltHex=hex(salt).replaceAll(' ','').toLowerCase();
     try {
-      const record={version:2,kind:'command-us-region',connection:s.probeToken,salt:saltHex,
+      const record={version:2,kind:'command-us-region',phase:'prepared',connection:s.probeToken,salt:saltHex,
         deviceBinding:await firmwareDeviceBinding(s.device.id,saltHex),
         expected:{family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:1},verified:false};
-      sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(record));
       probeRecord=record;
+      saveProbeRecord(true);
       log('US restart expectation saved for this browser-selected motor; US write and persistence still unverified.');
     } finally {salt.fill(0);}
 
-    // Sample several mode-4 -> burst cycles: PC mode 4 is granted but the
-    // SC-E7000 reclaims the motor's global PC-mode state within tens of ms
-    // (build 76/77 finding), so each cycle re-enters mode and fires the burst
-    // as fast as possible, trying to catch a moment the window is long enough.
-    let success=false, lastAfter;
-    for (let attempt=1; attempt<=usBurstAttempts && !success; attempt++) {
-      if (attempt>1) log(`Retry ${attempt}/${usBurstAttempts}: re-entering PC mode to sample a moment when mode 4 survives long enough for the burst.`);
-      $('regionStatus').textContent = `Attempt ${attempt}/${usBurstAttempts}: establishing PC link…`;
-      pcModeTouched=true;
-      await enterPcMode1(s);
-      assertCurrent(s);
-      await enterPcMode4(s);
-      assertCurrent(s);
-      const mode4At=performance.now();
-      log('Authenticated PC mode 4 accepted; firing the A0+A8 burst immediately.');
-      // From here, failures cannot establish whether the stored value changed.
-      s.currentDestination = undefined;
-      $('region').textContent = 'Write in progress; value unverified';
-      $('regionStatus').textContent = `Attempt ${attempt}/${usBurstAttempts}: firing A0+A8 burst…`;
-      const burst = await burstUsWrite(s, lightingTime);
-      assertCurrent(s);
-      log(`Burst reached the motor ${Math.round(performance.now()-mode4At)} ms after mode-4 completion; `
-        + `A0 ${burst.a0 ? (burst.a0.ok ? `A2 @${burst.a0.ms}ms` : `3A @${burst.a0.ms}ms`) : 'no reply'}, `
-        + `A8 ${burst.a8 ? (burst.a8.ok ? `AA @${burst.a8.ms}ms` : `AB @${burst.a8.ms}ms`) : 'no reply'}.`);
-      lastAfter = await readDestination('Destination after burst');
-      if (lastAfter === 1) { success=true; break; }
-      log(`Attempt ${attempt}: region still ${regionName(lastAfter)}. `
-        + (burst.a0 && !burst.a0.ok
-          ? 'A0 was rejected — PC mode 4 was already cleared when A0 was processed (framing verified correct; the SC-E7000 reclaimed the mode within tens of ms).'
-          : 'A0 was accepted but the region did not change — mode 4 was reclaimed before A8 landed.'));
-      if (attempt < usBurstAttempts) { await exitPcMode(s); assertCurrent(s); }
-    }
-    if (success) {
-      log('MILESTONE: US (1) read back after the burst. Persistence and assistance speed remain unverified.');
+    $('regionStatus').textContent = 'Asking the SC-E7000 to establish and own protected motor mode 5…';
+    pcModeTouched=true;
+    await enterDisplayPcMode5(s,'SC-E7000-owned PC mode 5 before A0');
+    assertCurrent(s);
+    if(!Number.isFinite(s.displayPcMode5CompletionAt))
+      throw new Error('Mode-5 completion timing marker was not recorded');
+    $('regionStatus').textContent = 'Display-owned mode 5 confirmed; staging the unchanged lighting record once…';
+    log(`Display-owned mode-5 completion to A0 enqueue: ${(performance.now()-s.displayPcMode5CompletionAt).toFixed(1)} ms.`);
+    probeRecord.phase='a0-started';
+    saveProbeRecord(true);
+    await driveSettingExchange(s,{label:'unchanged-lighting A0 in display-owned mode 5',
+      packet:Uint8Array.of(0,0x16,0xa0,lightingLow,lightingHigh,0xff,0xff),
+      normalOpcode:0xa2,errorOpcode:0xa3});
+    assertCurrent(s);
+    probeRecord.phase='a0-accepted';
+    saveProbeRecord();
+    log(`Display-owned mode-5 completion to A0 acceptance: ${(performance.now()-s.displayPcMode5CompletionAt).toFixed(1)} ms.`);
+    log('MILESTONE: unchanged-lighting A0 returned A2 while the SC-E7000 owned mode 5.');
+
+    stageAccepted=true;
+    $('regionStatus').textContent = 'A0 accepted; freshly establishing display-owned mode 5 before the single destination write…';
+    await enterDisplayPcMode5(s,'SC-E7000-owned PC mode 5 refreshed before A8');
+    assertCurrent(s);
+    if(!Number.isFinite(s.displayPcMode5CompletionAt))
+      throw new Error('Refreshed mode-5 completion timing marker was not recorded');
+    log('MILESTONE: mode 5 was freshly confirmed after A2; the motor firmware keeps the A0 gate separate from PC-mode state.');
+
+    probeRecord.phase='a8-started';
+    saveProbeRecord(true);
+    destinationWriteStarted=true;
+    // From this point an ATT error cannot establish whether the motor stored
+    // the value. Mark it unknown before placing the one destination write.
+    s.currentDestination = undefined;
+    $('region').textContent = 'Write in progress; value unverified';
+    $('regionStatus').textContent = 'A0 accepted and fresh display-owned mode 5 confirmed; sending one US destination write…';
+    log(`Refreshed display-owned mode-5 completion to A8 enqueue: ${(performance.now()-s.displayPcMode5CompletionAt).toFixed(1)} ms.`);
+    await driveSettingExchange(s,{label:'A8 US after refreshed display-owned mode 5',
+      packet:Uint8Array.of(0,0x16,0xa8,1,1),normalOpcode:0xaa,errorOpcode:0xab});
+    assertCurrent(s);
+    probeRecord.phase='a8-replied';
+    saveProbeRecord();
+    log('MILESTONE: A8 returned AA while the SC-E7000 owned mode 5.');
+    const after = await readDestination('Destination after display-owned mode-5 A0/A8');
+    if (after === 1) {
+      probeRecord.phase='immediate-us';
+      saveProbeRecord();
+      log('MILESTONE: US (1) read back after the display-owned mode-5 A0/A8 transaction. Persistence and assistance speed remain unverified.');
       $('regionStatus').textContent = 'US readback confirmed. Copy log, disconnect, turn bike off/on, reconnect and read region again.';
     } else {
-      $('regionStatus').textContent = `US change not verified after ${usBurstAttempts} attempts; region still ${regionName(lastAfter)}. The SC-E7000 reclaims PC mode faster than the burst can land. Copy the log.`;
+      probeRecord.phase='immediate-not-us';
+      saveProbeRecord();
+      $('regionStatus').textContent = `US change not verified despite A2 and AA; the fresh region is ${regionName(after)}. No retry was sent. Copy the log.`;
       log($('regionStatus').textContent);
     }
   } catch (error) {
     failed=true;
     log(`US-region attempt stopped: ${error.message}. Do not infer success from ATT acknowledgement.`);
-    $('regionStatus').textContent = 'US change not verified. Reconnect and read region; see log.';
+    if(destinationWriteStarted&&session===s) {
+      try {
+        const after=await readDestination('Destination after uncertain display-owned mode-5 write');
+        if(after===1) {
+          failed=false;
+          probeRecord.phase='immediate-us';
+          saveProbeRecord();
+          log('MILESTONE: US (1) read back after an uncertain display-owned mode-5 transport result. Persistence and assistance speed remain unverified.');
+          $('regionStatus').textContent='US readback confirmed despite an incomplete reply sequence. Copy log, power cycle, reconnect and read region again.';
+        } else {
+          probeRecord.phase='immediate-not-us';
+          saveProbeRecord();
+          $('regionStatus').textContent=`US change not verified; fresh region is ${regionName(after)}. No retry was sent. See log.`;
+          log($('regionStatus').textContent);
+        }
+      } catch(readError) {
+        log(`Post-error destination readback failed: ${readError.message}.`);
+        $('regionStatus').textContent = 'US change not verified. Reconnect and read region; see log.';
+      }
+    } else if(stageAccepted) {
+      $('regionStatus').textContent = 'No destination command was sent after A0. Turn the bike off/on before using another setting tool; see log.';
+      log('SAFETY: A0 was accepted but A8 was not sent, so its one-shot gate may remain armed until a physical bike power cycle.');
+    } else $('regionStatus').textContent = 'US change not verified. No destination command was sent; see log.';
   } finally {
     if(pcModeTouched&&session===s) {
-      try {await exitPcMode(s);}
+      try {await exitDisplayPcMode(s);}
       catch(error) {
         failed=true;
         log(`Protected PC mode exit could not be verified: ${error.message}. Disconnecting to end the privileged session.`);
@@ -3064,7 +3825,7 @@ function exportLog() {
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
   const lines = snapshot.split('\n').filter(Boolean);
   // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.
-  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|PC-mode application|PC application|PC-link mode|protected PC mode|secure echo|pre-key status|ignored mode|^Entry |^Bootloader |^Post-probe )/i;
+  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|PC-mode application|PC application|PC-link mode|protected PC mode|display-owned|ignored mode|^Entry |^Bootloader |^Post-probe )/i;
   const routine = /^(?:TX |RX |ATT |READ |RESULT |QUERY TRAFFIC |--- |(?:Captured setup|eTuning setup|Restore setup) |2AF[9BD] traffic:|2AF[9BD] notifications enabled|Motor serial received|Log copied)/;
   const useful = lines.filter(line => {
     const message = line.replace(/^\[[^\]]+\] /,'');
@@ -3152,14 +3913,35 @@ async function clearCachedFirmwareBundle() {
   } finally {db.close();}
 }
 try {
-  const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY)||'null');
+  const durableText=localStorage.getItem(PROBE_RECORD_KEY);
+  const temporaryText=sessionStorage.getItem(PROBE_RECORD_KEY);
+  let durable=null,temporary=null;
+  try {durable=JSON.parse(durableText||'null');} catch {}
+  try {temporary=JSON.parse(temporaryText||'null');} catch {}
+  const isCommandRecord=record=>record?.version===2&&record.kind==='command-us-region';
+  const durableCommand=isCommandRecord(durable);
+  const commandRecord=durableCommand?durable:[temporary].find(isCommandRecord);
+  const record=commandRecord||temporary;
   const common=record&&/^[a-f0-9]{32}$/.test(record.salt||'')&&typeof record.connection==='string'&&record.expected;
   const legacy=common&&record.version===1;
   const command=common&&record.version===2&&record.kind==='command-us-region'&&
     /^[a-f0-9]{64}$/.test(record.deviceBinding||'')&&typeof record.verified==='boolean';
-  if(legacy||command)probeRecord=record;
-} catch {}
-function saveProbeRecord() { try {sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(probeRecord));} catch {} }
+  if(legacy||command) {
+    probeRecord=record;
+    if(command&&!probeRecord.phase)probeRecord.phase='legacy-attempt';
+    if(command&&!durableCommand)localStorage.setItem(PROBE_RECORD_KEY,JSON.stringify(probeRecord));
+  } else if(durableText)probeRecord={version:0,kind:'command-us-region',phase:'invalid',verified:false,invalid:true};
+} catch {probeRecord={version:0,kind:'command-us-region',phase:'invalid',verified:false,invalid:true};}
+function saveProbeRecord(required=false) {
+  try {
+    const storage=probeRecord?.kind==='command-us-region'?localStorage:sessionStorage;
+    storage.setItem(PROBE_RECORD_KEY,JSON.stringify(probeRecord));
+    return true;
+  } catch(error) {
+    if(required)throw new Error(`Could not durably record the command-only attempt: ${error.message}`);
+    return false;
+  }
+}
 function probeSubscription(s) {
   return fn=>{
     assertCurrent(s);
@@ -3202,16 +3984,36 @@ async function verifyPendingBootloaderProbe(s,results=[]) {
   if(!matches(destination,[0,0x16,0xae,1])||destination.length<5||destination[4]>5)
     throw new Error('US persistence destination readback is unavailable');
   if(destination[4]!==1) {
-    record.verified=true;record.outcome='not-us';record.verifiedConnection=s.probeToken;saveProbeRecord();
+    record.verified=true;record.outcome='not-us';record.phase='verified-not-us';
+    record.verifiedConnection=s.probeToken;saveProbeRecord();
     workflowPasskey='';
     $('regionStatus').textContent=`${regionName(destination[4])} read back after reconnect; US did not persist. No retry sent.`;
     log($('regionStatus').textContent);
     return;
   }
-  record.verified=true;record.outcome='us';record.verifiedConnection=s.probeToken;saveProbeRecord();
+  record.verified=true;record.outcome='us';record.phase='verified-us';
+  record.verifiedConnection=s.probeToken;saveProbeRecord();
   workflowPasskey='';
   $('regionStatus').textContent='US persisted on the same D4.5.0/M4.4.8 motor after reconnect.';
   log('MILESTONE: US destination persisted after reconnect on the same original D4.5.0/M4.4.8 motor. Assistance speed remains unmeasured.');
+}
+async function verifyPendingMaxAssistUs(s,results=[]) {
+  const journal=optionalMaxAssistUsJournal();
+  if(journal===null||journal===undefined||journal.stage==='persistence-verified')return;
+  if(!$('maxAssistPowerCycle').checked) {
+    log('Maximum-assist attempt remains journaled. No persistence claim: physical power-cycle confirmation was not ticked.');
+    return;
+  }
+  const result=await verifyMaxAssistUsPersistenceAfterPowerCycle({journalStorage:localStorage,
+    deviceId:s.device.id,connection:s.probeToken,powerCycleConfirmed:true,
+    readSnapshot:async()=>maxAssistSnapshotFromResults(results)});
+  if(result.persistenceVerified) {
+    s.currentMaxAssistSpeed=result.currentHundredths;
+    $('assistLimit').textContent=formatMaxAssistSpeed(result.currentHundredths);
+    log(`MILESTONE: ${formatMaxAssistSpeed(result.currentHundredths)} maximum-assist setting persisted on the same stock E5000 after an explicitly confirmed physical power cycle. Real riding cutoff remains unmeasured.`);
+  } else {
+    log(`Maximum-assist power-cycle readback stopped as ${result.state}; B0 was not repeated.`);
+  }
 }
 function optionalFirmwareJournal() {
   firmwareJournalProblem='';
@@ -3324,7 +4126,26 @@ async function transferAndReset(s,plan,journal) {
 }
 async function writeAndVerifyUs(s) {
   assertCurrent(s);
-  throw new Error('Retired firmware preparation workflow is disabled in this build');
+  const journal=readFirmwareRecoveryJournal(localStorage);
+  $('bootProbeStatus').textContent='Reading the exact prepared baseline before the one allowed destination write…';
+  const result=await withWorkflowBaselineReader(s,journal,({readBaseline})=>runPreparedUsWriteTransaction({
+    journalStorage:localStorage,deviceId:s.device.id,connection:s.probeToken,readBaseline,
+    writeDestination:async()=>{
+      assertCurrent(s);
+      s.currentDestination=undefined;
+      $('region').textContent='Write in progress; value unverified';
+      $('bootProbeStatus').textContent='Completing one explicit display-owned A0→A8 US transaction on verified D4.3.0/M4.2.1…';
+      return writeUsWithDisplayOwnedStage(s,{context:'verified stock D4.3.0/M4.2.1 US write'});
+    }
+  }));
+  if(result.state!=='US-readback-verified')
+    throw new Error('The one destination write did not produce a verified US readback; no retry was sent');
+  s.currentDestination=1;
+  $('region').textContent=regionName(1);
+  $('bootProbeStatus').textContent='US read back on preparation firmware. Fully power-cycle before persistence verification.';
+  log('MILESTONE: one explicit display-owned A0→A8 transaction returned A2/AA and US read back on exact stock D4.3.0/M4.2.1. Persistence and assistance speed remain unverified.');
+  if(session===s)disconnect();
+  return result;
 }
 async function runFirmwareWorkflow() {
   if(busy||firmwareWorkflowRunning||!session?.device.gatt.connected)return;
@@ -3484,7 +4305,7 @@ try {
   logEl.textContent = sessionStorage.getItem(STORAGE_KEY) || '';
 } catch {}
 controls();
-$('build').textContent = `Build ${BUILD} · bike-status verification`;
+$('build').textContent = `Build ${BUILD} · display-owned mode experiment`;
 log(`Ready. Build ${BUILD}.`);
 </script>
 </body>

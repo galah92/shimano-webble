@@ -21,15 +21,18 @@ class RegionWriteTests(unittest.TestCase):
         self.open()
         self.assertTrue(self.page.locator('#setUS').is_disabled())
         self.page.evaluate('''async opts => {
-          window.commandDelay=async()=>{};
-          usBurstAttempts=opts.usBurstAttempts??1;
-          window.regionWrites=[];window.regionReads=0;window.secureWords=0;
-          window.secureWordsByMode={1:0,4:0};window.currentPcMode=0;window.currentPcSlot=0;
-          window.a0Staged=false;window.regionChanged=false;window.pcCycle=0;
-          if(opts.storageFailure){
+          window.regionWrites=[];window.regionReads=0;
+          window.currentPcMode=1;window.currentPcSlot=0;
+          window.regionChanged=false;window.destinationGate=false;window.mode5Requests=0;
+          window.probeJournalWrites=0;
+          if(opts.storageFailure||opts.storageFailureAt){
             const original=Storage.prototype.setItem;
             Storage.prototype.setItem=function(k,v){
-              if(k===PROBE_RECORD_KEY)throw Error('Storage blocked');
+              if(k===PROBE_RECORD_KEY) {
+                probeJournalWrites++;
+                if(opts.storageFailure||opts.storageFailureAt===probeJournalWrites)
+                  throw Error('Storage blocked');
+              }
               return original.call(this,k,v);
             };
           }
@@ -38,57 +41,48 @@ class RegionWriteTests(unittest.TestCase):
           session.currentDestination=0;
           if(opts.omitPcApplicationSlot)delete session.pcApplicationSlot;
           else session.pcApplicationSlot=opts.pcApplicationSlot??0x0d;
-          for(const short of ['2afe','2afd','2af9','2afb'])
+          for(const short of ['2afa','2afe','2afd','2af9','2afb'])
             session.chars[short]=await session.service.getCharacteristic(UUID(short));
-          const rx=session.chars['2afd'];
-          const emit=data=>{
+          const emitTo=(short,data)=>{
+            const rx=session.chars[short];
             rx.value=new DataView(Uint8Array.from(data).buffer);
             rx.dispatchEvent(new Event('characteristicvaluechanged'));
           };
+          const emit=data=>emitTo('2afd',data);
+          session.chars['2afa'].writeValueWithResponse=async packet=>{
+            const p=[...packet];regionWrites.push(p);
+            if(p[1]!==0x0c)throw Error('Unexpected display command');
+            const mode=p[2],slot=session.pcApplicationSlot??0x0d;
+            if(mode===5)mode5Requests++;
+            if(mode===5&&opts.mode5RequestFailure)throw Error('Display mode-5 ATT failure');
+            if(mode===5&&mode5Requests===2&&opts.secondMode5RequestFailure)
+              throw Error('Refreshed display mode-5 ATT failure');
+            if(mode===0&&opts.exitWriteFailure)throw Error('Display mode-exit ATT failure');
+            const secondMode5=mode===5&&mode5Requests===2;
+            const displayReject=mode===5
+              ? (opts.displayModeReject||(secondMode5&&opts.secondDisplayModeReject))
+              : opts.exitDisplayReject;
+            if(!opts.displayAckTimeout)emitTo('2af9',[0x2c,displayReject?1:0]);
+            if(displayReject||opts.displayAckTimeout)return;
+            const motorReject=mode===5
+              ? (opts.pcReject||(secondMode5&&opts.secondPcReject))
+              : opts.exitReject;
+            if(opts.modeCompletionTimeout)return;
+            const target=opts.completionRoute||'2afd';
+            if(opts.wrongModeFirst&&!motorReject)
+              emitTo(target,[0,0x32,0x12,mode===5?1:5,slot]);
+            if(opts.wrongSlotFirst&&!motorReject)
+              emitTo(target,[0,0x32,0x12,mode,(slot+1)&0x3e]);
+            if(motorReject)emitTo(target,[0,0x32,0x13,0x3a,slot]);
+            else {currentPcMode=mode;currentPcSlot=slot;emitTo(target,[0,0x32,0x12,mode,slot]);}
+          };
           session.chars['2afe'].writeValueWithResponse=async packet=>{
             const p=[...packet];regionWrites.push(p);
-            if(p[1]===0x32&&p[2]===0x10) {
-              currentPcSlot=p[4];
-              if(p[3]===1) {
-                currentPcMode=1;secureWordsByMode[1]=0;
-                if(opts.mode1RequestFailure)throw Error('Normal PC-link request ATT failure');
-                if(opts.mode1PreKeyStatus)emit([0,0x32,0x12,1,currentPcSlot]);
-                return;
-              }
-              if(p[3]===4) {
-                currentPcMode=4;secureWordsByMode[4]=0;window.pcCycle++;window.a0Staged=false;
-                if(opts.modeRequestFailure||opts.mode4RequestFailure)throw Error('Authenticated PC mode request ATT failure');
-                return;
-              }
-              if(p[3]===0) {
-                if(opts.exitWriteFailure)throw Error('PC mode exit ATT failure');
-                if(!opts.exitTimeout)emit([0,0x32,opts.exitReject?0x13:0x12,opts.exitReject?0x3a:0,currentPcSlot]);
-                return;
-              }
-            }
-            if(p[1]===0x32&&p[2]===0x30) {
-              secureWords++;
-              if(opts.secureWriteFailure===secureWords)throw Error('Secure word ATT failure');
-              secureWordsByMode[currentPcMode]++;
-              if(currentPcMode===1)emit([0,0x32,0x30,p[3],p[4]]);
-              if(secureWordsByMode[currentPcMode]===5) {
-                const reject=currentPcMode===1?opts.mode1Reject:opts.pcReject;
-                const target=opts.completionRoute||'2afd';
-                const targetRx=session.chars[target];
-                if(opts.wrongModeFirst&&!reject){
-                  targetRx.value=new DataView(Uint8Array.from([0,0x32,0x12,currentPcMode===1?4:1,currentPcSlot]).buffer);
-                  targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
-                }
-                if(opts.wrongSlotFirst&&!reject){
-                  targetRx.value=new DataView(Uint8Array.from([0,0x32,0x12,currentPcMode,(currentPcSlot+1)&0x3e]).buffer);
-                  targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
-                }
-                targetRx.value=new DataView(Uint8Array.from([0,0x32,reject?0x13:0x12,reject?0x3a:currentPcMode,currentPcSlot]).buffer);
-                targetRx.dispatchEvent(new Event('characteristicvaluechanged'));
-              }
+            if(p[1]!==0x16)throw Error('Unexpected command category');
+            if(p[2]===0xa4) {
+              emit([0,0x16,0xa6,0x0a,0x00,0xff,0xff,0xa4,1,0xff]);
               return;
             }
-            if(p[1]!==0x16)throw Error('Unexpected command category');
             if(p[2]===0xac) {
               regionReads++;
               if(opts.readbackWriteFailure&&regionReads===2)throw Error('Readback ATT failure');
@@ -98,31 +92,25 @@ class RegionWriteTests(unittest.TestCase):
               emit([0,0x16,0xae,1,regionReads===1?(opts.before??0):afterValue,0x21,0x43,0x65,0x87,0xff]);
               return;
             }
-            if(p[2]===0xa4) {
-              if(opts.lightingReadWriteFailure)throw Error('Lighting read ATT failure');
-              emit(opts.lightingReadReject?[0,0x16,0xa7,0x3a]:opts.shortLightingReply?
-                [0,0x16,0xa6,0x34]:[0,0x16,0xa6,0x34,0x12,0x56,0x78,0x9a,0xff,0xff]);
-              return;
-            }
             if(p[2]===0xa0) {
-              if(opts.stageWriteFailure&&(opts.stageFailureLength??7)===p.length){emit([0,0x16,0xa2]);throw Error('Staging ATT failure');}
-              const reject=(opts.stageReject&&(opts.stageFailureLength??7)===p.length)||
-                (opts.succeedOnAttempt&&window.pcCycle<opts.succeedOnAttempt);
-              window.a0Staged=!reject;
-              emit(reject?[0,0x16,0xa3,0x3a]:[0,0x16,0xa2]);
+              const record=JSON.parse(localStorage.getItem(PROBE_RECORD_KEY));
+              if(record?.phase!=='a0-started')throw Error('A0 phase was not durably recorded before enqueue');
+              if(opts.stageWriteFailure)throw Error('A0 ATT failure');
+            if(currentPcMode===5&&!opts.stageReject&&!opts.pcReject){
+                window.destinationGate=true;emit([0,0x16,0xa2]);
+              } else emit([0,0x16,0xa3,opts.stageReject||0x3a]);
               return;
             }
             if(p[2]===0xa8) {
-              const record=JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY));
+              const record=JSON.parse(localStorage.getItem(PROBE_RECORD_KEY));
               if(record?.version!==2||record.kind!=='command-us-region'||
-                  record.expected?.destination!==1||record.verified)
+                  record.expected?.destination!==1||record.verified||record.phase!=='a8-started')
                 throw Error('Missing pending restart record before setter');
               if(opts.destinationWriteFailure){emit([0,0x16,0xaa]);throw Error('Destination ATT failure');}
-              const staged=window.a0Staged;window.a0Staged=false;
-              // A8 changes the region only when A0 staged the one-shot flag in
-              // the same live PC-mode window; otherwise the motor returns 3A and
-              // nothing changes (a harmless blind A8).
-              if(staged&&!opts.destinationReject){window.regionChanged=true;emit([0,0x16,0x20,0x4f,0]);emit([0,0x16,0xaa]);}
+              if(window.destinationGate&&!opts.destinationReject&&!opts.pcReject){
+                window.destinationGate=false;window.regionChanged=true;
+                emit([0,0x16,0x20,0x4f,0]);emit([0,0x16,0xaa]);
+              }
               else emit([0,0x16,0xab,opts.destinationReject||0x3a]);
               return;
             }
@@ -154,65 +142,104 @@ class RegionWriteTests(unittest.TestCase):
             self.page.evaluate('field=>{session[field]=previous;controls();}',field)
         self.page.evaluate("probeRecord={version:1,verified:false};setUS()")
         self.assertEqual(self.packets(),[])
+        self.page.evaluate("probeRecord={version:2,kind:'command-us-region',verified:true,outcome:'not-us'};setUS()")
+        self.assertEqual(self.packets(),[])
 
-    def test_exact_mode4_sequence_stages_unchanged_lighting_and_sets_us_once(self):
+    def test_display_owned_mode5_sequence_waits_for_completion_then_sets_us_once(self):
         self.prepare(omitPcApplicationSlot=True);self.run_attempt()
         self.assertEqual(self.packets(),[
             [0,0x16,0xac,1],
             [0,0x16,0xa4,0],
-            [0,0x32,0x10,1,0x0d,0,0],
-            [0,0x32,0x30,0xa2,0x2b,0,0],
-            [0,0x32,0x30,0x30,0x0e,0,0],
-            [0,0x32,0x30,0x7a,0x4d,0,0],
-            [0,0x32,0x30,0x62,0x2b,0,0],
-            [0,0x32,0x30,0x85,0xb4,0,0],
-            [0,0x32,0x10,4,0x0d,0,0],
-            [0,0x32,0x30,0x19,0xb2,0,0],
-            [0,0x32,0x30,0x73,0xd8,0,0],
-            [0,0x32,0x30,0xa4,0x73,0,0],
-            [0,0x32,0x30,0xb1,0x72,0,0],
-            [0,0x32,0x30,0x01,0x10,0,0],
-            [0,0x16,0xa0,0x34,0x12,0xff,0xff],
+            [0,0x0c,5],
+            [0,0x16,0xa0,0x0a,0x00,0xff,0xff],
+            [0,0x0c,5],
             [0,0x16,0xa8,1,1],
             [0,0x16,0xac,1],
-            [0,0x32,0x10,0,0x0d,0,0],
+            [0,0x0c,0],
         ])
         self.assertIn('MILESTONE: US (1) read back',self.page.locator('#log').inner_text())
         self.assertIn('using wireless slot 0D',self.page.locator('#log').inner_text())
-        self.assertIn('A0 stage then A8 US as one burst',self.page.locator('#log').inner_text())
+        log=self.page.locator('#log').inner_text()
+        self.assertIn('SC-E7000-owned PC mode 5 before A0 display acknowledgement',log)
+        self.assertIn('SC-E7000-owned PC mode 5 before A0 motor completion',log)
+        self.assertIn('SC-E7000-owned PC mode 5 refreshed before A8 display acknowledgement',log)
+        self.assertIn('SC-E7000-owned PC mode 5 refreshed before A8 motor completion',log)
+        self.assertIn('unchanged-lighting A0 in display-owned mode 5',log)
+        self.assertIn('A8 US after refreshed display-owned mode 5',log)
+        self.assertRegex(log,r'Display-owned mode-5 completion to A0 enqueue: \d+\.\d ms')
+        self.assertRegex(log,r'Display-owned mode-5 completion to A0 acceptance: \d+\.\d ms')
+        self.assertRegex(log,r'Refreshed display-owned mode-5 completion to A8 enqueue: \d+\.\d ms')
+        self.assertLess(log.index('SC-E7000-owned PC mode 5 before A0 motor completion'),log.index('unchanged-lighting A0 in display-owned mode 5'))
+        self.assertLess(log.index('unchanged-lighting A0 in display-owned mode 5'),log.index('SC-E7000-owned PC mode 5 refreshed before A8 motor completion'))
+        self.assertLess(log.index('SC-E7000-owned PC mode 5 refreshed before A8 motor completion'),log.index('A8 US after refreshed display-owned mode 5'))
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
+        self.assertEqual(sum(p[2]==0xa0 for p in self.packets()),1)
+        self.assertEqual(sum(p==[0,0x0c,5] for p in self.packets()),2)
+        self.assertFalse(any(len(p)>2 and p[1]==0x32 for p in self.packets()))
 
-    def test_a0_rejection_still_bursts_harmless_a8_and_changes_nothing(self):
-        # Build 77 pipelines A0 then A8 without waiting for A0's reply, so a
-        # rejected A0 still sends A8 — but with no staged flag the motor returns
-        # 3A and the region does not change.
-        self.prepare(stageReject=True,stageFailureLength=7);self.run_attempt()
+    def test_a8_rejection_changes_nothing_and_never_retries(self):
+        self.prepare(destinationReject=0x3a);self.run_attempt()
         packets=self.packets()
-        self.assertEqual([len(p) for p in packets if p[2]==0xa0],[7])
         self.assertEqual(sum(p[2]==0xa8 for p in packets),1)
         log=self.page.locator('#log').inner_text()
-        self.assertIn('RX A0 A3',log)
-        self.assertIn('RX A8 AB',log)
+        self.assertIn('A8 US after refreshed display-owned mode 5 rejected 3A',log)
+        self.assertIn('No retry was sent',log)
         self.assertNotIn('MILESTONE: US',log)
         self.assertFalse(self.page.evaluate('window.regionChanged'))
-        self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
+        self.assertEqual(sum(p==[0,0x0c,0] for p in packets),1)
 
-    def test_retry_succeeds_on_a_later_cycle_and_sets_us_once(self):
-        # PC mode 4 survives long enough only on the 2nd sampled cycle.
-        self.prepare(usBurstAttempts=3,succeedOnAttempt=2);self.run_attempt()
+    def test_a0_rejection_still_bounds_a8_and_changes_nothing(self):
+        self.prepare(stageReject=0x3a);self.run_attempt()
         packets=self.packets()
+        self.assertEqual(sum(p[2]==0xa0 for p in packets),1)
+        self.assertEqual(sum(p[2]==0xa8 for p in packets),0)
         log=self.page.locator('#log').inner_text()
-        self.assertIn('MILESTONE: US (1) read back',log)
-        self.assertIn('Retry 2/3',log)
-        self.assertEqual(sum(p[:4]==[0,0x32,0x10,4] for p in packets),2)
-        self.assertEqual(sum(p[2]==0xa8 for p in packets),2)
-        self.assertTrue(self.page.evaluate('window.regionChanged'))
+        self.assertIn('unchanged-lighting A0 in display-owned mode 5 rejected 3A',log)
+        self.assertNotIn('MILESTONE: US',log)
+        self.assertFalse(self.page.evaluate('window.regionChanged'))
+
+    def test_mode5_rejection_prevents_a0_a8_and_cannot_trigger_a_retry(self):
+        self.prepare(pcReject=True);self.run_attempt()
+        packets=self.packets()
+        self.assertEqual(sum(p[2]==0xa0 for p in packets),0)
+        self.assertEqual(sum(p[2]==0xa8 for p in packets),0)
+        self.assertEqual(sum(p==[0,0x0c,5] for p in packets),1)
+        self.assertFalse(self.page.evaluate('window.regionChanged'))
+        self.assertIn('SC-E7000-owned PC mode 5 before A0 motor handshake rejected 3A',self.page.locator('#log').inner_text())
+
+    def test_refreshed_mode5_is_required_after_a2_and_never_retries_a0_or_a8(self):
+        failures=({'secondMode5RequestFailure':True},
+                  {'secondDisplayModeReject':True},
+                  {'secondPcReject':True})
+        for options in failures:
+            with self.subTest(options=options):
+                self.prepare(**options);self.run_attempt()
+                packets=self.packets()
+                self.assertEqual(sum(p[2]==0xa0 for p in packets),1)
+                self.assertEqual(sum(p[2]==0xa8 for p in packets),0)
+                self.assertEqual(sum(p==[0,0x0c,5] for p in packets),2)
+                self.assertEqual(sum(p==[0,0x0c,0] for p in packets),1)
+                self.assertTrue(self.page.evaluate('window.destinationGate'))
+                log=self.page.locator('#log').inner_text()
+                self.assertIn('A0 was accepted but A8 was not sent',log)
+                self.assertIn('physical bike power cycle',log)
+                record=self.page.evaluate("JSON.parse(localStorage.getItem(PROBE_RECORD_KEY))")
+                self.assertEqual(record['phase'],'a0-accepted')
+                self.page.reload()
+                self.assertEqual(self.page.evaluate('probeRecord.phase'),'a0-accepted')
+                self.assertFalse(self.page.evaluate('''() => {
+                  session={verified:true,directWriteEligible:true,motorEligible:true,
+                    motorAuthenticated:true,currentDestination:0,regionWriteAttempted:false};
+                  return canSetUS(session);
+                }'''))
+                self.context.close()
 
     def test_restart_record_is_durable_before_the_only_destination_write(self):
         self.prepare();self.run_attempt()
-        record=self.page.evaluate("JSON.parse(sessionStorage.getItem(PROBE_RECORD_KEY))")
+        record=self.page.evaluate("JSON.parse(localStorage.getItem(PROBE_RECORD_KEY))")
         self.assertEqual(record['version'],2)
         self.assertEqual(record['kind'],'command-us-region')
+        self.assertEqual(record['phase'],'immediate-us')
         self.assertEqual(record['expected'],{'family':34,'unit':0,'dVersion':'4.5.0.0',
                                              'mVersion':'4.4.8.0','destination':1})
         self.assertRegex(record['deviceBinding'],r'^[a-f0-9]{64}$')
@@ -220,6 +247,38 @@ class RegionWriteTests(unittest.TestCase):
         self.page.reload()
         self.assertEqual(self.page.evaluate('probeRecord.kind'),'command-us-region')
         self.assertFalse(self.page.evaluate('probeRecord.verified'))
+        self.assertEqual(self.page.evaluate('probeRecord.phase'),'immediate-us')
+        self.assertFalse(self.page.evaluate('''() => {
+          session={verified:true,directWriteEligible:true,motorEligible:true,
+            motorAuthenticated:true,currentDestination:0,regionWriteAttempted:false};
+          return canSetUS(session);
+        }'''))
+
+    def test_durable_attempt_loader_fails_closed_and_migrates_session_record(self):
+        self.open()
+        self.page.evaluate("localStorage.setItem(PROBE_RECORD_KEY,'{')")
+        self.page.reload()
+        self.assertTrue(self.page.evaluate('probeRecord.invalid'))
+        self.assertFalse(self.page.evaluate('''() => canSetUS({verified:true,
+          directWriteEligible:true,motorEligible:true,motorAuthenticated:true,
+          currentDestination:0,regionWriteAttempted:false})'''))
+        self.context.close()
+
+        self.open()
+        self.page.evaluate('''() => sessionStorage.setItem(PROBE_RECORD_KEY,JSON.stringify({
+          version:2,kind:'command-us-region',connection:'old-session',
+          salt:'00000000000000000000000000000000',
+          deviceBinding:'1111111111111111111111111111111111111111111111111111111111111111',
+          expected:{family:34,unit:0,dVersion:'4.5.0.0',mVersion:'4.4.8.0',destination:1},
+          verified:false
+        }))''')
+        self.page.reload()
+        self.assertEqual(self.page.evaluate('probeRecord.phase'),'legacy-attempt')
+        self.assertEqual(self.page.evaluate(
+          "JSON.parse(localStorage.getItem(PROBE_RECORD_KEY)).phase"),'legacy-attempt')
+        self.assertFalse(self.page.evaluate('''() => canSetUS({verified:true,
+          directWriteEligible:true,motorEligible:true,motorAuthenticated:true,
+          currentDestination:0,regionWriteAttempted:false})'''))
 
     def test_changed_or_short_fresh_region_stops_before_pc_mode(self):
         for options in ({'before':1},{'before':2},{'shortBefore':True}):
@@ -229,34 +288,45 @@ class RegionWriteTests(unittest.TestCase):
                 self.context.close()
 
     def test_each_prerequisite_failure_prevents_destination_write(self):
-        # Build 76 reads lighting time and saves the restart record BEFORE PC-mode
-        # entry, so these failures never enter privileged mode: no PC-mode command
-        # is sent and there is nothing to exit.
-        pre_mode=(
-            {'lightingReadWriteFailure':True}, {'lightingReadReject':True},
-            {'shortLightingReply':True}, {'storageFailure':True},
-        )
+        # Durable restart state is saved before PC-mode entry, so a storage
+        # failure sends no privileged or destination command.
+        pre_mode=({'storageFailure':True},)
         for options in pre_mode:
             with self.subTest(options=options,phase='pre-mode'):
                 self.prepare(**options);self.run_attempt()
                 packets=self.packets()
-                self.assertFalse(any(p[2]==0xa8 for p in packets))
+                self.assertFalse(any(p[2] in (0xa0,0xa8) for p in packets))
                 self.assertFalse(any(p[1]==0x32 for p in packets))
                 self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
                 self.context.close()
-        # Failures after PC-mode entry always exit privileged mode exactly once
-        # and never reach the destination write.
+
+    def test_required_phase_journal_failure_prevents_corresponding_setting(self):
+        for failure_at,expected_a0 in ((2,0),(4,1)):
+            with self.subTest(failure_at=failure_at):
+                self.prepare(storageFailureAt=failure_at);self.run_attempt()
+                packets=self.packets()
+                self.assertEqual(sum(p[2]==0xa0 for p in packets),expected_a0)
+                self.assertEqual(sum(p[2]==0xa8 for p in packets),0)
+                log=self.page.locator('#log').inner_text()
+                self.assertIn('Could not durably record the command-only attempt',log)
+                if expected_a0:
+                    self.assertIn('A0 was accepted but A8 was not sent',log)
+                    record=self.page.evaluate("JSON.parse(localStorage.getItem(PROBE_RECORD_KEY))")
+                    self.assertEqual(record['phase'],'a0-accepted')
+                self.context.close()
+        # Display-mode entry failures always request a display-owned exit once
+        # and never reach either drive-setting write.
         in_mode=(
-            {'mode1RequestFailure':True}, {'mode1Reject':True},
-            {'mode4RequestFailure':True}, {'secureWriteFailure':3}, {'pcReject':True},
-            {'stageWriteFailure':True},
+            {'mode5RequestFailure':True}, {'displayModeReject':True},
+            {'pcReject':True},
         )
         for options in in_mode:
             with self.subTest(options=options,phase='in-mode'):
                 self.prepare(**options);self.run_attempt()
                 packets=self.packets()
-                self.assertFalse(any(p[2]==0xa8 for p in packets))
-                self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
+                self.assertFalse(any(p[2] in (0xa0,0xa8) for p in packets))
+                self.assertEqual(sum(p==[0,0x0c,0] for p in packets),1)
+                self.assertFalse(any(len(p)>2 and p[1]==0x32 for p in packets))
                 self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
                 self.context.close()
 
@@ -264,38 +334,37 @@ class RegionWriteTests(unittest.TestCase):
         for route in ('2af9','2afb','2afd'):
             with self.subTest(route=route):
                 self.prepare(completionRoute=route);self.run_attempt()
+                self.assertEqual(sum(p[2]==0xa0 for p in self.packets()),1)
                 self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
                 log=self.page.locator('#log').inner_text()
                 self.assertIn(f'completion via {route.upper()}',log)
                 self.context.close()
 
-    def test_mode1_pre_key_status_does_not_unlock_the_transaction(self):
-        self.prepare(mode1PreKeyStatus=True);self.run_attempt()
-        packets=self.packets()
-        self.assertEqual(sum(p[2]==0xa8 for p in packets),1)
-        self.assertEqual(sum(p[:4]==[0,0x32,0x30,0xa2] for p in packets),1)
-        self.assertIn('pre-key status',self.page.locator('#log').inner_text())
-
     def test_wrong_mode_completion_is_ignored_until_exact_mode_arrives(self):
         self.prepare(wrongModeFirst=True);self.run_attempt()
+        self.assertEqual(sum(p[2]==0xa0 for p in self.packets()),1)
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
         self.assertIn('ignored mode',self.page.locator('#log').inner_text())
 
     def test_wrong_slot_completion_is_ignored_until_exact_slot_arrives(self):
         self.prepare(wrongSlotFirst=True);self.run_attempt()
+        self.assertEqual(sum(p[2]==0xa0 for p in self.packets()),1)
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),1)
         self.assertIn('ignored application slot',self.page.locator('#log').inner_text())
 
     def test_destination_and_readback_failures_never_retry_and_always_exit(self):
         failures=({'destinationReject':0x3a},{'destinationWriteFailure':True},
+                  {'stageReject':0x3a},{'stageWriteFailure':True},
                   {'readbackWriteFailure':True},{'after':0},{'exitReject':True},
                   {'exitWriteFailure':True})
         for options in failures:
             with self.subTest(options=options):
                 self.prepare(**options);self.run_attempt()
                 packets=self.packets()
-                self.assertEqual(sum(p[2]==0xa8 for p in packets),1)
-                self.assertEqual(sum(p[:4]==[0,0x32,0x10,0] for p in packets),1)
+                self.assertEqual(sum(p[2]==0xa0 for p in packets),1)
+                self.assertEqual(sum(p[2]==0xa8 for p in packets),0 if options.get('stageWriteFailure') or options.get('stageReject') else 1)
+                self.assertEqual(sum(p==[0,0x0c,0] for p in packets),1)
+                self.assertFalse(any(len(p)>2 and p[1]==0x32 for p in packets))
                 if options.get('after')==0:
                     self.assertNotIn('MILESTONE: US',self.page.locator('#log').inner_text())
                 self.context.close()
@@ -336,9 +405,17 @@ class RegionWriteTests(unittest.TestCase):
         record=self.page.evaluate('probeRecord')
         self.assertTrue(record['verified'])
         self.assertEqual(record['outcome'],'not-us')
+        self.assertEqual(record['phase'],'verified-not-us')
         self.assertEqual(sum(p[2]==0xa8 for p in self.packets()),destination_writes)
         self.assertIn('US did not persist. No retry sent',self.page.locator('#log').inner_text())
         self.assertFalse(self.page.locator('#guidedUS').is_disabled())  # No destination retry is reachable from the UI.
+        self.page.reload()
+        self.assertEqual(self.page.evaluate('probeRecord.outcome'),'not-us')
+        self.assertFalse(self.page.evaluate('''() => {
+          session={verified:true,directWriteEligible:true,motorEligible:true,
+            motorAuthenticated:true,currentDestination:0,regionWriteAttempted:false};
+          return canSetUS(session);
+        }'''))
 
 
 if __name__=='__main__':

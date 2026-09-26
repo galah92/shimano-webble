@@ -140,3 +140,33 @@ METHOD SetInspectionModeOtherPanel::btnLightingTime_Click 0x383b0
 0096 ret
 
 METHOD DriveUnitSetProgressPanel::setWorker_DoWork 0xcce2c
+; Selected ordering excerpt. The ordinary apply worker reaches tire
+; circumference first. Lighting time is a later, conditional write.
+0171 ldarg.0
+0172 call             get_TargetUnit
+0177 callvirt         get_SlotNo
+017C ldarg.0
+017D call             get_TireCircumference
+0182 call             SetTireCircumference
+; ... unrelated drive-unit setters omitted ...
+043B ldarg.0
+043C ldfld            fwVersion
+0441 ldarg.0
+0442 call             get_TargetUnit
+0447 callvirt         get_UnitSpec
+044C callvirt         get_ModelNo
+0451 call             IsSupportedVersionToLightingTime
+0456 brfalse.s        1128
+0458 ldarg.0
+0459 call             get_isLightingTimeExceeded
+045E brtrue.s         1128
+0460 ldarg.0
+0461 call             get_isLightingTimeSettingChanged
+046B ldloc.s          local(0x0014)
+046D brfalse.s        1187
+0470 ldarg.0
+0471 call             get_TargetUnit
+0476 callvirt         get_SlotNo
+047B ldarg.0
+047C call             get_LightingTime
+0481 call             SetLightingTime

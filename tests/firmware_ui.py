@@ -9,11 +9,16 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('https://shimano.test/', lambda route: route.fulfill(body=html, content_type='text/html'))
     page.goto('https://shimano.test/')
-    expect(page.locator('#build')).to_contain_text('2026-09-11.73')
+    expect(page.locator('#build')).to_contain_text('2026-09-25.91')
     expect(page.locator('#guidedUS')).to_be_visible()
     expect(page.locator('#guidedUSStatus')).to_contain_text('six-digit Shimano passkey')
     expect(page.locator('#firmwareFiles')).to_be_hidden()
+    assert 'runPreparedUsWriteTransaction' in html
+    assert 'writeUsWithDisplayOwnedStage' in html
+    assert 'Retired firmware preparation workflow is disabled' not in html
     expect(page.locator('#setUS')).to_be_disabled()
+    expect(page.locator('#setUSMax')).to_be_disabled()
+    expect(page.locator('#maxAssistPowerCycle')).to_be_disabled()
     expect(page.locator('#bootProbe')).to_be_disabled()
     page.locator('#firmwareFiles').set_input_files([
         {'name': 'D.dat', 'mimeType': 'application/octet-stream', 'buffer': bytes(256)},

@@ -31,7 +31,9 @@ class DescriptorTests(unittest.TestCase):
                 self.assertIn(expected, log)
                 self.assertEqual(self.page.locator('#region').inner_text(), 'EU')
                 packets = [w[2] for w in self.writes() if w[1] == '2afe']
-                self.assertEqual(packets, [[0,1,28,0],[0,1,44,0],[0,22,172,0],[0,22,172,1],[0,22,124,0],[0,1,132,0],[0,1,132,1]])
+                self.assertEqual(packets, [[0,1,28,0],[0,1,44,0],[0,22,172,0],[0,22,172,1],
+                                           [0,22,180,0],[0,22,188,1],[0,22,124,0],
+                                           [0,1,132,0],[0,1,132,1]])
                 if opts: self.assertIn('no variant inferred', log)
                 else: self.assertIn('00 16 7E 00 00 00 00 00 00 00 (10 bytes total)', log)
                 self.assertFalse(self.errors)

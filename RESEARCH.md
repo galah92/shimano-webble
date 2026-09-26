@@ -4,17 +4,19 @@ For the current takeover summary and asset policy, start with [HANDOFF.md](HANDO
 and [ASSETS.md](ASSETS.md). This document is a chronological notebook; older
 plans and interpretations below are retained as history, not current advice.
 
-Current status (2026-09-12, build .74): SC-E7000 display; motor reports
-E50X0, native D 4.5.0.0 / M 4.4.8.0, destination EU before the latest
-experiment. D4.5.0 implements the US destination setter but gates it on PC
-mode 4/5 plus an A0 one-shot staging flag. The bike accepted the motor unlock
-and normal PC mode 1, as well as modes 4 and 5 in separate trials. Build .73
-paired mode 4 with Shimano's seven-byte unchanged-lighting A0 frame. The bike
-still replied `A3 3A`, exited PC mode, and disconnected without receiving an
-A8 destination write. The user reported a display reset during that process;
-the log does not locate it in time. Build .74 parks the setter and offers a
-guided firmware/region readback only. US readback, persistence, and assistance
-speed remain unverified.
+Current status (2026-09-24, local build .82): SC-E7000 display; motor reports
+E50X0, native D 4.5.0.0 / M 4.4.8.0, and last verified destination EU. The
+display firmware exposes local command `00 0C <mode>` for modes 4 and 5, which
+makes the SC-E7000 itself establish and own that protected motor mode using its
+built-in secure-word table.
+This avoids the ownership collision that defeated phone-originated mode
+requests in builds .76/.77. Local build .82 selects display-owned mode 5 because
+Shimano's desktop inspection panel exposes its destination controls in that
+protected mode. It sends one unchanged A0, then freshly establishes
+display-owned mode 5 again before at most one US A8, with exact reply gates and
+a local mode exit. It has synthetic coverage but no bike result.
+The public Pages site still serves build .77. US readback, persistence, and
+assistance speed remain unverified.
 The dated entries below retain earlier hypotheses and superseded limitations.
 
 
@@ -3032,7 +3034,7 @@ catalog MD5 `4974d4f471b126be9f9657510e6bef55`) was downloaded on 2026-09-14.
 The Akamai edge returns HTTP 403 to a plain GET, but sending the E-TUBE app
 User-Agent (`E-TUBE PROJECT Cyclist/4.1.0 (Android)`) reaches the AmazonS3
 origin and returns the full image; the MD5 matches the catalog exactly. It is
-plaintext ARM Cortex-M (entropy 6.77), loaded at base `0x8000`. It is kept
+plaintext ARM Cortex-M (entropy 6.77), loaded at base `0x10000`. It is kept
 private and is not committed (see `ASSETS.md`).
 
 ### What the bridge does with drive-unit commands
@@ -3040,7 +3042,7 @@ private and is not committed (see `ASSETS.md`).
 - **No per-opcode filtering.** The display has no command-id literals for
   `A0`/`A8`/`AC`; it never originates them and has no code to intercept or
   rewrite them. They reach the motor through a raw, verbatim forward path
-  (`0x25bb2`→`0x257c4`), which copies the command content byte-for-byte and
+  (`0x2dbb2`→`0x2d7c4`), which copies the command content byte-for-byte and
   prepends only two bus-node bytes.
 - **Motor offset+4 is the packet's leading byte, not the first parameter.**
   Verified byte map: motor offset +2/+3 = phone bytes b1/b2 (category/opcode),
@@ -3053,11 +3055,11 @@ private and is not committed (see `ASSETS.md`).
   the first parameter at offset+4 was falsified by the `AC 01` read, which would
   then have been rejected but is accepted every session.
 - **PC-mode commands are forwarded to the motor, not answered locally.** The
-  display's own cat-0x32 handler table (`0x21844`, dispatch `0x1964a`) belongs
+  display's own cat-0x32 handler table (`0x21844`, dispatch `0x2164a`) belongs
   to its connection/handshake state machine for the display's own DU link; it is
   not the phone-inbound handler and contains no code to synthesize a motor
   secure-word reply or a slot-routed opcode-0x12 completion. The DU→phone path
-  (`0x131c6`/`0x131e0`→BLE notify `0x10bf4`) tunnels the motor's raw reply words
+  (`0x1b1c6`/`0x1b1e0`→BLE notify `0x18bf4`) tunnels the motor's raw reply words
   straight back. This matches the live evidence that app-slot `00` produced no
   completion while slot `0D` did: that is the motor's secure-handler slot
   routing. So the motor genuinely enters PC mode 4 when the phone drives it.
@@ -3161,3 +3163,1304 @@ bridge. The reliable paths are the wired SM-PCE adapter (E-TUBE Professional
 writes destination=US directly, no firmware downgrade) or a firmware downgrade.
 Do not iterate further phone-only builds; the ~60 ms reclaim is a bus-ownership
 property of the display, not something a Web Bluetooth client can outrun.
+
+## 2026-09-24 correction and build .78: the completion wait, not BLE itself, was ruled out
+
+The build-.77 conclusion was too broad. Its four live failures conclusively
+rule out sending the first drive-setting command **after receiving** the
+mode-4 completion notification. They do not rule out queuing a setting command
+after the fifth secure word's ATT write completes locally but **before waiting
+for** that notification. That removes one complete BLE notification scheduling
+leg from the critical path.
+
+### Cross-version firmware findings
+
+The public eTuning preparation archive was fetched again and verified as
+SHA-256 `4dee4d75ee83c22e951114cbf57332709c15be637ec2a8171bd82f9345adb137`.
+It contains the exact D4.3.0/M4.2.1 pair. Reverse engineering D4.3.0 found the
+same structure as D4.5.0:
+
+- `A0` handler `0x23b74` requires mode 4/5 and zero target, and sets the
+  one-shot byte at `0x2000295f`;
+- `A8` handler `0x23c48` requires mode 4/5 plus that byte, clears it, and
+  persists the candidate record;
+- PC-mode request `0x25ae8` and secure-word handler `0x25cfc` stage and promote
+  mode 4/5 in the same way as D4.5.0.
+
+Therefore the older supported firmware does not simply remove the gates. Its
+different field behavior must come from state/timing elsewhere in the complete
+system. Preparation remains a credible path because multiple commercial tools
+support this exact pair, not because the `A8` handler is unconditional.
+
+The D4.3 startup path resolves the fresh-boot question. Entry `0x2e214` calls
+the complete two-record initializer table at `0x2ffcc`. Record one invokes
+zeroing routine `0x2ff90` for `0x2530` bytes beginning at `0x20000490`. That
+range ends at `0x200029c0`, so it explicitly clears the A8 gate at
+`0x2000295f`. Record two invokes decompressor `0x294aa`; decoding its complete
+`0x3f5`-byte input produces `0x56c` bytes at `0x2000000c..0x20000577`, ending
+`0x23e7` bytes before the gate. The table dispatcher then reaches its end.
+
+The static writer audit was widened beyond exact literals. The only direct
+literal for `0x2000295f` remains the A0/A8 shared literal. Every located
+reference based from `0x20002940` through `0x2000295e` accesses an exact byte,
+and no call site of the image's generic byte-fill or byte-copy helper spans the
+gate. This does not mathematically exclude an arbitrary computed pointer, but
+it rules out the direct, nearby-base, startup-table, and identified standard
+bulk-write paths. No other gate setter was found. Thus a cold boot does not
+pre-arm direct A8; the commercial call sites prove packet shape but leave some
+prior state or version-specific behavior unstated.
+
+D4.5 is parallel: initializer table `0x3173c` first calls zeroing routine
+`0x31700` for `0x25d0` bytes from `0x20000490`, covering its gate at
+`0x200029fd`. Its second record calls the structurally identical decompressor
+at `0x2c33a` and also ends at `0x20000578` exclusive. Neither initializer can
+arm the gate.
+
+### Two independent clients use direct A8
+
+Current eTuning 3.0.7 was decompiled again. Its old-generation region action
+constructs `00 16 A8 01 <destination>` directly in `p000/C1459qj.java`; its
+`A0` method is used by the separate lighting-time UI. The independent
+eMaxMobileApp 1.89 implementation does the same in
+`DestinationSettingsActivity.java`, including `00 16 A8 01 01` for US, and
+treats `AA` as success. Neither region path stages A0.
+
+The current published compatibility evidence is also consistent:
+
+- eMax's table lists E50X0 D4.2.1-D4.3.0 as Bluetooth-capable for destination
+  changes and D4.4.2-D4.5.0 as not capable, with Bluetooth downgrade support:
+  https://www.emax-tuning.com/eMax-possibilities.pdf
+- eTuning advertises automatic downgrade for older E5000 systems and region
+  changes without a physical device:
+  https://etuning-app.com/compare/etuning-vs-emax-vs-stunlocker/
+- STUnlocker lists Bluetooth destination change through E5000 D4.3.0 and a
+  wired path for the latest firmware: https://www.stunlocker.com/
+- Shimano's own recovery documentation warns that an interrupted wireless
+  update may require E-TUBE Professional and SM-PCE recovery:
+  https://bike.shimano.com/en-NA/support-and-service/faq/EPP0A.html
+
+Community reports corroborate the outcome but are not protocol proof. E5000
+owners report a US/32 km/h selection through eTuning over Bluetooth:
+https://www.appwereld.nl/app/etuning-for-shimano-ebikes/1578877322 and
+https://happyride.se/forum/threads/optimala-installningar-for-shimano-steps-e5000.3700908/
+
+### Build .78 transaction
+
+Build .78 keeps one A0 and one A8, with no retries. On the exact verified
+D4.5.0/M4.4.8 EU baseline, after motor authentication and mode 1 it:
+
+1. reads the current two-byte lighting time before privileged mode;
+2. subscribes to the exact mode-4 completion routes and A0/A8 replies;
+3. sends the mode-4 request and five secure words;
+4. after the fifth secure write's ATT completion, immediately queues unchanged
+   `00 16 A0 <low> <high> FF FF`, then queues one `00 16 A8 01 01` after only
+   A0's local ATT completion, without awaiting A0's motor reply or mode-4
+   completion;
+5. requires exact mode-4/slot completion, A0 `A2`, and A8 `AA`;
+6. freshly reads selector 1 and requires US; and
+7. exits protected mode. A separate physical power cycle and new session are
+   still required to establish persistence, and a ride is required to establish
+   the assistance cutoff.
+
+The secure handler promotes the active mode before it emits completion, so the
+ordering is internally coherent and A0 supplies the statically required gate.
+It may still fail if either ATT response is already too late. There is one
+attempt only: no A0 or A8 retry, no inferred success from ATT completion, and
+an uncertain transport outcome triggers a readback. Synthetic tests
+deliberately withhold the mode-4 completion until both commands are observed,
+proving the page does not wait for the losing notification round trip.
+Synthetic acceptance does not prove bike acceptance.
+
+A deeper eTuning call-chain audit found no hidden A0 inside the direct region
+operation. `C1463qn.m6499J` is only a bare `2AFE` GATT write helper, and the
+quick-action dispatcher schedules its optional region task before its other
+optional setting tasks; its lighting-time action is separate. In the eMax APK,
+the A0 packet constructors likewise occur in `LightActivity`, not in
+`DestinationSettingsActivity`. This strengthens the direct-A8 observation but
+does not explain the cold-zeroed gate: connection initialization,
+version-specific system behavior, or an indirect memory write remains missing.
+
+The current public field evidence also sharpens the downgrade tradeoff. On
+2026-05-29 the eTuning author stated that the guided mobile app now integrates
+the downgrade for older E5000/E5080 systems and supports 32 km/h over Bluetooth:
+https://foro.e-mtb.es/index.php?topic=5382.375 . The same thread contains user
+reports of wireless updates stopping at 98% or around 60% and requiring dealer
+or SM-PCE02 restoration. Those anecdotes do not quantify the failure rate, but
+they corroborate Shimano's official recovery warning and justify keeping the
+firmware path behind a separate risk decision.
+
+If a .78 run returns `A3 3A` or `AB 3A` and EU, the remaining
+evidence-backed no-new-hardware path is the already implemented paired BLE
+firmware workflow: install D4.3.0/M4.2.1, verify that exact pair, write and
+persist US, then restore D4.5.0/M4.4.8. Build .45 already verified ordinary
+bootloader entry and clean return on this bike; build .64 corrected the
+first-use preflight to that path but has never been live-tested, and no firmware
+image has ever been sent. Wireless flashing is materially riskier than build
+.78: interruption can leave a unit needing the wired recovery hardware the user
+wants to avoid. The hidden firmware UI must not be exposed until the .78 result
+is known and the recovery/restore sequence is reviewed again.
+
+## 2026-09-24 second correction and build .79: let the display own mode 4
+
+The build-.78 timing hypothesis is superseded by a stronger finding in the
+SC-E7000 4.1.0 display image. The prior phone-only experiments asked the motor
+for mode 4 directly while the display still owned and maintained its normal
+motor session. Their repeatable 59-74 ms loss demonstrates that ownership
+collision. It does not establish that a mode requested and owned by the display
+itself is equally short-lived.
+
+### The local 0C handler supports protected modes
+
+An independent address check corrected the earlier display-image base. Header
+entry pointer `0x2c6f1` maps to file offset `0x1c6f1`, and literal table pointer
+`0x21dfc` maps to the known mode-1 words at file offset `0x11dfc`; both require
+load base `0x10000`, not the previously recorded `0x8000`. Earlier display
+function labels were therefore `0x8000` too low. The bytes and control flow were
+the same, but all display function addresses below use the corrected base.
+
+The BLE/display-local handler at `0x236fc` accepts exactly input modes 0, 1, 4,
+and 5:
+
+- mode 0 calls `0x212ac(0)`, then cleanup helper `0x17cfa`, and replies
+  `2C 00`;
+- modes 1/4/5 call setup helper `0x17cc8`, then `0x212ac(mode)`, then helper
+  `0x1f7a4`, and reply `2C 00`;
+- any other mode replies `2C 01`.
+
+`0x212ac` builds the display-to-motor category-32 mode request and, for nonzero
+accepted modes, queues all five secure words. Its built-in tables are at
+`0x21dfc` for mode 1, `0x21e08` for mode 4, and `0x21e14` for mode 5. This is
+not speculative transport mapping: the supplied official eTuning capture sends
+display command `00 0C 01`, receives `2C 00` on the display reply route, and
+then receives motor completion `00 32 12 01 0D ...` about 61 ms later.
+
+Thus `00 0C 04` is the missing BLE primitive: it asks the SC-E7000 itself to
+establish mode 4 with the motor. Builds .76/.77 instead sent the corresponding
+category-32 request and secure words from the phone, causing the display's own
+state machine to overwrite their grant. Static analysis proves the changed
+ownership path.
+
+### Completion does not immediately exit the display-owned mode
+
+The follow-up trace located the five-word response handler at `0x21d2c`.
+After the fifth comparison succeeds it stores the requested mode from
+`0x20003101` in the display connection state's active-mode byte at
+`0x200001f8 + 0x0e`, clears the word counter, sets the completion flag at
+offset `+0x1e`, stores the application slot at `+0x12`, and constructs the
+observed category-32 opcode-`12` completion. These state writes occur before
+the completion is queued. There is no call to `0x236fc(0)`, cleanup helper
+`0x17cfa`/`0x1f76c`, or the mode-0 builder on this path. Within this
+category-32 state cluster, the only direct writes to the active-mode byte are
+the explicit mode-0 clear at `0x21cc6` and the successful five-word completion
+store at `0x21d78`.
+
+The two internal calls to `0x236fc(0)` are at `0x1f810` and `0x1f85a`. Both
+are reached through the separate `0x1f7b8`/`0x1f836` connection/topology
+maintenance state machine; the four call sites of `0x1f7b8` are connection
+event handlers, not the secure-word completion handler. The local nonzero-mode
+path also calls `0x1f7a4`, which clears bytes `+0x06`, `+0x04`, `+0x05`, and
+`+0x03` in topology state at `0x20002fc8`. The periodic tick at `0x1f6f0`
+decrements the timer but calls exit state machine `0x1f836` only if byte
+`+0x06` equals one. It is therefore disarmed after the display-owned request;
+a timer alone cannot produce the 59--74 ms reclaim observed when the phone
+owned mode 4. A fresh connection/topology event through `0x1f7b8` can set the
+trigger again, so this does not prove an unlimited mode-4 lifetime.
+
+A whole-image direct-`BL` scan narrows that remaining event caveat. The only
+references to re-arm handler `0x1f7b8` are `0x17820`, `0x178a6`, `0x17b6c`,
+and `0x18352`; the only references to exit machine `0x1f836` are the periodic
+gate at `0x1f704` and the re-arm handler at `0x1f7f0`. The only direct
+references to local mode handler `0x236fc` are the normal local-command
+dispatcher at `0x16210` and the two maintenance mode-0 calls. None is in the
+mode-completion or raw drive-command forwarding path. This does not prove that
+an independent connection event cannot occur, but it rules out another hidden
+direct caller elsewhere in this exact image.
+
+This rules out the specific concern that the SC-E7000 reports success and
+immediately or periodically exits its own requested mode without a new event.
+It does not prove that a later topology event cannot end the mode before the
+next BLE command, nor that D4.5.0 will accept A0. Build .79 identified the
+motor-side A0 gate after an internally recorded display-owned completion, not
+whether the completion handler or an already-running timer revokes the grant;
+build .80 below retains that question while selecting the stronger mode-5
+client precedent.
+
+The next BLE drive command does not synchronously re-arm or exit this state
+machine. The generic enqueue at `0x2bf74` reaches selector `0x2dbb2`; staging
+type `0x10` takes its full-copy branch to `0x2d7c4`. None of those bounded call
+graphs calls `0x1f7b8`, `0x1f836`, `0x236fc`, `0x212ac`, `0x17cfa`, or
+`0x1f76c`. Consequently receipt of the build-.79 A0 cannot cancel mode 4 before
+the packet is enqueued. This is still bounded static evidence: an independent
+asynchronous topology event could occur after enqueue, and motor acceptance is
+unverified.
+
+The read-only `tools/inspect_display_pc_mode.py` verifier pins the exact private
+image fingerprint and reproduces the mode tables, bounded local/completion and
+drive-forward call graphs, topology-maintenance gate, and state-write ordering
+without emitting vendor bytes.
+
+### Negative audit of other historical setup commands
+
+Historical eTuning 1.0.32 was decompiled to test whether its connection flow
+contained another hidden gate setter. Its destination button still sends
+direct `00 16 A8 01 <destination>` and no A0. It uses display-local `0C 01`,
+but no `0C 04`/`0C 05` call site was found. Raw/fallback decompilation confirms
+the complete `RegionActivity.writeClick` bytecode constructs that one five-byte
+A8 packet and performs one `2AFE` write; its `onCreate` helper only checks the
+firmware version and can show a warning. A complete eMaxMobileApp 1.89 source
+audit is parallel: inventory sends local `0C 01`, destination writes direct A8,
+and no local mode-4/5 command was found. Its connection command
+`00 32 B4 00` is read-only: D4.3 handler `0x215b4` calls `0x2453a`, which loads
+the dword at `0x2000276c` and returns a B6 response. D4.5 is parallel at
+`0x22c40`/`0x25c6e`, loading `0x200027e8`. The display-local `00 0D 00`
+command is also a read-only status query at `0x23746`. Neither explains or arms
+the A8 one-shot gate.
+
+These negative findings preserve the static motor conclusion: A0 remains the
+only identified setter of the cold-zeroed A8 gate. The new result changes how
+mode 4 should be established, not the required A0/A8 semantics.
+
+### Current commercial-client diffs expose no second privilege path
+
+Two additional current/historical release comparisons were performed on
+2026-09-24, with all third-party packages kept outside the repository.
+
+The eTuning 2.0.8 release note says it fixed a firmware-specific E5000 problem
+that prevented assistance parameters from being saved. A direct comparison
+with 2.0.7 shows that this is not a destination or PC-mode change. Both versions'
+assistance worker writes the same ordinary category-16 opcode-`98` records,
+`00 16 98 <mode> <assist-le16> <torque> <power-le16>`, with 750 ms between
+changed modes. Both source trees contain display-local `00 0C 01`, but neither
+contains `00 0C 04` or `00 0C 05`; their category-32 literal inventories are
+also unchanged. Therefore the public 2.0.8 E5000 fix does not provide a second
+way to enter privileged destination-write mode. The inspected 3.0.7 manifest
+is version code 97, matching the current public release listing as of this
+check. Release history:
+https://apkpure.net/tw/etuning-for-shimano-steps/eTuning.for.shimnao.steps/versions .
+
+STUnlocker Android 1.21.157 provides a second independent implementation. Its
+obfuscated strings were decoded from the package's own native string routine
+and the complete decoded literal inventory was searched. The connection flow
+performs the normal BLE authentication and display access sequence, including
+display-local `00 0C 01`. The market worker then selects motor slot 0, performs
+the model-dependent motor authentication when required, writes exactly
+`00 16 A8 01 <destination>`, and reads `00 16 AC 01`. Its lighting worker labels
+`00 16 A0 <low> <high> FF FF` as the lighting-time setter. The complete decoded
+inventory contains one `000C01`, one `0016A801`, the `0016A0` constructor, and
+no `000C04` or `000C05`. Thus STUnlocker independently confirms both category-16
+packet roles but exposes no alternate D4.5 mode grant. This is consistent with
+its published boundary of Bluetooth destination changes through E5000 D4.3.0
+and a wired route for the latest firmware: https://www.stunlocker.com/ .
+
+An authentic intermediate package, STUnlocker 1.20.153, was then recovered.
+Its SHA-256 is
+`0965e31e6db74f9d19b410bcba9bb04ad5b3a710638f6bdad6ab6d9935c71af9`;
+its SHA-1 matches APKFab's version page, and its signing certificate is
+byte-for-byte the same certificate used by 1.21.157. Decoding all 3,333 unique
+literal values and tracing its market worker produces the same result: select
+slot 0, run D8/AES/E8 security access when required, send direct
+`00 16 A8 01 <destination>`, optionally update assistance speed, and read
+`00 16 AC 01`. Its inventory also contains local `000C01`, but no `000C04` or
+`000C05`. This shows the visible direct-A8 design was already present in the
+January 2025 package; it still does not establish what the unavailable
+1.15.120-era client did.
+
+Together these audits rule out another visible sequence in the public packages
+examined. They do not explain reported success on older supported firmware,
+which could depend on transient state created during preparation/update or on
+an unexamined historical/private workflow. Build .79's display-owned
+`00 0C 04` step remains the only identified software-only way to supply
+D4.5.0's required mode 4/5 before the unchanged A0 and A8 halves of the
+settings record.
+
+The current STUnlocker package's embedded v1.20 manual independently gives the
+same E5000 boundary: Market Setting is supported through D4.3.0, while standard
+features extend through D4.5.0. Its decoded "Use Security Access" path is not a
+second PC-mode mechanism; it performs the already tested D8 challenge/AES
+response and E8 release sequence before direct A8. Public archive metadata
+lists historical Android releases back to 1.7.38, but the checked APKPure,
+Uptodown, APKCombo, APKTurbo and Aptoide routes did not yield an authentic
+pre-1.20 artifact. Uptodown's current client API was also reconstructed from
+its native HMAC routine, but the public API host returned `410 Gone` before an
+authenticated archive lookup could complete. In particular, versioned APKTurbo
+URLs displayed the requested old version only in the page title while their
+structured data and download target still pointed to 1.20.153. This is a
+bounded artifact-availability result, not evidence that an old client lacked
+another sequence.
+
+### The category-16 setters assemble one 11-byte record
+
+The exact D4.5.0 handlers also sharpen the mutation boundary. Category-16 A0
+at `0x252a8` requires mode 4/5 and selector zero, copies five bytes to the
+pending buffer at `0x20002548`, sets the volatile one-shot byte
+`0x200029fd`, and emits A2. Category-16 A8 at `0x2537c` requires the same mode
+and that flag equal to one, copies the next six bytes to adjacent address
+`0x2000254d`, clears the flag, and calls `0x25516`. That helper compares the
+assembled 11-byte pending buffer against the current record at `0x2000253c`
+and copies it into the record buffer only on its changed-record path. This
+explains why preserving the freshly read A0/lighting bytes is important: A0
+and A8 form two halves of a single settings record, and only the destination
+half should differ.
+
+An exact mode-4/5-only read-only probe was sought before A0. The other direct
+mode-4/5 check is category-32 A0 at `0x24d50`, not the category-16 A0 above;
+its path dispatches the supplied byte through `0x1c434`/`0x246ec` and a
+separate record/update operation. It is therefore not safe as a status probe.
+Category-32 B4 and display-local 0D are read-only, but neither proves that the
+motor remains specifically in mode 4/5. The unchanged category-16 A0 is still
+the narrowest available gate before the destination commit.
+
+### Build .79 transaction and safety boundaries
+
+On the exact verified D4.5.0/M4.4.8 EU baseline, build .79:
+
+1. reads selector 1 and the current two-byte lighting value before privileged
+   mode;
+2. stores the salted same-device restart expectation;
+3. sends `00 0C 04` on display characteristic 2AFA;
+4. requires both display acknowledgement `2C 00` and exact motor completion
+   `00 32 12 04 <wireless-slot>` on an observed notification route;
+5. sends unchanged `00 16 A0 <low> <high> FF FF` once and requires A2;
+6. only then sends `00 16 A8 01 01` once and requires AA;
+7. freshly reads destination selector 1 and requires US; and
+8. exits via display-local `00 0C 00`, requiring its acknowledgement and exact
+   motor mode-0 completion.
+
+It sends no phone-originated category-32 mode request or secure words, no
+firmware data, no A8 after an A0 rejection, and no A0/A8 retry. An uncertain
+destination-write transport result triggers readback rather than another
+write. The page records mode-4 completion-to-A0-enqueue and
+completion-to-A2-acceptance intervals for the one allowed run. Synthetic tests
+cover the exact packet order, reply routing, timing-log presence, wrong
+mode/slot filtering, rejection paths, exit attempts, and at-most-once
+properties. They do not prove bike acceptance.
+
+The next meaningful live evidence is therefore a single build-.79 run, not a
+build-.78 timing run. Success requires `2C 00`, exact mode-4/slot completion,
+A2, AA, and fresh US readback; persistence still requires a physical power
+cycle and a new session, and higher assistance speed still requires a safe ride
+test. If the motor returns `A3 3A` or `AB 3A` despite exact display-owned mode
+completion, do not repeat the command. The paired BLE D4.3.0/M4.2.1 preparation
+workflow remains the higher-risk no-new-hardware fallback.
+
+### Fresh public-code sweep does not expose another destination path
+
+A 2026-09-24 search of current public repositories and exact command strings
+found no independent implementation of the E50X0 destination transaction or
+the SC-E7000 local mode-4/5 operation. This is bounded negative evidence, not a
+claim that unpublished code does not exist.
+
+- Reven's [`etubeapi`](https://github.com/reven-project/etubeapi) provides the
+  firmware catalog, and
+  [`reven-plugin-etube`](https://github.com/reven-project/reven-plugin-etube)
+  provides firmware header/decrypt/encrypt helpers. Neither contains a BLE
+  settings client or destination transaction.
+- [`BikeBridge`](https://github.com/Shiho-Patch/BikeBridge) independently names
+  the Shimano `2AFA` command and `2AF9` response characteristics and implements
+  ordinary display settings. Its Shimano constants leave `DUUnitDataLink` and
+  `DestinationType` as comments; there is no destination setter or local
+  `0C 04`/`0C 05` sequence in the current tree.
+- The
+  [`Shimano-Steps-Simulator-BT-E6000`](https://github.com/ottelo9/Shimano-Steps-Simulator-BT-E6000)
+  project documents battery UART authentication and simulation. It is a
+  different transport/subsystem and provides no E-Tube BLE destination path.
+- The public
+  [E-Tube desktop patching guide](https://forums.electricbikereview.com/threads/derestricting-a-shimano-steps-e-bike.54485/)
+  still describes the wired `DUUnitDataLink.SetDestination(slot, 1, 1)` route
+  and serial-derived regulation authentication. Its command details agree with
+  the already inspected E-TUBE 3.4.5 assemblies, but it requires SM-PCE01/02
+  and adds no phone-only initialization step.
+
+The sweep therefore found corroboration for the known command surface, not a
+safer shortcut.
+
+## 2026-09-24 third correction and build .80: match Shimano's destination mode
+
+Build .79 correctly changed ownership, but its choice of protected mode 4 was
+not the closest available client precedent. Rechecking the E-TUBE 3.4.5 desktop
+control flow shows that `SetInspectionModeOtherPanel` contains the actual
+factory and OEM destination buttons, both calling
+`DUUnitDataLink.SetDestination`. The surrounding inspection workflow enters
+protected PC-link mode 5. That is direct evidence for the mode in which Shimano
+exposes destination writes, whereas mode 4 is only known to be accepted by the
+same D4.5 motor gates.
+
+This does not undo the display-firmware result. The SC-E7000 local handler
+accepts both 4 and 5, calls the same setup and post-request helpers for either,
+and selects the corresponding built-in secure table. The completion handler
+stores the requested mode generically before announcing success. The D4.5 A0
+and A8 handlers also accept either 4 or 5. Therefore display-owned mode 5 keeps
+the ownership fix while matching Shimano's known destination-setting context
+more closely.
+
+Local build .80 changes only that selection and its exact completion gate:
+
+1. send display-local `00 0C 05`;
+2. require `2C 00` and exact motor completion
+   `00 32 12 05 <wireless-slot>`;
+3. send one unchanged category-16 A0 and require A2;
+4. send at most one OEM-selector US A8 and require AA plus fresh US readback;
+5. exit through display-local `00 0C 00`; and
+6. require a separate post-power-cycle readback before calling the value
+   persistent.
+
+All identity, EU-baseline, motor-authentication, durable restart-record,
+at-most-once, no-retry, readback, and exit guards are unchanged. Build .79 was
+never published or tested on the bike. Build .80 has synthetic coverage only;
+the last verified destination remains EU, and no higher assistance cutoff has
+been measured.
+
+## 2026-09-24 fourth correction: the A0 gate predates D4.3
+
+The remaining client/firmware contradiction was tested against the exact
+DUE5000 D4.1.0 image distributed with E-TUBE Professional 3.4.5. That pairing
+is historically important because the same desktop release contains the
+inspection panel whose factory and OEM destination buttons call
+`DUUnitDataLink.SetDestination` directly.
+
+D4.1.0 is not an ungated predecessor. Its category-16 A0 handler at `0x240e0`
+requires active PC mode 4 or 5 and selector zero, copies the five-byte first
+half of the pending record to `0x200028d0`, sets the byte at `0x20002d72`, and
+returns A2. Its A8 handler at `0x241b0` requires mode 4/5 and that byte equal to
+one, copies the adjacent six-byte second half to `0x200028d5`, clears the gate,
+and reaches record helper `0x24356`. This is the same state machine already
+verified in D4.3.0 and D4.5.0.
+
+Cold boot does not supply the missing state. D4.1 header entry `0x2ebb9` calls
+runtime initialization at `0x30b20`; the first record in table `0x30bc8`
+resolves to zero routine `0x30b8c` and clears `0x2520` bytes from
+`0x200008b0`, covering the gate. The exact gate address occurs as a literal
+only once, in the pool shared by A0 and A8. This is bounded static negative
+evidence, not proof against arbitrary computed pointers, but it rules out an
+already-armed cold-start gate and a firmware-version explanation based on A8
+becoming gated only after D4.1.
+
+A complete managed caller pass found only two `SetDestination` callers in the
+3.4.5 executable: the factory and OEM destination buttons. The only
+`SetLightingTime` callers are its separate button and the drive-unit setup
+worker. No hidden A0 call sits immediately inside either destination button.
+The old desktop UI therefore remains evidence for mode 5 and A8 arguments, not
+for a complete self-contained wire sequence. Some earlier setup state,
+operator sequence, display behavior, or an unobserved indirect path must
+explain the direct call.
+
+The panel lifecycle and general apply worker were then checked. `DoLoad` and
+`ResetDisplay` only build the inspection controls and unit lists. In the
+ordinary drive-unit settings worker, `SetTireCircumference` occurs at IL
+offset `0x0182`; the only `SetLightingTime` call is later at `0x0481` and only
+when the lighting value changed. Therefore the public desktop patch that adds
+`SetDestination` inside `SetTireCircumference` executes A8 before this possible
+A0. Its reported wired success cannot be explained by a hidden preceding
+lighting setter in the published call chain.
+
+This correction strengthens rather than changes build .80. Display-owned mode
+5 matches Shimano's destination context, while replaying the freshly read,
+unchanged A0 half explicitly satisfies the one-shot gate present in all three
+verified motor versions. The build number and live-test plan remain unchanged.
+`tools/inspect_motor_destination.py` makes the three-version result
+reproducible from exact private images without dumping or committing them.
+
+## 2026-09-24 fifth correction: old display firmware has the same owned mode
+
+The exact SC-E7000 4.0.6 image bundled with E-TUBE Professional 3.4.5 was
+compared against the bike's 4.1.0 image to test whether historical BLE success
+depended on an older bridge lifecycle. It does not expose such a shortcut.
+
+SC-E7000 4.0.6 local handler `0x22d74` accepts modes 0, 1, 4, and 5. Its three
+five-word secure tables at `0x21474`, `0x21480`, and `0x2148c` are byte-for-byte
+identical to the corresponding 4.1.0 tables. Completion handler `0x213a4`
+stores the requested mode, completed-session flag, and application slot before
+announcing completion and has no immediate mode-0 or cleanup call. Its
+post-request helper clears the periodic maintenance trigger, while the periodic
+tick invokes the exit machine only when a later event has set that trigger.
+Whole-image direct references to the local handler, event-rearm handler, and
+exit machine have the same bounded topology as 4.1.0.
+
+The one relevant implementation difference makes current 4.1.0 more fully
+reset, not less capable: its post-request helper additionally clears topology
+phase byte `+0x03`; 4.0.6 clears the same trigger and phase `+0x04/+0x05` fields
+but not `+0x03`. There is therefore no static reason to add a display downgrade
+to the candidate workflow. It would add wireless-update risk without arming
+the motor's separate destination gate.
+
+`tools/compare_display_pc_mode.py` verifies the two exact fingerprints, secure
+table hashes, state-write signatures, call graphs, and whole-image direct-call
+sets. This historical negative result leaves build .80 unchanged and further
+concentrates the next experiment on current display-owned mode 5 plus A0/A8.
+
+## 2026-09-24 sixth correction: PC-mode completion cannot substitute for A0
+
+The apparent direct-A8 desktop path left one narrow alternative: perhaps the
+fifth secure word that promotes protected mode 4 or 5 also arms the nearby
+destination gate. Exact-image handler checks now rule that out for D4.1.0,
+D4.3.0, and D4.5.0.
+
+Each version keeps the application slot, active mode, requested mode, and
+secure-word count in four consecutive bytes. The destination gate is a
+separate byte two positions beyond the count. The PC-mode request handlers at
+`0x26098`, `0x25ae8`, and `0x2721c` stage requested mode and slot and reset the
+counter. The secure-word handlers at `0x262ac`, `0x25cfc`, and `0x27430`
+promote requested mode after the fifth matching word and reset the counter.
+Their verified direct state writes do not set the destination gate. The three
+mode-1/4/5 secure tables are also byte-identical across all motor versions and
+match the paired display tables; mode 5 therefore supplies context and
+ownership, not an implicit region-write grant.
+
+`tools/inspect_motor_destination.py` now machine-checks those handler
+dispatches, request and promotion signatures, tables, state layout, and the
+already verified A0/A8 and cold-start invariants against exact fingerprints.
+All three private images pass; a modified sample is rejected. This remains
+bounded static evidence and does not prove bike acceptance. It does show that
+build .80's unchanged A0 is required rather than merely defensive, and leaves
+the unexplained old direct-A8 client behavior attributable to prior or retained
+staging, an unobserved indirect path, or adapter-specific state—not mode-5
+completion alone.
+
+## 2026-09-24 seventh correction and build .81: refresh mode after A0
+
+The separated PC-mode and destination-gate state makes a safer transaction
+possible. Once A0 returns A2, its candidate record and one-shot gate survive
+ordinary PC-mode changes; only A8 consumes the gate, while cold startup clears
+it. The SC-E7000 local `0C` handler also does not short-circuit a request for
+the already active mode. Each accepted mode-5 request stages mode 5 again and
+queues a fresh motor request plus all five secure words.
+
+Build .81 therefore keeps both setting writes once-only but requires two
+display-owned handshakes:
+
+1. require local `00 0C 05` acknowledgement and exact motor mode-5 completion;
+2. send the unchanged A0 once and require A2;
+3. send local `00 0C 05` again and require a second exact display and motor
+   completion; and
+4. only then send one OEM US A8, require AA and fresh US readback, and exit
+   through local mode 0.
+
+This removes a remaining avoidable race between A2 and A8: even if an
+independent topology event reclaimed motor mode after A0, the second handshake
+restores it without clearing the accepted A0 gate. The exact display image
+shows that same-mode requests are forwarded again, and the exact motor images
+show that mode request/promotion does not touch either the gate or pending
+record. If the second handshake fails, build .81 withholds A8, disconnects,
+and tells the operator to power-cycle before using another setting tool because
+the A0 gate may remain armed. Synthetic fault tests cover all three second-
+handshake failures and prove one A0, zero A8, verified exit attempt, and the
+power-cycle warning. No bike acceptance, persistence, or higher cutoff has yet
+been demonstrated.
+
+## 2026-09-24 eighth correction and build .82: no-retry survives reload
+
+Build .81's protocol ordering was sound, but its no-retry guarantee was only
+held in the live JavaScript session. The command verification record used
+`sessionStorage`, and `canSetUS` blocked only an unverified record. After a
+non-US reconnect result became verified, a page reload and new connection could
+therefore make the setter eligible again. An A0-only interruption also needed
+stronger persistence because its gate can remain armed until bike power-off.
+
+Build .82 keeps the exact build-.81 packet sequence and changes the attempt
+journal. Before privileged mode it durably stores only a random salt, a salted
+hash binding the browser-selected Bluetooth device, the exact expected motor
+pair and destination, and a phase marker. It persists `a0-started` before A0
+enqueue and `a8-started` before A8 enqueue. Any command-attempt record is now
+terminal for the setter across reloads, including verified `us` and `not-us`
+outcomes. The read-only bike check remains available. A record that reached A0
+without A8 produces an explicit physical-power-cycle warning before any other
+setting tool is used.
+
+No passkey, raw device identifier, serial number, packet capture, or firmware
+content is stored. Synthetic tests reload the page after A0-only failures and
+after a verified non-US result and prove that `canSetUS` remains false. Build
+.82 remains unpublished and has no bike result.
+
+## 2026-09-24 ninth correction: the desktop host does not hide the A0 gate
+
+The remaining wired-client ambiguity was followed through E-TUBE Professional
+3.4.5's managed serial boundary. `UnitCommandSetting.Make` only stores the
+slot, group, opcode, and parameters. `SendUnitCommandData` and
+`SendReceiveUnitCommand` pass that payload through
+`SendDCASRawPacketCommand`/`WriteData` with control byte `0x48`.
+`CreateWriteData` adds the control byte and two's-complement FCS, and
+`Common.CreateFrame` performs framing and escaping. The protected-mode start
+and five secure words are ordinary category-32 commands through the same path.
+There is no opcode-specific hook that inserts A0 before A8 or rewrites the
+destination call.
+
+The independent 2018 `freeMax.exe` client provides a second control. It opens
+PCE1/BCR2 serial directly and writes complete logical DCAS frames byte by byte,
+escaping only logical `BB` and `BD`. Its assistance workflow includes ordinary
+frames such as `48 00 32 10 01 0B 00 00 6A BB`,
+`48 00 32 B4 00 D2 BB`, and direct category-16 `9C` setting writes. It does not
+invoke E-TUBE's managed transport or a host-side command expander. This makes
+a general adapter command-synthesis layer unlikely, although it cannot exclude
+a narrow firmware special case for A8.
+
+The bundled PCE1 3.1.3 and PCE02 3.0.4 update files were also traced through
+the updater. The host reads each file as raw bytes, chunks it, optionally
+run-length-compresses an individual transport packet, pads only beyond EOF,
+and sends it; PCE1 startup supplies write address `00 40 00`. No decrypt or
+relocation transform precedes the device. Raw scans and bounded M16C, RL78,
+8051, MSP430, H8, CR16, and V850 attempts did not produce a coherent program,
+so the adapter CPU and any opcode-specific path remain unresolved rather than
+negatively proved.
+
+Finally, exact UI worker order strengthens the contradiction. The published
+wired patch injects `SetDestination(slot, 1, 1)` inside
+`SetTireCircumference`, reached at IL `0x0182`. The worker's only
+`SetLightingTime` call is later at `0x0481` and conditional on a changed value.
+Thus its shown call order sends A8 before any possible A0; it cannot itself
+explain the one-shot gate verified in D4.1, D4.3, and D4.5. The published
+outcome may depend on retained state, omitted initialization, a different
+context, or narrow adapter behavior, but it is not a complete causal trace.
+
+This correction does not change build .82. Display-owned mode 5, one unchanged
+A0, a fresh display-owned mode-5 completion, one A8, readback, and local mode-0
+exit remain the narrowest no-new-hardware experiment. Build .82 is still local,
+unpublished, and untested on the bike; the last verified destination remains
+EU and no higher assistance cutoff has been measured. The complete bounded
+transport evidence and exact fingerprints are in
+`docs/evidence/pce-transport-analysis.md` and `ASSETS.md`.
+
+## 2026-09-24 tenth correction: exact PCE02 does not transform A8
+
+The ninth correction left one adapter-sized uncertainty. The exact bundled
+SM-PCE02 3.0.4 update file is now decoded as a coherent little-endian ARM Thumb
+image at base `0x10000`, with vector-like stack/reset values `0x20000868` and
+`0x1aba1`. Its logical serial parser reverses `BD` escaping and dispatches
+control `0x48` to function `0x166e2`.
+
+That handler strips only the serial control and application-slot bytes, then
+copies all group/opcode/parameter bytes unchanged into this send chain:
+
+```text
+0x166e2 -> 0x1873c -> 0x19206 -> 0x1b8a4 -> 0x1beec -> 0x1e15c
+```
+
+The chain's only opcode-aware branch, `0x1bc42`, checks 14 group/opcode pairs
+from a startup-initialized table at RAM `0x2000000c`. The exact table is
+`30/2A`, `01/18`, `01/1A`, `01/2C`, `01/2E`, `01/0C`, `01/0E`, `01/24`,
+`01/26`, `01/5C`, `01/5E`, `02/08`, `01/00`, and `01/02`. Neither `16/A0`
+nor `16/A8` is present. The A8 command therefore takes `0x1e15c`'s ordinary
+length-based bus packetizer. This exact PCE02 firmware does not inject A0 or
+rewrite A8.
+
+`tools/inspect_pce02_transport.py` verifies the whole-image fingerprint,
+vector, initializer record, 14-pair table, and exact function-slice hashes; its
+in-memory modified-sample test fails closed. PCE1's running image remains
+undecoded, and this
+is static evidence rather than a live PCE trace. However, the public wired
+guide explicitly allowed PCE02, so a PCE1-only special case cannot explain its
+claimed general recipe. The wired outcome must depend on retained state, an
+omitted command, a different motor/firmware context, or some other unreported
+workflow condition—not a PCE02 A8 transform.
+
+This correction leaves build .82 as the narrowest no-new-hardware experiment:
+display-owned mode 5, one unchanged A0, a fresh complete display-owned mode-5
+handshake, one A8, readback, and mode-0 exit. It remains local, unpublished,
+and untested on the bike; the last verified destination remains EU and no
+higher assistance cutoff has been measured.
+
+## 2026-09-24 eleventh correction: PCE1 MCU identified, package still undecoded
+
+The public SM-PCE1 top-board photograph shows a 32-pin Renesas device whose
+marking is consistent with `D78F1807`. Renesas' instruction manual and device
+list identify µPD78F1807 as a 64-KiB 78K0R/FB3 part. E-TUBE starts PCE1 update
+writes at `0x4000`, which is consistent with a resident 16-KiB bootloader and
+an application region above it. The earlier bounded attempts to decode the
+file as M16C, RL78, 8051, MSP430, H8, CR16, or V850 are therefore discarded;
+78K0R is distinct from both RL78 and the older 78K0 ISA.
+
+That identification does not turn the exact PCE1 update file into a flat
+program. The 3.0.2 and 3.1.3 files are equal-sized structured packages with an
+offset-like leading table and explicit version records (`05 30 02 00` and
+`05 31 03 00`). Apparent entry offsets do not decode as plausible 78K0R code.
+The managed updater passes file bytes directly, apart from optional per-packet
+RLE, so the resident PCE1 bootloader must interpret the package layout or
+perform the remaining transformation. Plaintext searches for `16 A0` or
+`16 A8` in those package bytes are not probative. The correct bounded statement
+is: the PCE1 CPU family is identified, while its package layout, running image,
+and opcode behavior remain undecoded.
+
+This does not reopen adapter magic as the explanation for the published wired
+recipe. The guide explicitly allowed PCE02, and the exact PCE02 3.0.4 running
+image demonstrably forwards `16 A8` unchanged without synthesizing A0. A
+PCE1-only implementation therefore cannot explain a recipe claimed for both
+adapters. Build .82 and the paired BLE preparation fallback remain unchanged;
+neither has a new live-bike result.
+
+## 2026-09-24 twelfth correction and build .83: exact current-firmware patch branch
+
+The commercial paired-downgrade route was rechecked as a causal mechanism,
+rather than accepted from the client policy alone. All 27 located instructions
+that load the active PC-mode byte in exact D4.3.0 have corresponding D4.5.0
+references at a fixed `+0x1734` code relocation, with identical local
+instruction windows. The mode-request handler, fifth-secure-word promotion,
+mode 1/4/5 tables, A0-created one-shot gate, A8 gate consumption, and cold-boot
+clearing are also equivalent. A preparation workflow may create some other
+transient, but “reboot D4.3 and send direct A8” is not by itself a complete
+motor-side recipe for this topology.
+
+A bounded current-firmware derivative is now more causally direct. In the exact
+unwrapped D4.5.0 image, the final `BNE error` after A0's active-mode comparisons
+is at runtime `0x252c8` (file `0x152c8`), and the corresponding A8 branch is at
+runtime `0x25394` (file `0x15394`). Replacing only those two Thumb branches with
+`00 BF` NOPs lets the existing handlers proceed independently of the contested
+global PC-mode byte. It does not bypass A0's zero target, candidate copy, or
+one-shot gate, nor A8's gate check/consumption or persistent-record helper. A
+fifth changed byte marks the native D header 4.5.0.1, allowing reconnect
+readback to distinguish the experiment from restored stock 4.5.0.0.
+
+The exact source image is 138,072 bytes with SHA-256
+`44806bd54aedff95a88bb73fafe0f0581297f2f67b2ea35545cea012899d90bb`.
+The deterministic five-byte derivative has SHA-256
+`0dbbb3d3b634d831d8450d2758d953502bfdc7f16ac8640a4e3ca46fff3fff18`
+and whole-image byte-sum `0x49`, versus source `0xBD`.
+`tools/patch_motor_pc_mode.py` and the unwired page helper both require the
+exact source fingerprint and original bytes and validate the exact output.
+Synthetic tests use generated bytes, not a committed vendor image.
+
+The audited update path's raw family/header checks, 64-byte block sums, block
+indices, and final whole-image sum make modified-image acceptance plausible.
+The official container AES-CBC/MD5 checks are host-side wrapper checks, and no
+asymmetric signature or second raw-image authenticator was found. This is not
+bootability proof: a resident-bootloader or application-startup integrity check,
+an interruption, or a bad image could remove BLE recovery and require wired
+hardware.
+
+Build .83 therefore leaves build .82's live command sequence unchanged and
+adds only the fail-closed, unwired patch constructor. There is no UI caller,
+paired-transfer coordinator, or patched-image recovery journal, and no image
+has been sent to the bike. Before any exposure, the implementation must require
+the exact stock D4.5.0/M4.4.8 restoration pair, derive D4.5.0.1 in memory,
+transfer a complete compatible pair, reset into a different BLE session, prove
+native 4.5.0.1/M4.4.8 readback before one A0/A8 transaction, then restore and
+prove native 4.5.0.0/M4.4.8 plus persistent US. The current verified state
+remains stock D4.5.0/M4.4.8 at EU, with no measured higher cutoff.
+
+## 2026-09-24 thirteenth correction and build .84: exact pair derivation and startup audit
+
+Build .84 leaves build .82's live A0/A8 transaction unchanged and advances only
+the offline firmware branch. `loadPatchedD450FirmwarePair` accepts the exact
+reviewed stock D4.5.0/M4.4.8 restoration files, applies the five-byte D patch in
+memory, keeps M4.4.8 byte-for-byte unchanged, rechecks the D4.5.0.1/M4.4.8 peer
+requirements, and returns `source: pc-mode-patch, installable: false`. A
+synthetic exact-hash test covers the pair boundary. There is still no UI caller,
+transfer authorization, patch-specific recovery journal, or live image write.
+
+The exact application startup was then audited to narrow the modified-image
+risk. The D4.1, D4.3, and D4.5 header entries each set the stack and call their
+runtime initializer. That initializer executes exactly two table records—a RAM
+zero routine and a 12-byte ROM-to-RAM copy—then calls `main`. For each exact
+image, the declared image-size value occurs only at header offset `0x18`; the
+computed image-end address and a direct pointer to the size field do not occur
+anywhere in the raw image. The image tail is structured executable/data content
+and contains no identified appended opaque signature block. A fresh D4.5
+Ghidra import independently found nine reads of the version header and zero
+references to the entry pointer, image-size field, or family field.
+
+`tools/inspect_motor_image_integrity.py` machine-checks the three exact hashes,
+header/entry/runtime/main calls, initializer records, whole-image size/end
+literal absence, and structured tails. This materially reduces the likelihood
+of an application-level whole-image self-check. It does not inspect the
+resident motor bootloader, exclude computed addresses or an external checksum
+record, or prove modified-image acceptance, successful boot, and BLE recovery.
+The bootloader remains the decisive no-new-hardware risk. Build .84 is local,
+unpublished, and untested on the bike; the last verified state remains stock
+D4.5.0/M4.4.8 at EU with no measured higher cutoff.
+
+## 2026-09-24 fourteenth correction and build .85: loader inventory and patch recovery lineage
+
+The resident-loader uncertainty was narrowed using the exact E-TUBE Project
+3.4.5 `etubedatalinks.dll` already fingerprinted in `ASSETS.md`. Its nested
+`RenesasMicomCommandDefine.BootloaderCommandCodes` enum is a complete named
+client inventory: START `21`, firmware version `22`, erase count `23`, write
+address `24`, checksum `25`, clear checksum `26`, FINISH `27`, RESET `28`,
+serial low/high `29`/`2A`, and bootloader version `41`, with normal/error and
+query response codes `31`-`36`/`51`. There is no flash-read, range-read, dump,
+signature, key, or authentication request in that exact enum or its one-helper-
+per-command implementation.
+
+The IL call chain independently confirms the raw write contract.
+`Unit.UpdateRenesasFirmware` obtains `RenesasFirmwareFile.get_BinaryData` and
+passes it to `EtubeDataLinksMain.UpdateRenesasFirmware`. That worker calls
+START, then `SendRenesasFWData`, FINISH, and RESET. `SendRenesasFWData` sets the
+write address, clears the partial sum, streams data packets, checks additive
+byte-sums, and clears between windows. No separate signature or cryptographic
+verification operation appears in this reviewed raw-write chain. The DAT
+wrapper checks happen on the host before `get_BinaryData`; they are not a
+second authenticator sent to the loader.
+
+The eTuning 2.0.7, 2.0.8, and 3.0.7 decompilations were also enumerated for
+every loader command constructor. They add current-generation setup `06`-`09`,
+bank `0A`, identity/version queries `2E`-`30`, and data command `60`, but no
+memory-read request. This is bounded negative evidence for the clients, not a
+proof that the resident loader has no undocumented opcode. It does establish
+that the reviewed BLE/software paths cannot first dump the resident loader or
+make a recovery backup. `tools/inspect_etube_d_loader.py` now verifies the exact
+assembly fingerprint, enum, command/reply helpers, and update call chain;
+`docs/evidence/d-loader-acceptance-analysis.md` records the limits.
+
+Build .85 uses that result to finish only the offline D4.5.0.1 workflow. It
+keeps build .82's live display-owned mode-5/A0/mode-5/A8 transaction unchanged.
+`transferPatchedD450Pair` accepts the exact stock restoration files, derives
+the five-byte D image in memory through the exact-hash builder, retains M4.4.8
+byte-for-byte, and invokes the existing complete M-then-D workers. The durable
+journal now admits only the exact `pc-mode-patch` D4.5.0.1/M4.4.8 pair from a
+stock D4.5.0/M4.4.8 EU baseline, and recovery reloads the stock files and
+re-derives the same patch before replaying the complete pair.
+
+After reset, `verifyPatchedD450FirmwareAfterReconnect` requires another BLE
+session to report the same motor at D4.5.0.1/M4.4.8 and destination 0 before
+the one-write transaction is eligible. The existing uncertain-write and
+physical-power-cycle persistence gates now accept either the historical
+preparation pair or the exact patch pair. Stock restoration from a patched
+route is authorized only after the same journal proves D4.5.0.1/M4.4.8 at US
+through a separate power-cycle readback; final restoration still requires
+stock D4.5.0/M4.4.8 plus US. The generic UI planner treats a patch journal as
+inspection-only, so no browser action can accidentally expose the branch.
+
+`tests/motor_firmware_patch_workflow.cjs` uses generated bytes to prove exact
+derivation, unchanged M, paired transfer ordering, complete-pair recovery
+replay, the explicit version-marker gate, one destination mutation, persistence
+lineage, and stock-restoration authorization. It also proves that the generic
+restoration loader cannot start this route from the stock EU baseline. No
+firmware or destination command was sent to the bike, no UI caller was added,
+and the public Pages site remains build .77. The last verified bike state is
+still stock D4.5.0/M4.4.8 at EU with no measured higher assistance cutoff.
+
+This raises modified-image feasibility but does not close the decisive risk:
+the resident loader may apply an implicit/external integrity policy, and an
+accepted transfer whose application fails to boot may eliminate BLE recovery.
+No software-only experiment is authorized until that risk is explicitly
+accepted with the exact stock pair available and the possibility of later
+wired recovery understood. The corrected M4.2.1 raw-image SHA-256 is
+`10190fd78e6527908c0e43405184c414b612bc4becce9ca5483612665ced6b56`;
+the prior `ASSETS.md` value was a transcription error, while the allowlist and
+actual extracted file already used the correct digest.
+
+## 2026-09-24 fifteenth correction: current eTuning stock-pair proof and dormant boot-patch path
+
+The exact eTuning 3.0.7 base APK was traced from ZIP import through firmware
+transfer to settle whether its modern preparation workflow depends on an
+undisclosed patched E5000 image. `C0473Oa.m2065A` computes MD5; `m2079l`
+constructs an obfuscated 18-member file allowlist; `m2086u` and the ZIP import
+path require membership before an accepted DAT is placed in the private
+firmware directory. The update workers unwrap those accepted files and pass
+their binary results onward without an identified E5000 application patch.
+
+The first two decoded allowlist entries exactly match the files in eTuning's
+public `5000_430.zip`: `DUE5000-D.5.3.0.dat` is MD5
+`6daee3c8de5ae0d4b77443e28c7bb758`, and
+`DUE5000-M.5.2.1.dat` is MD5 `492d14c37c8ee2fd4a636ab416eea143`.
+Their parsed headers and sizes remain D4.3.0.0 at 132,072 bytes and M4.2.1.0 at
+116,320 bytes. Thus current eTuning 3.0.7 explicitly accepts the exact public,
+stock preparation pair already modeled by the local workflow. The earlier
+bounded statement that current client/server pairing remained unproved is
+superseded at the client-import and file-identity layers; a server-only or
+modified E5000 image is not required to pass this client check.
+
+This does not prove wireless transfer on this bike, destination success,
+persistence, or a higher cutoff. It also does not resolve the static paradox:
+exact D4.3 still cold-clears the one-shot gate and requires A0 before A8, while
+the commercial clients' visible destination action sends direct A8. Some
+transient/system state or omitted live step remains. Nevertheless, the exact
+stock pair plus current-client acceptance moves the complete paired BLE
+downgrade above the modified-D4.5.0.1 route on the no-hardware experiment
+ladder. `tools/inspect_etuning_firmware_policy.py` reproduces the allowlist
+decode and file matches; `docs/evidence/etuning-firmware-policy-analysis.md`
+records the boundary.
+
+A separate official desktop lead was also exhausted. E-TUBE Project 3.4.5's
+exact `DuE5000Unit` static constructor assigns family 34/unit 0 a BootPatchSpec
+with substrate 1, `Firmware.BootLoaderDcasXBaseName` (`UPDATEX`), and
+bootloader 5.0.0 revision 01. `GetBootPatchFileName` constructs substrate plus
+base plus `-{revision:X2}`, yielding stem `1UPDATEX-01`. The BootPatch file type
+is 3, requires bootloader 4.0.0.0, and exposes checksum, code-size, DCAS,
+generation, and version fields at offsets 0, 1, 2, 4, 5, 6, 7, and 8.
+
+`Unit.UpdateBootPatch` starts update mode 2, obtains bootloader identity and
+version, validates the newest BootPatch file set, compares its version to the
+reported bootloader, and sends newer bytes through `SendUpdateData(..., true)`
+and `EndUpdate(true)`. This is a genuine architecture path, not a mislabeled
+application update. However, no `UPDATEX`/`UPDATE2I` payload was present in the
+installed application or in the inspected public 2.2.3-3.4.5 catalogs,
+debug catalog, archived installer contents, likely 5.x static filenames,
+Wayback/Common Crawl indexes, GitHub/Sourcegraph results, or the Reven corpus.
+Positive-control DUE5000 URLs continued to resolve during the filename sweep.
+This bounded negative evidence makes the boot-patch path dealer/recovery-only
+or dormant unless a payload is recovered elsewhere; it is not presently a BLE
+bypass or recovery backup. `tools/inspect_etube_boot_patch.py` machine-checks
+the exact assemblies and IL facts, and
+`docs/evidence/d5000-boot-patch-analysis.md` records the search boundary.
+
+Build .85's live and offline behavior is unchanged by this correction. No
+firmware or destination command was sent, the public Pages site remains build
+.77, and the last verified bike state remains stock D4.5.0/M4.4.8 at EU with
+no measured higher assistance cutoff.
+
+## 2026-09-24 sixteenth correction and build .86: hidden stock-pair workflow completed
+
+The current-client allowlist proof makes the exact stock D4.3.0/M4.2.1 route
+the best-supported firmware fallback, so build .86 closes the one deliberate
+gap in its local coordinator. After a different BLE session has proved the
+same motor at exact D4.3.0/M4.2.1 and EU, `writeAndVerifyUs` now delegates to
+the existing durable `runPreparedUsWriteTransaction`. The transaction performs
+a fresh salted baseline read, persists `US-write-attempt` before mutation,
+sends exactly one current-eTuning packet `00 16 A8 01 01`, requires `AA`, and
+then re-reads the full same-motor/version/destination baseline. Only an exact US
+readback advances to the separate physical-power-cycle persistence gate.
+
+An explicit `AB <status>`, timeout, disconnect, malformed reply, or non-US
+readback cannot repeat A8. The durable journal instead requires read-only
+resolution in another session or remains stopped. Stock D4.5.0/M4.4.8
+restoration is still authorized only after exact D4.3.0/M4.2.1 plus US is
+proved across a physical power cycle; the final gate remains exact stock
+versions plus US on another reconnect. The transfer/recovery path still
+replays a complete M-then-D pair from byte zero rather than resuming a fragment.
+
+The preparation card remains `hidden`/`aria-hidden`, the public page still
+serves build .77, and no bike command was sent. Build .86's visible current-
+firmware mode-5/A0/mode-5/A8 sequence is unchanged from build .85. The hidden
+stock workflow is implemented for synthetic review and is not authorized for
+live use because interrupted BLE flashing may require wired recovery. The
+modified D4.5.0.1 branch remains a later, higher-risk fallback rather than the
+next firmware experiment. The last verified bike state is unchanged: stock
+D4.5.0/M4.4.8, EU, with no measured higher assistance cutoff.
+
+## 2026-09-24 seventeenth correction: SC-E6100 historical display control
+
+The contemporaneous STUnlocker success reports specifically pair DU-E5000
+with SC-E6100 4.0.5, so that exact display image was recovered from Shimano's
+public catalog and checked rather than treating SC-E7000 behavior as universal.
+The image is 164,488 bytes, SHA-256
+`9a3d9575af48eac883a2369af08bd00d819547c49c78d313d7aadc18269eeb77`,
+catalog MD5 `90ea6133e21bf5d59b40f999e5ea9a11`.
+
+The apparent display-specific lead does not survive exact comparison.
+SC-E6100 local handler `0x2b88c` accepts modes 0, 1, 4, and 5 with the same
+selector semantics as SC-E7000. Its builder is `0x29460`; secure completion
+handler `0x29ee0` stores requested mode, completion flag, and application slot
+before constructing opcode `12`, and has no immediate mode-0 or cleanup call.
+The mode tables at `0x29fb0`, `0x29fbc`, and `0x29fc8` are byte-identical to
+the three tables in both exact SC-E7000 images. Their respective SHA-256 values
+are `b34a08754c4e367c574499c73ce89919f3c1ed20165c5063cd139ac562a99c4e`,
+`be1f5a4366bfd7b3c7f77dd585554e1201f38e86e56a1789522ff6af4cd47fa1`,
+and `52cf8e1fbc56803e6ede87262de5df10e0165e948d7ebf992c29ace6541ee2b6`.
+
+The lifecycle machinery is homologous too. Post-request helper `0x27950`
+clears the periodic trigger and phase bytes +4/+5; tick `0x2789c` reaches exit
+machine `0x279e0` only when trigger byte +6 is one. Whole-image direct-call
+references locate exactly four event-rearm callers, two exit-machine callers,
+and three local-mode callers. The two maintenance callers at `0x279ba` and
+`0x27a04` issue mode 0 under the same event-driven conditions as SC-E7000.
+Like SC-E7000 4.0.6, SC-E6100 4.0.5 does not clear phase byte +3 in the post
+helper; current SC-E7000 4.1.0 adds that clear.
+
+This rules out a different SC-E6100 secure key/table or an obvious permissive
+owned-mode lifecycle as the explanation for the old success reports. It does
+not reproduce live scheduling and cannot exclude a transient created by the
+2020 client or its preceding firmware/update workflow. The historical-client
+artifact and transient-state questions remain, but a display swap, SC-E6100
+firmware port, or emulation detour is not supported by this evidence.
+`tools/compare_display_pc_mode.py` now verifies SC-E6100 4.0.5 alongside
+SC-E7000 4.0.6/4.1.0 without emitting vendor bytes.
+
+No command was sent to the bike, build .86 and the public build .77 remain
+unchanged, and the verified bike state remains stock D4.5.0/M4.4.8 at EU with
+no measured higher cutoff.
+
+## 2026-09-24 eighteenth correction and build .87: independent wheel-circumference fallback
+
+The exact eTuning 3.0.7 client exposes a second D4.3.0 BLE speed route that does
+not depend on the unresolved A0/A8 destination gate. Its old-generation getter
+is `00 35 04 00`; notification parsing requires `00 35 06 lo hi`. Both the
+single-setting path and backup-restore worker write `00 35 00 lo hi`, and the
+notification dispatcher treats opcode `02` as the setter completion. The newer
+GATT path independently reads first, writes only when different, waits 150 ms,
+then requires an equal readback. Its UI bounds the value to 1300–3000 mm.
+
+Independent public evidence agrees on the boundary. Shimano's DU-E5000
+specification lists 1300–3000 mm and both 25 km/h and 20 mph support. eTuning's
+downgrade guide marks E5000 4.3.0 as wheel/region capable, explains that the
+wheel method makes the speedometer wrong while US gives accurate 32 km/h, and
+says region/wheel values survive a later firmware update. STUnlocker lists
+4.3.0 as the last E5000 Bluetooth version for both values; its older manual's
+warning that E5000 settings may reset at power-off justifies retaining a
+separate physical-power-cycle gate. eMax independently lists Bluetooth
+destination and circumference changes for DU-E50X0 4.2.1–4.3.0.
+
+For actual circumference `C`, nominal cutoff `Vn`, and target `Vt`, representing
+`round(C*Vn/Vt)` makes the motor calculate the target cutoff. A 2080 mm wheel at
+25→32 km/h gives 1625 mm, so displayed speed and distance become 0.78125 of
+reality. This is a reversible fallback with inaccurate telemetry, not a US
+destination change and not a measured cutoff result.
+
+Build .87 leaves build .86's visible display-owned mode-5/A0/mode-5/A8 path
+unchanged. It adds only an unwired wheel branch: exact packet builders/parser,
+same-device durable journal before one mutation, no retry after any ambiguous
+outcome, read-only resolution in another BLE session, and a separate explicit
+power-cycle persistence check on the exact same salted motor and prepared pair.
+`tests/wheel_fallback_transaction.cjs` uses generated bytes to prove the exact
+packets, 2080→1625 calculation, single-write guard, uncertainty resolution,
+and persistence gates. `docs/evidence/d430-wheel-circumference-analysis.md`
+records the evidence and limits.
+
+The branch has no UI caller and does not authorize D4.5.0 restoration yet. A
+live staged experiment must first prove preparation, original value, one setter,
+and power-cycle persistence, then prove that the wheel getter remains available
+after restoration before the final state machine can be safely extended. No
+bike command or firmware transfer occurred; the public page remains build .77,
+and the last verified state remains D4.5.0/M4.4.8 at EU with no measured higher
+assistance cutoff.
+
+## 2026-09-25 nineteenth correction and build .88: destination is not the only speed field
+
+The exact historical Shimano E-TUBE PROJECT Cyclist 5.0.2 Android client closes
+a post-destination ambiguity that the previous work treated only as a forum
+anecdote. The inspected package identifies itself as
+`com.shimano.etubeprojectmobile.droid.phone`, version `5.0.2`, version code
+`20211125`; it is 115,738,926 bytes with SHA-256
+`b9b0ccb924f0dd1931beaada10501791b77268e4364bdb871010cd36ca606db2`.
+Its embedded signing certificate names SHIMANO INC.'s Bicycle Components
+Division and has SHA-256
+`4670436569eabd6ea8392b9f844fc23a574c35bffe463a537620452495d3c6bb`.
+The APK came from a historical mirror rather than a live Shimano endpoint, so
+the manifest, certificate, and signed entries improve provenance without being
+treated as a current vendor download. The APK and full decompilation stay
+outside Git.
+
+`DUE5000Unit` explicitly sets `canSetMaxAssistSpeed = true`. The exact
+`DUUnitDataLink` commands are:
+
+- current configured maximum getter `00 16 B4 00`, reply `00 16 B6 lo hi`;
+- destination-specific maximum getter `00 16 BC destination`, reply
+  `00 16 BE destination lo hi`;
+- configured maximum setter `00 16 B0 lo hi FF FF`, with normal setter
+  completion B2.
+
+The two-byte values are little-endian hundredths of km/h.
+`DUCustomizeOptions` first reads destination and then invokes the BC getter for
+that destination; it divides the returned value by 100 and stores it as the
+default maximum. `CustomizeDUPresenter.makeDefaultSettings` copies that default
+into the pending DU settings. Confirming Reset updates the pending model only;
+the Apply coroutine calls `writeMaxAssistSpeedKM`, which multiplies the selected
+integer speed by 100 before B0. The fallback range table gives US 19–32 km/h
+and ordinary non-US metric operation 15–25 km/h. Thus Reset/Apply after a
+successful destination change has a concrete mechanism: it is a separate B0
+write, not a hidden destination command.
+
+A public E-TUBE PROJECT Professional 5.4.4 service report generated in January
+2026 independently shows a live DU-E5000 on D4.5.0 with destination Type 1 and
+maximum assist speed 25 km/h at the same time. Cyclist maps Type 1 to US. The
+report therefore confirms that the separate lower-ceiling state exists on
+current firmware; it does not show how the destination was written or prove
+BLE setter acceptance. Its device identifiers are intentionally not copied.
+
+Independent eMaxMobileApp 1.89 code corroborates the old-generation B0 packet,
+B2 success, B4 getter, and B6 little-endian parser. It does not settle live
+E5000 setter availability: the current eMax UI disables the reduced-maximum
+button for the E5000 family while allowing supported older-firmware destination
+and circumference actions. Static D4.1/D4.3/D4.5 dispatch tables likewise put
+B0/B4/BC on the generic category-16 forwarder, not the local A0/A8 handlers;
+D4.3's generic handler reaches the secondary-component forwarding path. This
+supports, but does not prove, a live BLE response from the exact bike.
+
+Build .88 retains build .87's write and firmware branches unchanged. The normal
+authenticated information batch now adds only two reads: B4 for the configured
+ceiling and BC 01 for the motor's US-profile ceiling. Exact reply header,
+length, destination echo, and 10–50 km/h bounds are required before display.
+No B0 setter is exposed. Synthetic tests prove packet construction, parsing,
+formatting, batch order, absence of B0, and the diagnostic distinction between
+US with a lower configured ceiling and US with its destination maximum.
+
+The next live evidence gate is therefore safer and more informative. A
+read-only build-.88 run can establish the current EU-side B4 and US BC values.
+If a later destination transaction reads back US but B4 remains below BC 01,
+the destination is not the failure; the separate maximum setting becomes the
+next narrowly scoped candidate. Only that observed state could justify an
+at-most-once B0 coordinator with a durable journal before write, exact B2,
+immediate B4, no retry after ambiguity, and a separate physical-power-cycle
+readback. No bike command, setting write, or firmware transfer occurred during
+this correction. The public page remains build .77 and the last verified bike
+state remains D4.5.0/M4.4.8 at EU with no measured higher cutoff.
+
+## 2026-09-25 twentieth correction and build .89: stock B0 continuation after persisted US
+
+The build-.88 decision gate is now implemented as a separate local,
+unpublished transaction rather than left as a design note. This does not alter
+the prerequisite: the last physical-bike state is still EU, so the new button
+cannot arm and no B0 was sent. It becomes eligible only if a normal information
+batch first proves the exact stock D4.5.0/M4.4.8 E5000 pair, destination US,
+configured B4 below the motor's BC 01 ceiling, verified session, and motor
+authentication. When US came from this page's destination transaction, that
+transaction's salted same-device reconnect record must already say US
+persisted. A typed speed is never accepted; the target is the freshly returned
+BC 01 value and is capped at 32 km/h.
+
+Immediately before any mutation, build .89 repeats seven reads: drive model,
+application firmware, current destination, B4, BC 01, native D firmware, and
+native M firmware. All must reproduce the exact stock pair and US/lower-ceiling
+state. It then creates a new versioned journal with a random salt, salted hash
+of the browser-selected device ID, salted hash of the BLE connection token,
+public expected component versions/destination/target, and original B4. The
+journal must serialize, persist, and read back byte-for-byte before the only
+`00 16 B0 lo hi FF FF` dispatch. Raw device ID, serial, passkey, and credentials
+are not stored.
+
+The write adapter accepts only normal B2 or matching B3 rejection. After B2,
+the same seven-read snapshot must still identify D4.5.0/M4.4.8 at US and show
+`B4 == BC 01 == journal target`. A B3 rejection, mismatched readback, malformed
+result, ATT failure, timeout, or disconnect records a terminal stopped state;
+the transaction has no loop or retry entry. Even an ambiguous outcome can only
+advance through the separate persistence verifier. That verifier has no write
+callback and requires an explicit physical-power-cycle checkbox, another BLE
+connection token, the same salted Web Bluetooth device, the exact stock pair,
+US, and target equality. A transport failure during persistence remains
+retryable only as another read-only verification.
+
+`tests/max_assist_write.cjs` proves the exact 32 km/h wire bytes
+`00 16 B0 80 0C FF FF`, journal-before-write order, one-write invariant,
+same-device and different-session gates, rejection and ambiguity behavior,
+fail-before-write storage errors, context rejection, immediate mismatch, and
+power-cycle match/mismatch. The Playwright browser test drives the exact stock
+US/lower-ceiling synthetic fixture, confirms one B0, reconnects, performs a
+second full information batch with the explicit checkbox, reaches
+`persistence-verified`, and confirms the B0 count remains one. The entire CJS
+suite and the targeted two-session browser scenario pass. These are software
+invariants only: they do not prove the real motor accepts B0, that a stored
+value changes assistance, or that 32 km/h is reached while riding.
+
+Build .89 keeps the display-owned mode-5/A0/mode-5/A8 destination experiment,
+hidden stock downgrade/restoration coordinator, hidden D4.5.0.1 patch branch,
+and hidden D4.3.0 circumference fallback otherwise unchanged. The public site
+remains build .77. The bounded live order is still destination first; only
+after US itself persists and B4 remains below BC 01 does the new one-attempt B0
+button become relevant. A later safe ride remains the independent final proof
+of the real assistance cutoff.
+
+## 2026-09-25 twenty-first correction: eTuning confirms A8-to-B0 continuation; M4.4.8 RX trace remains open
+
+The exact eTuning 3.0.7 base APK supplies an independent implementation of the
+post-destination step recovered from Shimano Cyclist. Its old-generation region
+activity writes `00 16 A8 01 destination`. When the operation's completion
+callback reports success, `ActivityC1041w.m5514C` invokes `m5522K`, which
+derives the maximum for the newly selected destination. The helper returns 32
+km/h for US. The resulting `RunnableC0168F2` sleeps 350 ms and invokes
+`C1463qn.m6515Z`; its old-generation branch multiplies by 100 and sends
+`00 16 B0 lo hi FF FF`. The concrete US packet is therefore
+`00 16 B0 80 0C FF FF`, byte-for-byte identical to build 89's target.
+
+`tools/inspect_etube_max_assist.py` now has an optional exact-eTuning source
+pass. It can also require the recorded 7,060,465-byte base APK SHA-256
+`d4d545150f025760a13bf3bcade148f278731a1d49bf59d1e9da338723c90e22`.
+The combined checker passed against both external decompilations and both exact
+APKs without printing source. This proves the current commercial client's
+intended A8-success -> 350 ms -> B0 ordering; it does not prove live A8 or B0
+acceptance by the stock D4.5.0/M4.4.8 pair. eTuning's documented E5000 BLE
+region support remains bounded to its older preparation firmware.
+
+A separate 2019 E-MTB Forums report supplies bounded live corroboration on an
+E6100 running 4.4.0. The rider reported that destination already read US while
+the maximum remained 24 km/h; using E-TUBE Reset after the region change moved
+the maximum to 32 km/h and a later ride reached that assistance speed. This is
+consistent with the recovered separate fields and write order, but the motor,
+firmware, display path, and client differ from the present E5000 system. Source:
+https://www.emtbforums.com/threads/steps-unlocker-issue.7518/ .
+
+The exact official M4.4.8 artifact was reacquired as 119,824 bytes with SHA-256
+`9ea350e988345a9d9fb41c1363562ca190f1a8d5e1cc8a38c6373f69b877f033`.
+It is Renesas RX code. Loading at `0xFFFC0000` with the Ghidra RX processor
+module produces coherent functions and internal-ROM references; earlier M16C
+and base-zero scratch projects were invalid. Immediate and rendered-operand
+sweeps for the category byte, B0/B4/B6/BC/BE family, A0/A8, and 2500/3200 were
+manually checked in context. Candidate B0/A0/A8 hits near recovered functions
+were low-RAM addresses, raw `16 B0` pairs were data or instruction encodings,
+and the located 2500/3200 constants belonged to motor-control/configuration
+logic. No inspected result identifies the packet dispatcher or B0 policy.
+
+The new `tools/GhidraDumpInstructions.java` and
+`tools/GhidraFindInstructionScalars.java` scripts make that bounded search
+reproducible; the latter now handles RX rendered immediates and non-instruction
+range starts. The corrected status is in
+`docs/evidence/m448-max-assist-analysis.md`. The next useful motor step is to
+recover the table-driven receive dispatcher or anchor it with a real B4/BC/B0
+notification transcript, not to treat more unanchored byte hits as commands.
+No bike command, setting write, or firmware transfer occurred. Build 89 and the
+public build 77 are unchanged; the last verified bike state remains stock
+D4.5.0/M4.4.8 at EU with no measured higher cutoff.
+
+## 2026-09-25 twenty-second correction and build .90: exact D4.5 B0 policy recovered
+
+The prior conclusion that D4.5.0 put B0/B4/BC only on a generic forwarder was
+wrong. Its large dispatcher at `0x1D4A0` compares combined little-endian
+category/opcode keys through a cumulative subtraction chain, so searching for
+standalone `0xB016`, `0xB416`, or `0xBC16` literals cannot find the cases.
+Replaying every subtraction recovers explicit `16 B0` at `0x1D74E`, `16 B4`
+at `0x1D766`, and `16 BC` at `0x1D778`. Their handlers are respectively
+`0x1EE3C`, `0x1EE80`, and `0x1EE8C`.
+
+The B0 path is now concrete. `0x1EE3C` requires the global PC-mode byte to be
+nonzero, reads the requested little-endian u16, and calls `0x19264`. It does
+not require protected mode 4/5. `0x19264` obtains the current destination,
+calls ceiling helper `0x193EE`, rejects only when the request exceeds that
+ceiling, accepts an already-equal value, and otherwise persists record `0x28`
+through the ordinary settings store before updating the live configured value
+and recalculating dependent state. Success queues event `0x2E`; its builder at
+`0x22E9C` uses response key `16 B2`. The error path still uses B3.
+
+The same helper makes the numerical policy exact: destination 0 returns 2500,
+destination 1 returns 3218 (`0x0C92`), destination 2 returns 2400, and
+destinations 3/4 or fallback return 2500. The BC handler stores the requested
+destination and queues event `0x2F`; builder `0x22F1C` emits `16 BE`, echoes
+the selector, and calls `0x193EE`. The B4 callback builder at `0x22ED8` emits
+`16 B6` and reads the configured value. Therefore stock D4.5.0 directly
+permits B0=3200 after destination 1 while rejecting it under destination 0.
+The ordinary display-owned mode 1 is sufficient, and a successful fresh BC
+read immediately before B0 proves the same nonzero-mode gate was live.
+
+This also corrects the transaction target. BC 01 can legitimately report the
+internal bound 32.18 km/h, while Shimano Cyclist/eTuning choose the user-facing
+32.00 km/h. Build .90 now derives `min(fresh BC 01, 3200)`, journals both the
+fresh internal ceiling and the derived target, dispatches exactly
+`00 16 B0 80 0C FF FF`, and requires later B4=3200 while BC remains unchanged.
+The one-write, durable-journal, uncertainty, different-session, and physical-
+power-cycle rules remain unchanged. Tests now exercise a synthetic BC=3218
+and prove that only B0=3200 is sent.
+
+The M4.4.8 project was also corrected again: the first u32 is image size
+`0x1D410`, while the header pointer at file offset `0x14` gives the real entry
+`0xFFFC0018`. A clean RX project seeded there produces coherent startup and
+904 recovered functions. Its earlier direct opcode hits remain false, but an
+M-side wire handler is no longer expected because the exact D application
+contains the acceptance and persistence policy. New reusable function-list and
+decompiled-search scripts plus `--defined-only` scalar scanning preserve the
+clean project.
+
+No bike command, setting write, or firmware transfer occurred. Build 90 remains
+local and unpublished; the public site remains build 77 and the last verified
+bike state remains stock D4.5.0/M4.4.8 at EU with no measured higher cutoff.
+
+## 2026-09-25 twenty-third correction and build .91: D4.3 fallback now satisfies the verified gate
+
+The hidden stock-preparation coordinator inherited an unresolved contradiction:
+after verifying D4.3.0/M4.2.1 it sent the commercial clients' direct A8 packet,
+even though exact D4.1, D4.3, and D4.5 firmware all require the volatile gate
+created only by an accepted A0. Current eTuning, eMax, and STUnlocker clients
+prove the A8 packet and field compatibility but their visible destination call
+chains do not explain how the gate becomes armed. Relying on that unexplained
+retained state made the repository's fallback less causal than its stock path.
+
+Build .91 corrects the hidden D4.3 transaction without exposing the firmware
+card. After the existing same-device, exact-pair, different-session verification
+and durable journal, it now reads the current lighting value, asks the SC-E7000
+to establish and own mode 5, sends one unchanged-lighting A0, requires A2,
+freshly establishes display-owned mode 5 again, and sends one US A8. It requires
+AA and immediate US readback, exits through display-local mode 0, never retries
+A0 or A8, and retains the separate physical-power-cycle persistence and stock-
+restoration gates. A failure after A0 remains terminal journal state resolved
+only through read-only reconnect.
+
+The prepared-pair browser adapter test now proves the exact A4 read,
+`00 16 A0 lo hi FF FF`, two display-owned mode-5 calls, `00 16 A8 01 01`,
+mode exit, rejection mapping, and timeout propagation. The durable transaction
+and patched-pair lineage suites remain green. This is synthetic evidence only:
+no firmware or setting command was sent, build .91 remains local and unpublished,
+and the physical bike remains verified only at stock D4.5.0/M4.4.8 with EU.

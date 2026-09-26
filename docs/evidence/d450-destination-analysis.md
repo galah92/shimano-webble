@@ -213,3 +213,87 @@ appropriate until that evidence exists.
 
 These validation gaps do not by themselves justify installing different
 firmware. The unchanged A0 stage remains rejected on the live D4.5.0 bike.
+
+### 2026-09-24 correction: gated burst before the mode-completion round trip
+
+Builds .76/.77 and the recovered SC-E7000 bridge image subsequently settled
+the earlier ambiguity. The phone's bytes are forwarded verbatim, the leading
+`00` supplies the required zero target, and the bike genuinely entered motor
+mode 4. `A0` failed because the display reclaimed the motor's global mode
+59-74 ms after completion, not because of framing or a display reset.
+
+The same-version eTuning client and an independent current eMax client both
+send `A8` directly for destination changes; neither invokes A0 in that action.
+However, D4.3 startup explicitly zeroes the A8 gate, and the only identified
+gate setter in D4.3/D4.5 is A0. The Android paths therefore establish packet
+shape but do not establish a self-contained direct-A8 transaction.
+
+Build .77 waited for the mode-completion notification before its first setting
+command. Build .78 tests the one ordering not covered by those negative runs:
+queue one unchanged-lighting A0 and then one `A8 01 01` as soon as the fifth
+secure ATT write completes locally, before awaiting the mode notification or
+A0's motor reply. It requires exact mode-4/slot completion, A0 `A2`, A8 `AA`,
+immediate US readback, and a separate persistence readback. See
+[`d430-direct-a8-analysis.md`](d430-direct-a8-analysis.md). This is a bounded
+live hypothesis, not a validated US-setting procedure.
+
+### 2026-09-24 second correction: use the display-owned mode path
+
+Further SC-E7000 4.1.0 analysis found that BLE command `00 0C <mode>` reaches a
+display-local handler at `0x236fc` which accepts modes 0, 1, 4 and 5. For modes
+1/4/5 the display itself constructs the motor request and five secure words
+through `0x212ac`; the official capture already proves this for `00 0C 01`.
+This is distinct from builds 76-78, where the phone tried to take the motor's
+global mode while the display still owned its session.
+
+Build 79 therefore asks the SC-E7000 to own mode 4 with `00 0C 04`, requires
+both `2C 00` and exact motor completion `00 32 12 04 <slot>`, then sends one
+unchanged A0 and, only after A2, one A8. It requires AA and fresh US readback
+and exits via `00 0C 00`. This supersedes build 78 as the preferred live
+candidate. Synthetic validation does not establish motor acceptance,
+persistence, or the physical assistance cutoff.
+
+A subsequent completion-path trace strengthens that ordering. Handler
+`0x21d2c` compares all five returned secure words, stores the requested mode in
+the display's active-mode field at `0x200001f8 + 0x0e`, stores the application
+slot at offset `+0x12`, sets the completion flag at `+0x1e`, and only then
+builds the category-32 opcode-`12` completion. It does not call mode 0 or
+cleanup. The mode-0 calls found at `0x1f810` and `0x1f85a` are downstream of
+connection/topology maintenance, not this completion path. Thus the display
+does not knowingly revoke its own mode 4 before reporting completion; the
+remaining uncertainty is the motor's live acceptance of the following A0.
+
+The two setters' memory behavior now explains the preservation step exactly.
+Category-16 A0 copies five bytes into pending record `0x20002548` and sets the
+volatile flag; A8 copies the adjacent six bytes at `0x2000254d`, clears the
+flag, and passes the assembled 11-byte record to `0x25516`. Replaying the
+freshly read lighting half therefore preserves it while A8 changes destination.
+No separate mode-4/5-specific read-only probe was found. Category-32 A0 at
+`0x24d50` is a different, mutating record command, while the read-only B4 and
+display-local 0D commands do not prove that mode 4/5 is active.
+
+### 2026-09-24 third correction: select display-owned mode 5
+
+Build 79's mode-4 ownership result remains valid, but its mode selection was
+not the closest known destination-client precedent. In E-TUBE 3.4.5, the
+factory and OEM destination buttons live in `SetInspectionModeOtherPanel`, and
+the surrounding desktop inspection workflow enters protected PC-link mode 5.
+The SC-E7000 local handler owns mode 5 through the same setup/post-request path
+as mode 4, and D4.5's A0/A8 gates accept both values.
+
+Unpublished build 80 therefore sent local `00 0C 05` and required exact motor
+completion `00 32 12 05 <slot>` before the same unchanged A0 and at-most-once
+A8 sequence. Builds 79/80 were never published or bike-tested.
+
+Build 81 preserves those payloads but requires another complete display-owned
+mode-5 handshake after A0 returns A2 and before its single A8. The motor's
+mode-request/promotion state is separate from the A0 gate and pending record,
+and the display forwards a repeated accepted mode request, so this refresh can
+restore mode without consuming the one-shot gate. If it fails, A8 is withheld
+and a physical power cycle is required before another setting tool is used.
+
+Build 82 keeps build 81's packet order and makes the one-attempt policy
+durable. Its salted same-device record persists a phase before A0 and A8
+enqueue and blocks another command write after reload or either reconnect
+outcome. It stores no raw device identifier, passkey, serial, capture, or
+firmware content.
