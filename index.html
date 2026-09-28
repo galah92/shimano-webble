@@ -93,7 +93,7 @@
 <div class="card"><button id="identify" disabled>Read region and compatibility</button>
 <div class="muted">Read display, drive-unit, destination, current assist ceiling, and the motor's US-profile ceiling in one batch. The target is US (value 1). Allow up to 110 seconds; copy the log when the summary appears.</div></div>
 <div class="card"><button id="motorAuth" disabled>Authenticate motor</button><div id="motorStatus" class="muted">Read bike information first.</div></div>
-<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Build 94 retains build 91's experimental path for the verified D4.5.0/M4.4.8 pair at EU. Its destination sequence is unchanged from build 82: it asks the SC-E7000 to own protected mode 5 through its local 0C command—the same protected mode used by Shimano's desktop destination-setting panel—waits for both the display acknowledgement and exact motor completion, then sends one unchanged A0 stage. Only after exact A2 does it establish display-owned mode 5 again before the single OEM A8 destination write. It requires exact completions, AA, and fresh US readback, exits through the display-owned mode path, and never changes firmware. The salted same-device attempt journal is durable and prevents a repeat across reloads; persistence still needs a power cycle.</div></div>
+<div class="card"><button id="setUS" disabled>Set region to US</button><div class="muted">Historical one-attempt build-94 path: the tested bike rejected its unchanged A0 with 3A after display-owned mode-5 completion, so it did not send A8 or change region. The salted same-device journal blocks repeating that write after reload. Build 95 adds only a read-only early-queue timing diagnostic to the guided flow; it does not add a new setting-write path or firmware download.</div></div>
 <div class="card"><button id="setUSMax" disabled>Set assist ceiling to safe US target</button>
 <label class="check"><input id="maxAssistPowerCycle" type="checkbox" /> <span>I physically turned the bike fully off and back on after the recorded assist-ceiling attempt.</span></label>
 <div id="maxAssistWriteStatus" class="muted">Read bike information first. This one-attempt setter is available only after the exact D4.5.0/M4.4.8 pair reports US, a lower current ceiling, and a higher US-profile ceiling. It journals before B0, never retries, and requires a later power-cycle readback.</div></div>
@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-09-26.94';
+const BUILD = '2026-09-27.95';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2516,7 +2516,11 @@ function currentGuidedWorkflowPlan() {
 
   if(session.currentDestination===0) {
     if(commandRecord?.verified)
-      return {action:'blocked',label:'US write will not repeat',status:'EU persisted after the recorded US attempt. The at-most-once write is blocked; open Technical details and copy the report.'};
+      return commandRecord.outcome==='not-us'&&session.directWriteEligible&&session.motorEligible
+        ? session.queueProbeAttempted
+          ? {action:'blocked',label:'Timing report ready',status:'The read-only queue probe has run in this connection. Copy its report; the US write remains blocked.'}
+          : {action:'probe-queue',label:'Check bus timing',status:'EU persisted after the recorded attempt. The US write remains blocked. This optional diagnostic temporarily enters display-owned mode 5 and queues only a destination read; it changes no stored setting.'}
+        : {action:'blocked',label:'US write will not repeat',status:'EU persisted after the recorded US attempt. The at-most-once write is blocked; open Technical details and copy the report.'};
     if(probeRecord)
       return {action:'blocked',label:'Review stored state',status:'A prior experiment record blocks a new destination write. Open Technical details and copy the report.'};
     if(session.directWriteEligible&&session.motorEligible)
@@ -3014,7 +3018,7 @@ function regionReadiness(model, firmware, destination) {
   if (!destination || destination.length < 5 || destination[4] > 5) return 'Current destination not verified; no change ready';
   if (destination[4] === 1) return 'US already reported; persistence and speed behavior still need verification';
   if (model?.length >= 5 && firmware?.length >= 5 && model[3] === 0x22 && firmware[3] === 0x45 && firmware[4] === 0) {
-    return 'D4.5.0 confirmed. Build 94 retains the evidence-backed display-owned mode experiment: ask the SC-E7000 to establish mode 5 itself, matching Shimano\'s desktop destination-setting context; require its acknowledgement and motor completion, send unchanged A0, then freshly establish mode 5 again before one A8. The accepted A0 gate survives PC-mode changes; neither setting write is repeated, and the durable same-device journal blocks a repeat across reloads. Use once only.';
+    return 'D4.5.0 confirmed. The tested build-94 display-owned mode-5 transaction rejected unchanged A0 with 3A before any US write. Build 95 offers a read-only early-queue timing diagnostic after a recorded non-US reconnect; it never clears or repeats that bike\'s attempt journal.';
   }
   return 'US target: model/firmware preparation requirements still need verification';
 }
@@ -3144,7 +3148,7 @@ async function identifyDrive() {
       ? commandAttemptStatus(probeRecord)
       : results.some(item => item.alternate)
       ? 'Destination response AF/3A unresolved; current region unknown; no change ready'
-      : s.directWriteEligible ? 'D4.5.0 verified. Build 94: use the guided Set US region once action for the bounded two-handshake display-owned mode-5 experiment.'
+      : s.directWriteEligible ? 'D4.5.0 verified. The build-94 A0 path failed on the tested bike. Build 95 adds a read-only queue diagnostic for a recorded non-US reconnect; no new US-setting method is validated.'
       : regionReadiness(model, firmware, destination);
     if(destination?.[4]===1&&Number.isInteger(currentMax)&&Number.isInteger(usMax)) {
       const safeTarget=stockMaxAssistUsTarget(usMax);
@@ -3445,7 +3449,7 @@ function renderMaxAssistWriteStatus(s,journal=optionalMaxAssistUsJournal()) {
     ` (motor internal ceiling ${formatMaxAssistSpeed(s.usProfileMaxAssistSpeed)})`;
   el.textContent=`Ready for one journaled attempt: set ${formatMaxAssistSpeed(s.currentMaxAssistSpeed)} to Shimano's safe US target ${formatMaxAssistSpeed(target)}${internal}. This has synthetic coverage only.`;
 }
-function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength=3,timeout=8000,privatePacket=false}) {
+function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength=3,timeout=8000,privatePacket=false,onWriteComplete}) {
   assertCurrent(s);
   return new Promise((resolve,reject)=>{
     const rx=s.chars['2afd'];
@@ -3481,6 +3485,7 @@ function driveSettingExchange(s,{label,packet,normalOpcode,errorOpcode,minLength
       s.chars['2afe'].writeValueWithResponse(packet).then(()=>{
         if(settled)return;
         written=true;log(`ATT write completed: ${label}`);
+        if(onWriteComplete)try {onWriteComplete();}catch(error){return finish(error);}
         if(responseError)finish(responseError);
         else if(response)finish(null,response);
       },error=>finish(error instanceof Error?error:new Error(String(error))));
@@ -3599,13 +3604,14 @@ function pcApplicationSlot(s) {
   log('PC application slot was not observed live; using wireless slot 0D from the supplied official eTuning capture.');
   return s.pcApplicationSlot;
 }
-function setDisplayPcMode(s,{mode,label,timeout=12000}) {
+function setDisplayPcMode(s,{mode,label,timeout=12000,onDisplayAck}) {
   assertCurrent(s);
   if(mode===5)delete s.displayPcMode5CompletionAt;
   const applicationSlot=pcApplicationSlot(s);
   return new Promise((resolve,reject)=>{
     const routes=['2af9','2afb','2afd'].map(short=>[short,s.chars[short]]).filter(([,ch])=>ch);
     let written=false,settled=false,displayAck=false,completion,responseError;
+    let ackActionStarted=false,ackActionDone=!onDisplayAck;
     const finish=(error)=>{
       if(settled)return;
       settled=true;clearTimeout(timer);
@@ -3614,8 +3620,16 @@ function setDisplayPcMode(s,{mode,label,timeout=12000}) {
       if(error)reject(error);else resolve(completion);
     };
     const maybeFinish=()=>{
-      if(responseError&&written)return finish(responseError);
-      if(written&&displayAck&&completion)finish();
+      if(responseError&&written&&(!ackActionStarted||ackActionDone))return finish(responseError);
+      if(!responseError&&written&&displayAck&&onDisplayAck&&!ackActionStarted) {
+        ackActionStarted=true;
+        Promise.resolve().then(onDisplayAck).then(()=>{
+          ackActionDone=true;maybeFinish();
+        },error=>{
+          ackActionDone=true;responseError=error instanceof Error?error:new Error(String(error));maybeFinish();
+        });
+      }
+      if(written&&displayAck&&completion&&ackActionDone)finish();
     };
     const onAbort=()=>finish(new Error(`Disconnected during ${label}`));
     const onValue=(short,event)=>{
@@ -3627,6 +3641,7 @@ function setDisplayPcMode(s,{mode,label,timeout=12000}) {
           responseError=new Error(`${label} rejected by display with status ${data[1].toString(16).padStart(2,'0').toUpperCase()}`);
           maybeFinish();return;
         }
+        if(displayAck)return;
         displayAck=true;
         log(`RX ${label} display acknowledgement via 2AF9: ${hex(data.slice(0,2))}`);
         maybeFinish();
@@ -3646,6 +3661,7 @@ function setDisplayPcMode(s,{mode,label,timeout=12000}) {
         log(`RX ${label} ignored application slot ${data[4].toString(16).padStart(2,'0').toUpperCase()} via ${short.toUpperCase()}; expected ${applicationSlot.toString(16).padStart(2,'0').toUpperCase()}.`);
         return;
       }
+      if(completion)return; // Keep the first motor-completion timestamp across notification routes.
       completion=data.slice();
       if(mode===5)s.displayPcMode5CompletionAt=performance.now();
       log(`RX ${label} motor completion via ${short.toUpperCase()}: ${hex(data.slice(0,5))} (${data.length} bytes total; header only)`);
@@ -3676,6 +3692,70 @@ async function enterDisplayPcMode5(s,label) {
 async function exitDisplayPcMode(s) {
   await setDisplayPcMode(s,{mode:0,label:'SC-E7000-owned PC mode exit',timeout:5000});
   log('SC-E7000-owned protected PC mode exited.');
+}
+// Diagnose the display queue without repeating the journaled A0/A8 attempt.
+// AC is the existing read-only destination getter and follows A0's bridge path.
+async function probeEarlyDisplayQueue(s) {
+  const record=probeRecord?.kind==='command-us-region'?probeRecord:null;
+  if(busy||!s?.verified||!s.batchDone||!s.directWriteEligible||!s.motorEligible||
+      s.queueProbeAttempted||s.currentDestination!==0||
+      !record?.verified||record.outcome!=='not-us')return;
+  assertCurrent(s);
+  s.queueProbeAttempted=true;
+  busy=true;controls();
+  let touched=false,failed=false,readReply,readReplyAt,readEnqueueAt,readWriteCompleteAt;
+  const observeRead=event=>{
+    const data=bytes(event.target.value);
+    if(Number.isFinite(readEnqueueAt)&&!Number.isFinite(readReplyAt)&&
+        data.length>=5&&data[0]===0&&data[1]===0x16&&data[2]===0xae&&data[3]===1)
+      readReplyAt=performance.now();
+  };
+  s.chars['2afd'].addEventListener('characteristicvaluechanged',observeRead);
+  log('--- early display-queue timing probe start; AC read only, no A0/A8/B0 or firmware ---');
+  log('Queue probe context: the previous US attempt remains durably recorded as verified non-US; it will not repeat.');
+  try {
+    touched=true;
+    await setDisplayPcMode(s,{mode:5,label:'queue probe SC-E7000-owned mode 5',onDisplayAck:async()=>{
+      assertCurrent(s);
+      if(Number.isFinite(s.displayPcMode5CompletionAt))
+        throw new Error('Motor mode completion preceded local acknowledgement; no early read was queued');
+      readEnqueueAt=performance.now();
+      log('Queue probe: local 2C 00 received; enqueueing one AC 01 destination read before motor completion.');
+      readReply=await driveSettingExchange(s,{label:'queue probe read-only AC 01',
+        packet:Uint8Array.of(0,0x16,0xac,1),normalOpcode:0xae,errorOpcode:0xaf,minLength:5,
+        onWriteComplete:()=>{readWriteCompleteAt=performance.now();}});
+    }});
+    assertCurrent(s);
+    if(!readReply||readReply[3]!==1||readReply[4]!==s.currentDestination||
+        !Number.isFinite(readWriteCompleteAt)||!Number.isFinite(readReplyAt)||
+        !Number.isFinite(s.displayPcMode5CompletionAt))
+      throw new Error('Early destination read or mode-5 completion was not verified');
+    const completionAfterReadStart=s.displayPcMode5CompletionAt-readEnqueueAt;
+    const completionAfterAttAck=s.displayPcMode5CompletionAt-readWriteCompleteAt;
+    const readAfterCompletion=readReplyAt-s.displayPcMode5CompletionAt;
+    log(`Queue probe timing: AC send-call to motor completion ${completionAfterReadStart.toFixed(1)} ms; AC ATT acknowledgement to completion ${completionAfterAttAck.toFixed(1)} ms; completion to AE reply ${readAfterCompletion.toFixed(1)} ms.`);
+    if(completionAfterReadStart>0&&completionAfterAttAck>0&&readAfterCompletion>=0)
+      log('MILESTONE: the read-only AC ATT write completed before motor mode-5 completion and its AE reply followed completion. This does not prove actual bus enqueue order or A0 acceptance.');
+    else log('Queue probe did not establish the expected ATT-acknowledgement and reply order; no setting write was sent.');
+    guidedStatusOverride='Queue timing recorded with a destination read only. Copy the log; no region or speed write was sent.';
+  } catch(error) {
+    failed=true;
+    log(`Early display-queue timing probe stopped: ${error.message}. No setting write sent.`);
+    guidedStatusOverride=`Queue timing incomplete: ${error.message}. No setting write was sent; copy the log.`;
+  } finally {
+    s.chars['2afd'].removeEventListener('characteristicvaluechanged',observeRead);
+    if(touched&&session===s&&s.device.gatt.connected) {
+      try {await exitDisplayPcMode(s);}
+      catch(error) {
+        failed=true;
+        log(`Queue probe protected PC-mode exit not verified: ${error.message}. Disconnecting.`);
+        guidedStatusOverride='Queue timing ended, but protected mode exit was not verified. Disconnected; copy the log.';
+      }
+    }
+    log('--- early display-queue timing probe end; no setting write or journal change ---');
+    if(failed&&session===s)disconnect();
+    if(session===s) {busy=false;controls();}
+  }
 }
 // Complete the motor's verified two-half destination record rather than rely
 // on the undocumented retained state used by commercial D4.3 clients. The
@@ -3950,6 +4030,10 @@ async function runGuidedWorkflow() {
     return continueCommandWorkflow();
   }
   if(plan.action==='set-us'||plan.action==='set-max')return runGuidedMutation(plan.action);
+  if(plan.action==='probe-queue') {
+    if(!window.confirm('This diagnostic temporarily enters display-owned mode 5 and sends one destination read after its local acknowledgement. It sends no A0, A8, B0, or firmware and does not clear the prior attempt record. Continue?'))return;
+    return probeEarlyDisplayQueue(session);
+  }
   if(plan.action==='verify-us'||plan.action==='verify-max') {
     if(!window.confirm('Confirm that you fully turned the bike off and back on. Verification is read-only and will not repeat either write.'))return;
     if(!session?.verified&&!rememberWorkflowPasskey()) {
@@ -3972,13 +4056,14 @@ function exportLog() {
     snapshot.lastIndexOf('Bootloader entry/exit probe started.'),
     snapshot.lastIndexOf('--- motor authentication start;'),
     snapshot.lastIndexOf('--- US-region attempt start;'),
+    snapshot.lastIndexOf('--- early display-queue timing probe start;'),
     snapshot.lastIndexOf('--- one-attempt stock maximum-assist transaction start ---'),
     snapshot.lastIndexOf('Guided setting action stopped:'));
   const testStart = trackedStart < 0 ? null : starts.filter(item => item.index <= trackedStart).at(-1);
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
   const lines = snapshot.split('\n').filter(Boolean);
   // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.
-  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|PC-mode application|PC application|PC-link mode|protected PC mode|display-owned|ignored mode|^Entry |^Bootloader |^Post-probe )/i;
+  const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|Queue probe|early display-queue timing probe end|PC-mode application|PC application|PC-link mode|protected PC mode|display-owned|ignored mode|^Entry |^Bootloader |^Post-probe )/i;
   const routine = /^(?:TX |RX |ATT |READ |RESULT |QUERY TRAFFIC |--- |(?:Captured setup|eTuning setup|Restore setup) |2AF[9BD] traffic:|2AF[9BD] notifications enabled|Motor serial received|Log copied)/;
   const useful = lines.filter(line => {
     const message = line.replace(/^\[[^\]]+\] /,'');

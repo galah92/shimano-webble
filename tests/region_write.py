@@ -130,6 +130,99 @@ class RegionWriteTests(unittest.TestCase):
     def packets(self):
         return self.page.evaluate('regionWrites')
 
+    def prepare_queue_probe(self, completion_before_ack=False, late_att_ack=False,
+                            duplicate_completion=False):
+        self.open()
+        self.page.evaluate('''async opts => {
+          window.queueProbeWrites=[];
+          session.verified=session.motorEligible=session.directWriteEligible=true;
+          session.batchDone=true;session.currentDestination=0;
+          session.pcApplicationSlot=0x0d;
+          probeRecord={version:2,kind:'command-us-region',verified:true,outcome:'not-us'};
+          for(const short of ['2afa','2afe','2afd','2af9','2afb'])
+            session.chars[short]=await session.service.getCharacteristic(UUID(short));
+          const emit=(short,data)=>{
+            const rx=session.chars[short];
+            rx.value=new DataView(Uint8Array.from(data).buffer);
+            rx.dispatchEvent(new Event('characteristicvaluechanged'));
+          };
+          session.chars['2afa'].writeValueWithResponse=async packet=>{
+            const p=[...packet];queueProbeWrites.push(p);
+            if(p[1]!==0x0c||![0,5].includes(p[2]))throw Error('Unexpected display command');
+            if(p[2]===5&&opts.earlyCompletion)
+              emit('2afd',[0,0x32,0x12,5,0x0d]);
+            emit('2af9',[0x2c,0]);
+            if(p[2]===5&&!opts.earlyCompletion)
+              setTimeout(()=>emit('2afd',[0,0x32,0x12,5,0x0d]),20);
+            if(p[2]===5&&opts.duplicateCompletion)
+              setTimeout(()=>emit('2afb',[0,0x32,0x12,5,0x0d]),28);
+            if(p[2]===0)emit('2afd',[0,0x32,0x12,0,0x0d]);
+          };
+          session.chars['2afe'].writeValueWithResponse=async packet=>{
+            const p=[...packet];queueProbeWrites.push(p);
+            if(p.join(',')!=='0,22,172,1')throw Error('Unexpected drive command');
+            setTimeout(()=>emit('2afd',[0,0x16,0xae,1,0]),30);
+            if(opts.lateAttAck)await new Promise(resolve=>setTimeout(resolve,25));
+          };
+          controls();
+        }''', {'earlyCompletion': completion_before_ack, 'lateAttAck': late_att_ack,
+                'duplicateCompletion': duplicate_completion})
+
+    def test_queue_probe_enqueues_only_read_before_mode_completion(self):
+        self.prepare_queue_probe()
+        self.assertEqual(self.page.evaluate('currentGuidedWorkflowPlan().action'), 'probe-queue')
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
+        self.assertEqual(self.page.evaluate('queueProbeWrites'),
+                         [[0,12,5],[0,22,172,1],[0,12,0]])
+        self.assertIn('MILESTONE: the read-only AC ATT write completed before motor mode-5 completion',
+                      self.page.locator('#log').inner_text())
+        self.assertEqual(self.page.evaluate('probeRecord.outcome'), 'not-us')
+        self.assertEqual(self.page.evaluate('currentGuidedWorkflowPlan().action'), 'blocked')
+        self.assertFalse(self.errors)
+
+    def test_queue_probe_does_not_enqueue_read_after_early_completion(self):
+        self.prepare_queue_probe(completion_before_ack=True)
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
+        self.assertEqual(self.page.evaluate('queueProbeWrites'), [[0,12,5],[0,12,0]])
+        self.assertIn('No setting write sent', self.page.locator('#log').inner_text())
+        self.assertFalse(self.errors)
+
+    def test_queue_probe_does_not_claim_early_bus_order_when_att_ack_is_late(self):
+        self.prepare_queue_probe(late_att_ack=True)
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
+        self.assertEqual(self.page.evaluate('queueProbeWrites'),
+                         [[0,12,5],[0,22,172,1],[0,12,0]])
+        report=self.page.locator('#log').inner_text()
+        self.assertIn('did not establish the expected ATT-acknowledgement', report)
+        self.assertNotIn('MILESTONE: the read-only AC ATT write completed', report)
+        self.assertFalse(self.errors)
+
+    def test_duplicate_completion_cannot_move_the_timing_boundary(self):
+        self.prepare_queue_probe(late_att_ack=True, duplicate_completion=True)
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
+        report=self.page.locator('#log').inner_text()
+        self.assertIn('did not establish the expected ATT-acknowledgement', report)
+        self.assertNotIn('MILESTONE: the read-only AC ATT write completed', report)
+        self.assertFalse(self.errors)
+
+    def test_queue_probe_requires_the_verified_non_us_attempt_record(self):
+        self.prepare_queue_probe()
+        self.page.evaluate('probeRecord=null')
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
+        self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
+        self.assertFalse(self.errors)
+
+    def test_guided_button_runs_the_read_only_queue_probe(self):
+        self.prepare_queue_probe()
+        self.page.evaluate('window.confirm=()=>true')
+        self.assertEqual(self.page.locator('#guidedUS').inner_text(), 'Check bus timing')
+        self.page.locator('#guidedUS').click()
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
+        self.assertEqual(self.page.evaluate('queueProbeWrites'),
+                         [[0,12,5],[0,22,172,1],[0,12,0]])
+        self.assertTrue(self.page.locator('#guidedUS').is_disabled())
+        self.assertFalse(self.errors)
+
     def test_all_state_gates(self):
         self.prepare()
         for field, value in [('directWriteEligible',False),('verified',False),

@@ -4549,3 +4549,113 @@ transport results. Build .94 has not yet received a physical DB reason or sent
 a setting command; the next live run must be treated as a new explicitly
 confirmed action, and its compact report must be preserved whatever the DB
 code or later outcome.
+
+## 2026-09-27 twenty-seventh correction: build .94 physical A0 rejection
+
+The build-.94 compact physical report supersedes the untested-status paragraph
+above. On exact stock D4.5.0.0/M4.4.8.0 with EU destination, B4=25.00 km/h and
+BC(US)=32.18 km/h, the first D8 returned `DB 46`. One E8/EA exchange followed
+by one fresh D8 challenge completed motor authentication. The page retained
+lighting `0A 00`, durably recorded the same-device US attempt, and received
+both the SC-E7000's mode-5 acknowledgement and exact motor completion. It
+enqueued `00 16 A0 0A 00 FF FF` 15.5 ms after that completion. ATT accepted the
+write, but the motor explicitly replied `A3 3A`; the page stopped without
+sending A8 or B0. The connection then ended while mode-0 exit was being
+attempted, so the exit was not verified. A later read-only reconnect reported
+the same stock pair, EU and 25 km/h, and the durable journal blocked a repeat.
+The report does not establish whether the screen restarted or which event
+caused the disconnection.
+
+Exact D4.5.0 A0-handler decompilation at `0x252a8` has only two acceptance
+checks before it sets the A8 gate: active motor PC mode equals 4 or 5, and the
+normalized target byte equals zero. Failure produces `3A`. The validated
+SC-E7000 forwarder and this packet support a zero target, so loss of active
+mode by the time A0 was handled is the leading hypothesis, not directly
+measured fact. A read-only review of all references to active-mode RAM
+`0x200029f9` found the known mode-request and fifth-secure-word writers, not
+a newly discovered timer or hidden A0-specific clear. The full on-page log is
+needed to check for a mode-0/1 transition or unsolicited bridge traffic between
+the completion and A0 reply. Merely shortening the interval or repeating A0
+is not justified by this evidence.
+
+The same D4.1/D4.3/D4.5 mode and A0 gate checks mean a stock D4.3/M4.2.1 BLE
+downgrade is not a causal fix for this observed rejection on its own. Vendor
+compatibility documentation still identifies D4.3 as the Bluetooth-supported
+E5000 range, but the missing state transition and the older clients' direct-A8
+gate paradox remain unresolved. Treat flashing as a separate riskier candidate,
+not the next automatic action; an interrupted or unbootable BLE update may
+require a wired recovery interface. The hidden modified-D4.5.0.1 image remains
+uninstalled and unwired. No validated US-setting or higher-speed result exists.
+
+Primary vendor references checked again on 2026-09-27:
+[`STUnlocker compatibility`](https://www.stunlocker.com/),
+[`eMax DU-E50X0 matrix`](https://www.emax-tuning.com/eMax-possibilities.pdf),
+[`eTuning downgrade instructions`](https://etuning-app.com/downgrade.pdf), and
+[`Shimano Professional recovery FAQ`](https://bike.shimano.com/en-NA/support-and-service/faq/EPP0A.html).
+The now-updated eTuning guide says its old manual downgrade steps are
+superseded by an in-app iPhone/Android action; its E5000 table still names
+D4.3.0 and says US region has a correct speedometer. The vendor's
+[`comparison`](https://etuning-app.com/compare/etuning-vs-emax-vs-stunlocker/)
+also claims automatic downgrade for older E5000 motors. These are commercial
+capability claims, not proof that the current bike's display/battery topology
+will accept the downgrade or destination write. Shimano's FAQ describes
+SM-PCE02 single-unit wired restoration if a firmware update fails, so the
+in-app convenience does not remove the recovery risk.
+
+## 2026-09-27 twenty-eighth correction: a stock-BLE queue-ordering candidate
+
+The user prefers a route without a firmware downgrade. A fresh read-only
+SC-E7000 4.1.0 decompilation found a materially different timing relationship
+from the failed build-94 experiment. Display-local `00 0C 05` queues its motor
+mode request and five secure words through `0x210c6` → `0x2bf74` **before**
+`0x236fc` sends the local `2C 00` reply. Phone-originated drive commands also
+use `0x2bf74` through `0x200bc`. The generic type-`0x10` formatter adds full
+packets to a ring at `0x2d7c4`, and `0x2d61e` removes them FIFO. The image's
+compressed startup data was decoded in memory; its 14-entry priority table
+does not include the `32/10` request, `32/30` secure words, or `16/A0`.
+The exact-hash read-only verifier in `tools/inspect_display_pc_mode.py` now
+checks the startup-table digest, call graphs, and exclusions.
+
+Therefore an unchanged A0 enqueued immediately on local `2C 00`, *before*
+motor completion, could sit directly behind the six protected-mode frames and
+reach the motor much sooner after mode promotion than build 94's
+post-completion A0. This is a new mechanism, not another payload variant or
+attempt to shave a few milliseconds off the same post-completion path.
+However, static FIFO structure does not prove runtime bus order or exclude a
+topology event, an alternate queue state, a write failure, or A0 rejection.
+The build-94 salted journal remains terminal; no new bike write, bypass, or
+firmware download is enabled. See `docs/evidence/bridge-analysis.md` for the
+bounded path and limitations. A live experiment would need a separately
+reviewed one-shot protocol, exact motor completion plus A2 gating, and a
+distinct journal decision rather than silently clearing the existing record.
+A safer first physical discriminator would enqueue only the known read-only
+`AC 01` destination getter at local `2C 00`, require its ATT acknowledgement
+before motor mode-5 completion and exact `AE 01` afterward, then exit. `AC`
+shares A0's phone-forwarding path and is
+also absent from the priority table. This tests whether the bike admits and
+orders an early queued command without another setting write; it does not
+prove protected A0 acceptance. Build .95 connects only this
+read-only timing probe to the existing guided button after the verified non-US
+attempt record. It does not clear that record or wire the early A0 hypothesis.
+Synthetic tests cover ordering, one run per connection, and an early-completion
+abort; the probe itself has not been run on the bike.
+The [STUnlocker iOS manual](https://stunlocker.com/doc/ST_Manual_iOS.pdf)
+also clarifies that its D4.5-compatible speedometer calibration changes only
+displayed speed, not the motor's actual assist cutoff, so it is not a route to
+the requested higher assistance speed.
+
+## 2026-09-27 twenty-ninth correction: retained D4.5 wheel handlers
+
+Exact D4.5.0 decompilation also found `35 00` and `35 04` dispatch entries at
+`0x1d4ce` and `0x1d506`. The setter at `0x1e13c` requires nonzero PC mode,
+a nonzero 16-bit value, and a source-state relation at RAM `0x20002168`
+offsets `+0x1e` and `+0x18`; only then does `0x18e38` persist record `0x1f`.
+The getter route schedules a response. The exact-hash verifier is
+`tools/inspect_d450_wheel.py`; see the updated
+`docs/evidence/d430-wheel-circumference-analysis.md`.
+
+This is evidence that the native wheel handler remains in D4.5, **not** that
+the vendor's D4.3 Bluetooth compatibility matrix is wrong in practice. The
+SC-E7000 source-state gate and live BLE reply are untested, and a wheel edit
+would misstate speed/distance. A stock-firmware, read-only `35 04` query is a
+separate low-risk discriminator; no wheel setter is exposed or sent to the bike.

@@ -555,16 +555,14 @@ class BrowserTests(unittest.TestCase):
         self.assertTrue(self.page.evaluate('canSetUS(session)'))
         self.assertFalse(self.page.locator('#setUS').is_disabled())
         self.assertTrue(self.page.evaluate('session.commandWriteEligible'))
-        self.assertIn('bounded two-handshake display-owned mode-5 experiment', self.page.locator('#regionStatus').inner_text())
+        self.assertIn('build-94 A0 path failed on the tested bike', self.page.locator('#regionStatus').inner_text())
 
     def test_reported_motor_firmware_describes_the_unverified_command_path(self):
         self.open()
         result = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,0])')
-        self.assertIn('ask the SC-E7000 to establish mode 5 itself', result)
-        self.assertIn('The accepted A0 gate survives PC-mode changes', result)
-        self.assertIn('neither setting write is repeated', result)
-        self.assertIn('durable same-device journal blocks a repeat across reloads', result)
-        self.assertIn('Use once only', result)
+        self.assertIn('build-94 display-owned mode-5 transaction rejected unchanged A0', result)
+        self.assertIn('read-only early-queue timing diagnostic', result)
+        self.assertIn('never clears or repeats', result)
         already = self.page.evaluate('regionReadiness([0,1,30,34,0], [0,1,46,69,0], [0,22,174,1,1])')
         self.assertIn('US already reported', already)
 

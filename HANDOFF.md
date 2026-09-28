@@ -1,4 +1,4 @@
-# Shimano WebBLE handoff — 2026-09-26
+# Shimano WebBLE handoff — 2026-09-27
 
 ## Objective and current answer
 
@@ -16,6 +16,39 @@ that the SC-E7000 forwards PC-mode and setting commands correctly but reclaims
 the motor's global PC-mode state 59-74 ms after the mode-4 completion. They
 conclusively rule out sending a later setting command after a
 *phone-originated* mode completion while the display retains ownership.
+
+**New physical result (build 94, 2026-09-27):** the bounded `DB 46` motor-authentication
+recovery worked, and the SC-E7000 acknowledged and completed its own mode-5
+handshake. The unchanged-lighting A0 was queued 15.5 ms later but the motor
+explicitly replied `A3 3A`. No A8 or B0 was sent. A later read-only reconnect
+still reported EU and 25 km/h; the durable journal correctly prevents another
+attempt. The exact D4.5.0 A0 handler rejects when active mode is neither 4 nor
+5 or its normalized target byte is nonzero. The bridge and sent packet support
+zero target, so loss of motor mode before A0 processing is the leading
+explanation, **not a measured mode-state transition**. The compact report does
+not show the intervening bus traffic. Do not press Set US again or clear the
+journal. Preserve the full on-page log and any screen-restart observation.
+
+**Stock-BLE research lead, not a live retry:** exact SC-E7000 queue analysis
+shows that display-local mode 5 enqueues its motor request and five secure
+words before returning `2C 00`; the phone's A0 uses the same normal bus queue.
+Enqueueing A0 on that earlier local acknowledgement could place it directly
+behind the handshake rather than waiting for motor completion to return over
+BLE. This has not been sent to the bike, runtime queue behavior is unverified,
+and build 94's terminal journal remains intact. Build 95
+adds only a read-only AC timing probe to the existing guided button after a
+verified non-US attempt record; it does not wire the candidate A0 write or
+clear the journal. Synthetic tests are not bike results. See the latest correction in
+[`RESEARCH.md`](RESEARCH.md) and
+[`bridge-analysis.md`](docs/evidence/bridge-analysis.md).
+
+The exact D4.5.0 image also retains `35 00`/`35 04` wheel-setting handlers;
+the setter has nonzero-PC-mode and source-state gates and persists record
+`0x1f`. This is **not** proof of a stock BLE wheel workaround or a reason to
+send a setting write. A read-only `35 04` query is the next discriminator for
+that separate branch; see
+[`d430-wheel-circumference-analysis.md`](docs/evidence/d430-wheel-circumference-analysis.md)
+and `tools/inspect_d450_wheel.py`.
 
 A new branch closes an important post-destination ambiguity. Shimano
 Cyclist 5.0.2 explicitly marks DU-E5000 as supporting a separate configured
@@ -126,7 +159,7 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The page source is now build `2026-09-26.94`. Build 91 was published; build 92
+The page source is now build `2026-09-27.95`. Build 91 was published; build 92
 reduced the normal interface to one contextual
 button. **Connect and check bike** remains read-only and reports both
 assist-speed ceilings. Only after those reads prove eligibility does that same
@@ -176,16 +209,20 @@ a repeat. A later explicit physical-power-cycle checkbox and different BLE
 session permit only read-only same-device persistence verification. The target
 cannot be typed and is capped at 32 km/h. No B0 has been sent to the bike.
 
-If build 91's destination branch fails after exact display acknowledgement and motor completion,
-two no-new-hardware firmware branches remain. The existing paired BLE
+Build 94 physically rejected build 91's destination branch after exact display
+acknowledgement and motor completion. Two no-new-hardware firmware branches
+remain as unqualified research candidates. The existing paired BLE
 preparation workflow can install exact D4.3.0/M4.2.1 and later restore
 D4.5.0/M4.4.8. Current eTuning 3.0.7's exact MD5 allowlist now proves that its
 firmware importer accepts those two public, stock preparation files; transfer
 code passes their unwrapped bytes onward without a hidden E5000 patch. This
-makes the paired BLE downgrade the strongest no-new-hardware fallback, although
-exact static comparison still shows that D4.3 retains the same PC-mode and
+makes the paired BLE downgrade a commercially evidenced no-new-hardware
+candidate. However, exact static comparison still shows that D4.3 retains the
+same PC-mode and
 one-shot A0/A8 gates and the commercial success path is not yet a complete
-causal recipe for this SC-E7000 topology. Build 91 corrects this route's hidden
+causal recipe for this SC-E7000 topology. Build 94's mode-5/A0 rejection makes
+the same hidden D4.3 transaction less credible without new trace evidence.
+Build 91 corrects this route's hidden
 coordinator: after exact-pair reconnect verification and a durable journal it
 reads and preserves the current lighting half, uses display-owned mode 5,
 sends one A0, refreshes display-owned mode 5, and sends one A8. Exact A2/AA,
@@ -407,44 +444,33 @@ The desktop/PCE transport and wired-patch contradiction are in
 
 ## What could move the goal forward
 
-The offline bridge mapping now identifies a display-owned protected-mode path
-that no previous bike run exercised. Build 94 retains build 91's destination setter as the next
-lower-risk live experiment: it
-changes ownership rather than timing a phone-owned mode, selects mode 5 to
-match Shimano's known desktop destination-setting context, and freshly
-re-establishes that mode after A2 without consuming the A0 gate.
+Build 94 supplied the missing physical test and rejected the current stock-D4.5
+destination sequence at A0. The next step is **offline diagnosis, not another
+write**:
 
-1. Open build 94 with the bike
-   stationary, keep the phone close to the display,
-   enter the passkey, and press **Connect and check bike**. Record current
-   `B4/B6` plus US-profile `BC/BE`. If the guarded action becomes available,
-   press **Set US region once** and confirm it. The page performs the required
-   session and motor authentication automatically.
-2. Preserve the complete sanitized log. A valid transaction needs display
-   `2C 00`, exact motor `00 32 12 05 <slot>`, A0 `A2`, a second complete
-   mode-5 handshake, A8 `AA`, immediate US readback, and verified `0C 00` exit.
-   `ATT write completed` alone is not success.
-3. On success, power cycle and read again in a different session; only then
-   measure assistance cutoff on a safe ride.
-4. After a successful US destination readback and its physical-power-cycle
-   verification, run the read-only check again. If B4 is below BC 01,
-   press the guided **Set 32 km/h once** action and confirm it.
-   Build 91 rereads the complete exact context, derives `min(BC 01, 3200)`,
-   requires B2 plus immediate B4 equality, and records the attempt before
-   dispatch. On every outcome, do not repeat B0. Fully power-cycle, then press
-   **I power-cycled — verify 32 km/h**; only that
-   separate same-device result can establish persistence.
-5. On `A3 3A` or `AB 3A` plus EU, do not repeat build 94's action. The next
-   no-new-hardware candidate is the hidden exact-stock D4.3.0/M4.2.1 paired
-   workflow, not the modified-D4.5.0.1 route. Its transfer/recovery coordinator,
-   one explicit display-owned A0→A8 transaction, immediate readback, power-cycle persistence gate,
-   and stock restoration are complete and synthetically tested. It still needs
-   separate explicit live authorization because an interrupted BLE firmware
-   transfer can require wired recovery. Keep the exact restoration pair cached.
-6. If the prepared A0→A8 transaction is rejected, retain that verified D4.3.0/M4.2.1
-   state. The next bounded software fallback is one circumference write with
-   an original-value read and durable journal—not another A8 or A0 retry. Do
-   not expose it in the UI until restoration-era wheel reads are proven.
+1. Obtain the full sanitized on-page log spanning mode-5 completion, A0, and
+   disconnect, plus whether the SC-E7000 visibly restarted. Look for an
+   intervening mode-0/mode-1 request, topology event, or unsolicited 2AFD
+   message. A compact report does not prove the cause of mode loss or the
+   disconnect.
+2. Compare any discovered transition with the exact SC-E7000 4.1.0 and motor
+   D4.5.0 handlers, then find a known-good destination trace if one exists.
+   The newly identified pre-completion bus-queue path is a distinct stock-BLE
+   hypothesis. Build 95's no-setting-write timing probe enqueues the existing
+   `AC 01` destination getter on local `2C 00`, checks ATT acknowledgement
+   before exact motor completion and `AE 01` afterward, then exits. Its first
+   live result can test queue admission and relative timing without A0/A8/B0.
+   A later setting candidate would still need
+   reviewed completion/A2 gates and a separate attempt record. Do not repeat
+   the post-completion A0 or erase its journal.
+3. Treat stock D4.3.0/M4.2.1 paired BLE preparation as a separate, riskier
+   candidate, not an automatic next button: the older handler has the same
+   active-mode and A0-gate checks, while a failed wireless update may require
+   wired recovery. The exact D4.5.0.1 patch is still unwired and has no
+   validated BLE recovery path. Neither image has been sent to this bike.
+4. Only if US is independently established and persists should the separate
+   32 km/h B0 setting be considered. The current EU B4=25 km/h and BC(US)=32.18
+   km/h readings do not authorize B0 at EU.
 
 Do not pursue further A0 payload variants or repeat timing attempts. Asset
 sources and hashes are in [`ASSETS.md`](ASSETS.md).
@@ -460,7 +486,7 @@ evidence of a region-setting menu (`RESEARCH.md`, latest section).
 
 ## Repository map and reproducibility
 
-- [`index.html`](index.html): public single-file application source. Build 94's
+- [`index.html`](index.html): public single-file application source. Build 95's
   first guided action is read-only; the same button exposes the display-owned
   destination setter and separately gated stock B0 setter only when each is the
   next verified step. Technical controls are collapsed and the firmware

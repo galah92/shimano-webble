@@ -1,5 +1,10 @@
 # SC-E7000 bridge analysis and SC-E6100 historical control
 
+**2026-09-27 update:** Build 94 physically completed display-owned mode 5 but
+its first A0 returned `A3 3A`; no A8 was sent and EU remained on reconnect.
+The earlier proposed post-completion sequence below is therefore not a next
+live action. A new, untested queue-ordering hypothesis is recorded at the end.
+
 Analyst-generated summary of the SC-E7000 4.1.0 display firmware
 (`SCE7000.4.1.0.dat`, 126,508 bytes, catalog MD5
 `4974d4f471b126be9f9657510e6bef55`, plaintext ARM Cortex-M, load base
@@ -181,3 +186,53 @@ fresh US readback, and a display-owned mode-0 exit. A durable salted-device
 journal prevents another command attempt across page reloads. Until a bike run
 succeeds and a separate power-cycle read confirms persistence, this is an
 evidence-backed experiment, not a working procedure.
+
+## 2026-09-27 correction: enqueue before motor completion
+
+Build 94's A0 was placed only after the motor's mode-5 completion reached BLE.
+The display firmware exposes an earlier, causally different point. Local `0C`
+handler `0x236fc` calls mode builder `0x212ac` before sending its `2C 00` BLE
+acknowledgement. For mode 5, the builder calls `0x210c6` six times: once for
+the motor mode request, five times for its secure words. Each call reaches
+generic bus enqueue `0x2bf74`. The phone's forwarded A0 path at `0x200bc`
+reaches the **same** enqueue function. The ordinary type-`0x10` formatter
+`0x2d7c4` copies each message into a ring buffer; `0x2d61e` removes entries
+from its head. Thus, an A0 received immediately after `2C 00` can enter the
+display queue behind the already-enqueued six handshake frames, instead of
+waiting for the motor completion to travel back over BLE.
+The phone-forward guard at `0x200bc` and the local mode builder both read the
+same connection state at `0x200001f8`; the motor-completion handler does not
+write the guard field at `+0x1f`. This makes an early write plausibly admissible,
+but only a live read-only probe can verify that state during the handshake.
+
+The exact image's startup record at `0x2ea64` decompresses 1764 bytes into
+RAM beginning at `0x2000000c`. The 14-entry priority table at RAM offset
+`+0x0c` contains neither mode request `32/10`, secure word `32/30`, nor
+lighting A0 `16/A0`. On the ordinary bus path they therefore use the same
+normal ring. `tools/inspect_display_pc_mode.py` now verifies the exact image,
+call graph, startup-table digest, and those exclusions without exporting the
+vendor image or its table bytes.
+
+This is an offline queue-ordering inference, **not** proof of actual bus order,
+mode lifetime, A0 acceptance, or destination persistence on this bike. Runtime
+state can select a different queue, and an independent topology event can still
+intervene. A lower-risk first discriminator is to enqueue the existing
+read-only destination getter `00 16 AC 01` immediately after `2C 00`, record
+whether its ATT write completes before motor mode-5 completion and its exact
+`AE 01` reply follows that completion, then exit through local `0C 00`.
+`AC` is also absent from the priority table and uses the
+same phone-forwarding path as A0. This would test live queue admission and
+relative reply order without another setting write, though it would not prove
+that A0's protected-mode gate is open. Build 95 wires
+that diagnostic behind the existing contextual button only after the exact
+stock pair and verified non-US attempt record are freshly checked. It runs at
+most once per connection, does not alter the attempt journal, and requires a
+mode-0 exit or disconnect. Synthetic browser tests cover its packet ordering,
+early-completion fail-closed branch, and late-ATT-acknowledgement ambiguity;
+no bike result exists.
+
+A future bounded setting implementation would have to stage only one
+unchanged A0 after `2C 00`, require both exact motor mode-5 completion and A2,
+then separately evaluate how to queue a single A8 after another complete
+mode-5 handshake. It must retain the existing journal; build 94's rejected A0
+must not be silently retried or the record erased. No such live code is wired.

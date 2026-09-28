@@ -4,17 +4,21 @@ A single-file Web Bluetooth bike-status page for the tested Shimano SC-E7000
 endpoint and E50X0 motor family. [Open the HTTPS page](https://galah92.github.io/shimano-webble/).
 The first guided action authenticates the BLE session and reads motor identity,
 firmware, current destination, configured assist-speed ceiling, and the motor's
-US-profile ceiling without changing anything. Build 94 then presents only the
-next eligible action through the same button: one confirmed, journaled US
-attempt; read-only power-cycle verification; one confirmed, journaled 32 km/h
-ceiling attempt; and final read-only verification. It never enables a setting
-retry or firmware transfer. Raw controls and the sanitized log are collapsed under
+US-profile ceiling without changing anything. The guided control exposes a
+confirmed, journaled write only when its gates allow one. This bike's build-94
+US attempt is now durably recorded, so another setting attempt is disabled;
+read-only checks remain available. It never enables a setting retry or firmware
+transfer. Raw controls and the sanitized log are collapsed under
 **Technical details and log**.
 
 **Current result:** the bike reports native D `4.5.0.0`, M `4.4.8.0`, and EU
-destination (`0`). A direct US (`1`) command was rejected; later protected-mode
-staging commands were also rejected. No validated US-region or higher-speed
-outcome exists. Builds 76/77 proved that a mode requested directly by the phone
+destination (`0`) with a configured 25 km/h maximum. In the physical build-94
+run, `DB 46` authentication-lock recovery and the SC-E7000-owned mode-5
+handshake both completed, but the unchanged-lighting A0 returned `A3 3A`.
+No A8 destination command or B0 speed write was sent; reconnect still read EU
+and 25 km/h. The durable journal blocks another attempt. Do not press Set US
+again or clear that journal. No validated US-region or higher-speed outcome
+exists. Builds 76/77 proved that a mode requested directly by the phone
 is reclaimed by the SC-E7000 before a later BLE setting command can land.
 Display-firmware analysis then found the missing route: local command
 `00 0C <mode>` makes the SC-E7000 establish and own protected motor mode 4 or 5
@@ -77,8 +81,10 @@ policy allowlists the two files in the public E5000 preparation archive by MD5:
 stock D4.3.0 and stock M4.2.1. The app then transfers the accepted unmodified
 files; no secret E5000 patch is required by that client path. This makes the
 complete paired downgrade, separate-session verification, one bounded region
-write, power-cycle proof, and stock restoration the leading no-hardware route.
-It still needs bike validation and does not explain the direct-A8 gate paradox.
+write, power-cycle proof, and stock restoration a commercially evidenced
+no-hardware research candidate. Build 94's A0 rejection and the identical
+old-firmware mode/gate checks weaken its causal case for this SC-E7000 bike;
+it still needs bike validation and does not explain the direct-A8 gate paradox.
 See [`etuning-firmware-policy-analysis.md`](docs/evidence/etuning-firmware-policy-analysis.md).
 The paired SC-E7000 4.0.6 comparison likewise has the same display-owned
 mode path and identical secure tables as current 4.1.0. Exact SC-E6100 4.0.5,
@@ -101,8 +107,27 @@ retention around the same guards. The physical build-93 setting action stopped
 at a motor `DB` challenge reply, before PC mode or any A0/A8/B0 setting command.
 Build 94 retains that reply's non-secret reason byte and follows Shimano's
 inspected bounded lock policy: only exact `DB 46` sends one E8, requires EA,
-and starts one fresh D8 challenge. All other codes and a second rejection stop;
-no setting write is retried.
+and starts one fresh D8 challenge. The physical test confirmed this recovery
+but rejected A0 after mode-5 completion. The exact motor A0 handler accepts
+only active mode 4/5 with zero target; the packet/bridge support a zero target,
+so mode loss is the leading hypothesis, not a directly observed transition.
+The compact log does not show what happened between completion and rejection.
+All other DB codes and a second rejection stop; no setting write is retried.
+
+A new offline SC-E7000 queue analysis identifies a different stock-BLE
+candidate: its mode-5 request and five secure words are enqueued before local
+`2C 00`, and phone-forwarded A0 uses the same normal bus queue. An A0 placed
+after that local acknowledgement could follow the handshake before the later
+motor completion reaches BLE. This is not bike-tested and no new setting write
+is wired. Build 95 adds only a read-only `AC 01` timing
+diagnostic after a verified non-US reconnect; it leaves the prior attempt
+journal intact. See
+[`bridge-analysis.md`](docs/evidence/bridge-analysis.md).
+
+The stock D4.5.0 image also retains the old wheel getter and a gated,
+persistent wheel setter. That does not establish BLE acceptance or correct
+speed reporting; no wheel write is enabled. See
+[`d430-wheel-circumference-analysis.md`](docs/evidence/d430-wheel-circumference-analysis.md).
 
 A separate build-86 research branch constructs, but cannot install, an exact
 five-byte D4.5.0.1 derivative. It adds a native version marker and bypasses

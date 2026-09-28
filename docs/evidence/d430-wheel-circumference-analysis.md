@@ -97,3 +97,23 @@ next live evidence, if separately authorized, must be staged:
 Until those gates pass, this is a strong fallback design—not a validated bike
 result. Modified assistance limits may be illegal on public roads and can alter
 the bicycle's approval, warranty, braking assumptions, and displayed telemetry.
+
+## 2026-09-27 stock-D4.5.0 correction
+
+The exact stock D4.5.0 image **retains** handlers for combined packet keys
+`0x0035` (`35 00`, wheel setter) and `0x0435` (`35 04`, getter), despite the
+commercial BLE compatibility tables ending wheel adjustment at D4.3.0. The
+setter handler at `0x1e13c` checks the global nonzero PC-mode byte, a nonzero
+16-bit packet value, and a source-state relation involving RAM `0x20002168`
+offsets `+0x1e` and `+0x18`. Only then does `0x18e38` stage persistent record
+`0x1f`, commit, verify, and update the live value. The getter dispatches to
+`0x1e1bc`, which schedules a response. The exact-hash, no-image-output check is
+[`tools/inspect_d450_wheel.py`](../../tools/inspect_d450_wheel.py).
+
+This corrects a possible over-reading of the vendor version matrix: the native
+handler did not simply disappear in D4.5.0. It does **not** establish that the
+SC-E7000 forwards the setter in the needed source state, that the bike will
+accept it over BLE, or that it raises real cutoff on this topology. The safe
+next discriminator for this branch is only a `35 04` read on stock firmware;
+no D4.5 wheel write is wired or authorized by this static finding. A wheel
+workaround would also misreport speed and distance, unlike a true US region.

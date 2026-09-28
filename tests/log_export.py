@@ -89,6 +89,19 @@ class LogExportTests(unittest.TestCase):
         self.assertIn('completion via 2AFB',copied)
         self.assertIn('protected PC mode 5: completion reply timed out',copied)
 
+    def test_queue_probe_report_keeps_read_only_result(self):
+        source='[one] Connected; test\n'
+        source+='[one] --- early display-queue timing probe start; AC read only, no A0/A8/B0 or firmware ---\n'
+        source+='[one] Queue probe context: previous US attempt remains recorded as non-US.\n'
+        source+='[one] Queue probe timing: AC ATT acknowledgement to completion 17.2 ms.\n'
+        source+='[one] MILESTONE: the read-only AC ATT write completed before motor mode-5 completion.\n'
+        source+='[one] --- early display-queue timing probe end; no setting write or journal change ---\n'
+        self.set_log(source)
+        self.page.locator('#copyLog').click()
+        copied=self.page.evaluate('window.copied')
+        self.assertIn('Queue probe timing: AC ATT acknowledgement',copied)
+        self.assertIn('no setting write or journal change',copied)
+
     def test_copy_failure_offers_manual_copy(self):
         self.page.evaluate('window.failCopy = true')
         self.page.locator('#copyLog').click()

@@ -80,6 +80,47 @@ def secure_table(data, address):
     }
 
 
+def initialized_priority_table(data):
+    """Decode the exact startup data block copied to RAM 0x2000000c."""
+    source = file_offset(0x2EA74)
+    end = source + 0x3B3
+    position = source
+    output = bytearray()
+    while position < end:
+        control = data[position]
+        position += 1
+        literal_count = control & 3
+        if literal_count == 0:
+            literal_count = data[position] + 3
+            position += 1
+        match_count = control >> 4
+        if match_count == 15:
+            match_count = data[position] + 15
+            position += 1
+        literal_size = literal_count - 1
+        output.extend(data[position:position + literal_size])
+        position += literal_size
+        if match_count:
+            distance_low = data[position]
+            position += 1
+            distance_high = (control >> 2) & 3
+            if distance_high == 3:
+                distance_high = data[position]
+                position += 1
+            distance = distance_low + 256 * distance_high
+            if distance == 0 or distance > len(output):
+                raise ValueError("Invalid display startup-data backreference")
+            for _ in range(match_count + 2):
+                output.append(output[-distance])
+    if position != end or len(output) != 1764:
+        raise ValueError("Display startup-data bounds mismatch")
+    # RAM +0x0c..+0x27 is the 14-entry category/opcode priority table.
+    table = bytes(output[12:40])
+    if hashlib.sha256(table).hexdigest() != "8c4d154f1e7c3d9c6ec46b9033896f22fefd1f25ba8a263127a9fe9f420c4911":
+        raise ValueError("Display queue priority table mismatch")
+    return {(table[i], table[i + 1]) for i in range(0, len(table), 2)}
+
+
 def inspect(data):
     digest = hashlib.sha256(data).hexdigest()
     if len(data) != EXPECTED_SIZE or digest != EXPECTED_SHA256:
@@ -108,12 +149,22 @@ def inspect(data):
         raise ValueError("category-32 completion literal mismatch")
 
     local_calls = thumb_bl_targets(data, 0x236FC, 0x23746)
+    mode_builder_calls = thumb_bl_targets(data, 0x212AC, 0x21470)
+    display_queue_calls = thumb_bl_targets(data, 0x210C6, 0x21100)
+    phone_queue_calls = thumb_bl_targets(data, 0x200BC, 0x200D8)
+    priority_table = initialized_priority_table(data)
     expected_local_calls = [0x212AC, 0x17CFA, 0x17CC8, 0x212AC, 0x1F7A4]
     completion_calls = thumb_bl_targets(data, 0x21D2C, 0x21DDE)
     expected_completion_calls = [0x2118C, 0x2AC9A, 0x2C418, 0x23E14, 0x2AC3A,
                                  0x2ACCA, 0x2ACCA, 0x210C6, 0x19476]
     if local_calls != expected_local_calls:
         raise ValueError("display-local 0C call graph mismatch")
+    if mode_builder_calls.count(0x210C6) != 6 or display_queue_calls != [0x2BF74]:
+        raise ValueError("display-owned mode request/secure-word enqueue mismatch")
+    if phone_queue_calls != [0x2BF74]:
+        raise ValueError("phone-forwarded drive command enqueue mismatch")
+    if {(0x32, 0x10), (0x32, 0x30), (0x16, 0xA0), (0x16, 0xAC)} & priority_table:
+        raise ValueError("protected mode, A0, or AC unexpectedly uses the priority queue")
     if completion_calls != expected_completion_calls:
         raise ValueError("secure completion call graph mismatch")
 
@@ -220,6 +271,15 @@ def inspect(data):
                 pc_mode_mutation_targets & set(drive_forward_calls)
             ),
         },
+        "early_queue_candidate": {
+            "local_0c_queues_mode_request_and_five_words_before_2c_ack": True,
+            "mode_packets_and_phone_a0_share_enqueue": "0x2bf74",
+            "mode_a0_and_ac_absent_from_priority_table": True,
+            "normal_bus_ring_enqueue": "0x2d7c4",
+            "normal_bus_ring_dequeue": "0x2d61e",
+            "candidate": "enqueue one unchanged A0 after display 2C 00 but before motor mode-5 completion",
+            "bike_acceptance": "unverified; do not repeat the journaled attempt",
+        },
         "conclusion": (
             "successful display-owned completion records the requested mode with no immediate exit; "
             "the post-request helper also disarms periodic topology maintenance, so a "
@@ -228,6 +288,7 @@ def inspect(data):
         ),
         "limitations": [
             "static result for this exact display image only",
+            "does not prove runtime bus ordering or queue state after the local acknowledgement",
             "does not prove that no topology or lifecycle event occurs before the next BLE write",
             "does not exclude an asynchronous event after a drive command is enqueued",
             "does not prove the motor accepts A0 or A8",

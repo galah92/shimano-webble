@@ -29,8 +29,8 @@ verified non-US reconnect result.
 Exact D4.1.0 comparison now proves that the A0-created one-shot A8 gate and
 cold-start clearing predate D4.3; downgrade compatibility is not explained by
 an ungated old destination handler. Build 91's refreshed-mode-5 plus
-unchanged-A0 design
-remains the next evidence-backed test.
+unchanged-A0 design was physically tested in build 94 and rejected at A0;
+see the latest correction at the end of `RESEARCH.md`.
 Exact D4.1/D4.3/D4.5 PC-mode handlers also prove that request and fifth-word
 promotion update separate slot/mode/counter state without arming the
 destination gate; mode 5 cannot substitute for A0.
@@ -95,6 +95,32 @@ attempt journal. Build 94 records the non-secret DB reason byte. Only exact
 the inspected Shimano desktop caller; every other code and a second rejection
 stop without a loop. No setting command is retried. The firmware card remains
 hidden.
+
+Physical build 94 on 2026-09-27 recovered exact `DB 46` with one E8/EA and a
+fresh D8, then completed the display-owned mode-5 handshake. It sent one
+unchanged-lighting A0 15.5 ms after completion; the motor explicitly returned
+`A3 3A`. No A8 or B0 was sent. A read-only reconnect reported EU/25 km/h.
+The same-device journal blocks another US attempt. Exact D4.5.0 A0 code rejects
+for non-4/5 active mode or a nonzero normalized target; the known bridge and
+packet support zero target, making mode loss the leading but unmeasured cause.
+Do not repeat A0 or clear the journal. Request the full on-page log and screen
+restart observation before inferring the transition or preparing any new live
+test. D4.3 retains the same checks, so a paired BLE downgrade is not yet a
+causal fix and carries wired-recovery risk; the patched-D branch remains hidden.
+New exact SC-E7000 queue analysis finds that local `0C 05` enqueues the motor
+request and five secure words before `2C 00`; phone A0 reaches the same normal
+bus FIFO and none of those opcodes is in its initialized priority table.
+Placing A0 after local acknowledgement but before motor completion is a
+distinct untested stock-BLE hypothesis. The verifier and limitations are in
+`tools/inspect_display_pc_mode.py` and `docs/evidence/bridge-analysis.md`.
+No early A0 write or journal bypass is enabled. Build 95
+adds a read-only AC timing probe after the verified non-US attempt record;
+synthetic tests do not establish bike behavior.
+The exact stock D4.5.0 image retains the category-35 wheel getter and a
+nonzero-PC-mode, source-gated persistent setter. This corrects the assumption
+that the handler was removed after D4.3; it does not establish BLE acceptance
+or an accurate-speed workaround. No wheel write is wired; inspect the exact
+hash with `tools/inspect_d450_wheel.py`.
 
 The last verified destination is EU and no higher-speed result exists. The
 paired BLE downgrade remains the riskier fallback; no image has ever been sent
