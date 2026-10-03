@@ -83,7 +83,7 @@
 <div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div>
-<div class="row"><button id="copyLog">Copy report</button><button id="clearLog">Clear log</button></div>
+<div class="row"><button id="copyLog">Copy full report</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <details><summary>Manual protocol controls</summary>
@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-10-03.96';
+const BUILD = '2026-10-03.97';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -4085,7 +4085,7 @@ async function runGuidedWorkflow() {
   }
 }
 $('guidedUS').onclick=runGuidedWorkflow;
-function exportLog() {
+function reportSessionLog() {
   let snapshot = logEl.textContent;
   const starts = [...snapshot.matchAll(/^\[[^\]\n]+\] Connected;.*$/gm)];
   // A failed mutation can disconnect before a later read-only reconnect. Keep
@@ -4100,6 +4100,17 @@ function exportLog() {
     snapshot.lastIndexOf('Guided setting action stopped:'));
   const testStart = trackedStart < 0 ? null : starts.filter(item => item.index <= trackedStart).at(-1);
   if (starts.length) snapshot = snapshot.slice((testStart || starts.at(-1)).index);
+  return snapshot;
+}
+function exportFullLog() {
+  const snapshot=reportSessionLog().replace(/\n?$/,'\n');
+  return `SHIMANO LOG — full session report — exported by build ${BUILD}\n` +
+    'All retained lines from the selected test session and later reconnects are included. Original build markers remain in the log.\n' +
+    `BEGIN LOG (${snapshot.length} JavaScript characters)\n` + snapshot +
+    `END SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
+}
+function exportLog() {
+  let snapshot = reportSessionLog();
   const lines = snapshot.split('\n').filter(Boolean);
   // Keep outcomes and unexpected messages; omit repetitive packet/setup detail.
   const important = /(?:failed|stopped|error|timeout|timed out|rejected|MILESTONE|Queue probe|early display-queue timing probe end|PC-mode application|PC application|PC-link mode|protected PC mode|display-owned|ignored mode|^Entry |^Bootloader |^Post-probe )/i;
@@ -4566,10 +4577,10 @@ $('passkey').oninput=()=>{guidedStatusOverride='';controls();};
 
 
 $('copyLog').onclick = async () => {
-  const snapshot = exportLog();
+  const snapshot = exportFullLog();
   try {
     await navigator.clipboard.writeText(snapshot);
-    $('exportStatus').textContent = `Copied compact report (${snapshot.length.toLocaleString()} characters). Full log remains below.`;
+    $('exportStatus').textContent = `Copied full session report (${snapshot.length.toLocaleString()} characters), including setup and exit details.`;
   } catch (e) {
     $('exportStatus').textContent = 'Copy failed. Select and copy the log text below.';
   }

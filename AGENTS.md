@@ -123,8 +123,18 @@ verdicts. Silence is not proof that mode 5 was retained; AC timing is not A0
 permission. The owner's screen-restart recollection is unknown. October 3
 Reddit/GitHub/vendor research found no exact known-good stock D4.5.0/M4.4.8 +
 SC-E7000 destination trace; see `reports/Shimano stock BLE next step.md`.
-Build 96's publication must be verified before a live instruction. No probe
+Build 96's publication must be verified before a live instruction. No US-setting
 result, journal clear, new setting write, or firmware transfer exists.
+The owner's physical build-96 report confirms that
+authentication and mode 5 completed, AC's ATT acknowledgement arrived 54.7 ms
+after motor completion, and its EU reply followed by 54.9 ms. Early admission
+is inconclusive; no different mode was surfaced. Disconnect occurred during
+the requested mode-0 exit and is not evidence of a preceding unsolicited
+transition. No setting/firmware write or journal clear occurred. Do not repeat
+the same probe; preserve the full on-page exit tail and screen observation.
+Build 97 changes only report export: the existing Copy full report button
+includes the retained selected session's routine exit lines. The storage key
+is unchanged; a same-tab reload can retrieve build 96 without a new bike run.
 The exact stock D4.5.0 image retains the category-35 wheel getter and a
 nonzero-PC-mode, source-gated persistent setter. This corrects the assumption
 that the handler was removed after D4.3; it does not establish BLE acceptance

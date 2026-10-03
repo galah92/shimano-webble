@@ -46,6 +46,15 @@ Synthetic tests are not bike results. See the latest correction in
 [`RESEARCH.md`](RESEARCH.md) and
 [`bridge-analysis.md`](docs/evidence/bridge-analysis.md).
 
+**Physical build-96 result (2026-10-03):** matching motor authentication and
+display-owned mode 5 completed, but AC's ATT acknowledgement was observed
+54.7 ms after the motor completion; its EU reply followed by 54.9 ms. The
+early-admission criterion was not met. No different mode was surfaced, which
+does not establish retained mode 5. Disconnect occurred during the requested
+mode-0 exit, whose completion remains unverified. No setting or firmware write
+was sent. Preserve the full on-page exit tail and screen observation; do not
+repeat this same timing probe or infer A0 eligibility from it.
+
 The exact D4.5.0 image also retains `35 00`/`35 04` wheel-setting handlers;
 the setter has nonzero-PC-mode and source-state gates and persists record
 `0x1f`. This is **not** proof of a stock BLE wheel workaround or a reason to
@@ -163,7 +172,10 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The page source is now build `2026-10-03.96`. Verify the Pages deployment and
+The page source is now build `2026-10-03.97`. Build 97 changes only report
+copying: the same button is now **Copy full report**, preserving routine exit
+lines from the selected retained test session. Reload the same tab to retrieve
+the previous result; do not rerun the bike test for reporting. Verify the Pages deployment and
 served build before a live instruction. Build 91 was published; build 92
 reduced the normal interface to one contextual
 button. **Connect and check bike** remains read-only and reports both

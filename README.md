@@ -125,7 +125,11 @@ bounded motor authentication used by build 94, then records redacted PC-mode
 headers through entry, the early read, and exit. It leaves the prior attempt
 journal intact. Early read timing does not prove A0 acceptance, and absent mode
 headers do not prove that protected mode remained active. Its ordering, guards,
-and redaction are synthetically verified; there is no physical probe result.
+and redaction are synthetically verified. The physical build-96 report shows its
+AC write acknowledgement arrived 54.7 ms after motor completion, so early
+admission remains inconclusive. The EU read succeeded; disconnect occurred
+during the requested mode-0 exit, whose completion was not verified. No setting
+or firmware write occurred. Do not repeat the same timing probe.
 The October 3
 [`research report`](reports/Shimano%20stock%20BLE%20next%20step.md) reviews the
 linked Reddit thread, related E5000 reports, GitHub implementations, and current

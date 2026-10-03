@@ -4710,3 +4710,62 @@ The synthetic checks passed 27 region/probe tests, 11 motor-authentication
 tests, seven compact-report tests, and the firmware-picker browser check. These checks
 establish code ordering, guards, and redaction only. Build 96 has no bike result;
 the last physical result remains stock D4.5.0/M4.4.8, EU, and 25 km/h.
+
+## 2026-10-03 thirty-first correction: physical build-96 timing is inconclusive
+
+The owner's compact build-96 report now supersedes the unrun status above.
+The information batch verified native D4.5.0.0/M4.4.8.0, EU, B4=25 km/h,
+BC(US)=32.18 km/h and slot 0D. Normal motor authentication and E8/EA completed
+without the DB46 recovery branch. Display-local `00 0C 05` received its ATT
+completion and `2C 00`; the page then dispatched only `00 16 AC 01` and
+observed the exact motor mode-5 completion. The read returned `AE 01 00`.
+
+The recorded monotonic timings are:
+
+- Local display acknowledgement to AC send-call: 4.3 ms.
+- AC send-call to motor completion notification: 13.6 ms.
+- AC ATT acknowledgement to motor completion: -54.7 ms, meaning the write
+  acknowledgement was observed 54.7 ms after that completion notification.
+- Motor completion to AE notification: 54.9 ms.
+
+Thus the probe did not establish its conservative early-admission criterion.
+Starting a browser write before a motor notification is not evidence of when
+the display enqueued or the motor processed the read. The delayed ATT result
+also does not prove that the command first reached the display after mode
+completion. The outcome remains inconclusive, rather than a positive basis
+for an early A0 experiment or proof that every stock-BLE route is impossible.
+No different mode was surfaced during the probe, which does not establish
+retained mode 5. The observer's +883 ms timestamp includes authentication;
+it is not a measured protected-mode lifetime.
+
+At 10:10:45.729 UTC the connection ended during the page's requested
+display-owned mode-0 exit. The compact report omits the routine exit TX/ATT/
+display-ack lines and contains no verified mode-0 completion. Consequently
+exit is unverified; the disconnect does not demonstrate an unsolicited exit
+before the read or explain build 94's A0 rejection. A fresh exact-hash display
+review confirms local mode 0 calls `0x212ac(0)` and cleanup `0x17cfa` before
+constructing its `2C 00` reply. This is consistent with an exit-related
+disconnect, but does not prove a normal BLE shutdown or physical screen reset.
+The full existing on-page log tail and a screen observation are needed before
+changing exit verification semantics.
+
+No A0, A8, B0, wheel setter, firmware image or journal clear occurred. The
+recorded destination remains EU/25 km/h. Do not repeat the same ACK-triggered
+probe or bypass the terminal setting journal. Preserve the retained full log;
+the next causal work is exit/lifecycle and owner/source analysis, not a new
+setting dispatch based on these timings.
+
+## 2026-10-03 thirty-second correction: copy the full retained test session
+
+The owner correctly used the page's Copy report button. Its compact export
+filtered routine exit TX/ATT/acknowledgement lines, so asking for those lines
+through that button could not retrieve them. Build 97 replaces that same
+button with Copy full report; it exports the selected consequential connection
+and subsequent reconnects without routine-line filtering or character
+truncation. It retains the existing session-selection rule and labels the
+header as exported by the current build, rather than claiming old tests ran
+on the newer build. The displayed/session-stored sanitized log is untouched.
+The compact exporter remains available internally. Reloading the same open
+tab restores the retained log from the unchanged storage key; no connection
+or bike test is needed to retrieve the build-96 exit details. No protocol,
+setting eligibility, journal, authentication, or firmware behavior changed.

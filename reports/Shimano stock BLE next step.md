@@ -1,5 +1,13 @@
 # Match authentication before testing BLE timing
 
+**Physical test update, October 3:** build 96 completed matching authentication
+and mode 5, but the AC write acknowledgement was observed 54.7 ms after motor
+completion and its EU reply followed by 54.9 ms. This does not establish early
+admission or A0 eligibility. Disconnect occurred during the requested exit;
+exit completion and screen behavior remain unverified. The prospective next
+test below has now been run and should not be repeated unchanged. See the
+[latest research correction](../RESEARCH.md).
+
 **This research iteration improves the next experiment, but does not supply a validated stock-firmware US-region solution.** Build 95 omitted the motor authentication that succeeded before build 94's failed A0; prepared build 96 restores that precondition and adds passive, redacted mode-transition observation. The next bike test therefore answers a narrower question with fewer confounds: can an early phone destination read enter the display's queue before the mode-5 completion reaches BLE? The supplied Reddit thread confirms Bluetooth region changes on some EP8 systems, while a newly found E5000 report describes no downgrade through EW-WU111; neither identifies the exact firmware and owner topology needed to explain this bike. Current vendor documents still exclude E5000 D4.5 destination changes through their Bluetooth workflows without preparation. No known-good exact-stock trace emerged from the bounded GitHub search. **The last physical result remains EU and 25 km/h**, and a successful timing probe would still leave A0 acceptance unresolved. ([Physical result and corrected diagnostic](https://github.com/galah92/shimano-webble/blob/main/RESEARCH.md))
 
 ## Reddit establishes Bluetooth success without the missing firmware context
