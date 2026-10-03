@@ -85,6 +85,13 @@ independently cross-checked, but no producer of the display's 91/04 event is
 identified and the candidate is still not bound to this bike. See correction
 40 and `tools/inspect_radio_candidate.py`; do not infer an installable fix.
 
+Follow-up tracing maps a separate radio type-00/status-20-or-21 path through
+display `0x17b30` to setup-guarded topology rearm. The radio candidate has
+explicit producers in stack-event/control paths and a cached-status replay.
+This is not the ordinary type-20/subtype-40 command reply and does not prove
+any event occurred before the physical A0 rejection. The numeric event IDs
+and path limits are in correction 42 and both exact-image verifiers.
+
 **Completion-role correction:** exact display `0x21d2c` handles inbound secure
 requests and returns while a nonzero outbound local-0C request is staged.
 Its own mode-field writes do not prove the display synchronized its state to

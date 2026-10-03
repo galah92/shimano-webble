@@ -5079,3 +5079,43 @@ unchanged. Synthetic tests check no probe/authentication traffic from the
 guided action, including resetting the per-connection probe flag, while the
 archived protocol tests call the function directly. This UI correction is
 not an unlock; no higher assisted-speed result exists.
+
+## 2026-10-03 forty-second correction: trace a separate radio-status rearm, not every ATT reply
+
+The owner's build-100 export repeats cached radio 4.7.1.0 at 17:47 UTC and
+again reads EU/25 km/h and the stock D4.5.0/M4.4.8 pair. That later check
+contains no motor unlock or setting write. No further version test is needed.
+
+Further exact SC-E7000 tracing identifies another radio-to-exit path besides
+91/04. Serial outer type **00** routes to `0x28cb4`, copies the first payload
+byte unchanged, and calls `0x17b30` at `0x28d14`. This callback selects payload
+subtypes **20 or 21** at `0x17b3e`. Its `0x17b64` branch calls the setup getter
+`0x16120` and, only when it returns 1, calls topology rearm `0x1f7b8`.
+That existing state machine can request motor mode 0. The path is distinct
+from outer type **20**, payload **40**, the ordinary command-status route
+through `0x292f0`; identical hex bytes in different fields must not be conflated.
+
+In the version-matching plaintext radio candidate, `0x1d40a` caches and sends
+outer type 00 with one caller-supplied status byte. The stack-event worker
+`0x1e09e` reads the event ID as a u16 and has explicit branches for 10, 11,
+19, 50 and 52. Event 11 can send status 21 at `0x1e17a`; event 19 can send
+status 20 at `0x1e1ae`. State guards can select other outcomes, so neither
+is an unconditional mapping. The control helper `0x1edc0` also has a status-20
+branch at `0x1ede0`. The host's type-00 status query at `0x1e76c` re-emits
+the cached status. These paths narrow possible producers without proving
+their occurrence in the physical experiment.
+
+Nordic's [historical SDK event documentation](https://developer.nordicsemi.com/nRF5_SDK/nRF51_SDK_v4.x.x/doc/html/group__nrf51__evt__timeout__encoding.html)
+labels event 19 as GAP timeout. Newer stack enums assign different values,
+so this is supporting context, not an exact resident-SoftDevice binding.
+The verified machine-code claims above deliberately retain numeric event IDs.
+Do not rename the status route as an ordinary ATT acknowledgement or infer
+that changing write timing will suppress it. No BLE-surfaced log records
+these internal headers; the new route is not a measured explanation of A0/3A.
+
+Both exact-image verifiers now pin the status constructors, display callback
+selection, setup guard and rearm call graph. Exact stock passes; each verifier
+rejects truncated, appended, altered and empty inputs. The five synthetic
+radio parser/dispatch tests still pass. No firmware bytes, private captures,
+passkeys or serials were added to Git. The public app stays build 100; no
+setting retry, journal reset, firmware transfer or new live test is enabled.

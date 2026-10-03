@@ -69,6 +69,17 @@ def inspect(data):
         raise ValueError("Lifecycle event dispatch mismatch")
     if routes[0x20] != 0x28DCC or routes[0x10] != 0x28D1A:
         raise ValueError("Separate data-event paths mismatch")
+    if routes[0] != 0x28CB4:
+        raise ValueError("Radio status-event route mismatch")
+    for address, signature, label in [
+        (0x28CB4, "ac480678a649ce75", "type-zero status payload copied unchanged"),
+        (0x28D12, "3000eef70cff", "status subtype forwarded to callback"),
+        (0x17B3E, "2000103803d0103801280cd947e0", "callback selects subtypes 20 and 21"),
+        (0x17B64, "fef7dcfa012803d107f024fe04202872", "setup-guarded status topology rearm"),
+    ]:
+        require_bytes(data, address, bytes.fromhex(signature), label)
+    if thumb_bl_targets(data, 0x17B64, 0x17B74) != [0x16120, 0x1F7B8]:
+        raise ValueError("Status rearm call graph mismatch")
     if struct.unpack_from("<I", data, file_offset(0x276E4))[0] != 0x28A8D:
         raise ValueError("Serial receive callback literal mismatch")
     if struct.unpack_from("<I", data, file_offset(0x15D7C + (0x84 >> 1) * 4))[0] != 0x204E1:
@@ -88,6 +99,12 @@ def inspect(data):
         "rearm_condition": "0x18348 calls 0x1f7b8 only when setup getter 0x16120 returns 1",
         "separate_data_routes": {"0x10": hex(routes[0x10]), "0x20": hex(routes[0x20])},
         "dispatch_inputs_checked": 256,
+        "separate_status_rearm": {
+            "route": "radio type 00 -> 0x28cb4 -> 0x17b30; payload subtype 20 or 21",
+            "condition": "0x17b64 calls 0x1f7b8 only when setup getter 0x16120 returns 1",
+            "distinction": "not ordinary type-20/subtype-40 command status or event 91/04",
+            "live_occurrence": "not surfaced in the owner's BLE logs",
+        },
         "radio_component_version_read": {
             "display_packet": "00 13 01 84 01",
             "reply_prefix": "33 01 86",

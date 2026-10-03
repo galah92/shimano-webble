@@ -97,6 +97,12 @@ def inspect(data):
     # Standard command-status replies instead use type 20, length 4, subtype 40.
     require_bytes(memory, 0x1D47E, "4024147051709370")
     require_bytes(memory, 0x1D49C, "202204216846")
+    # Distinct link-status sender: type 00, one cached status byte.
+    require_bytes(memory, 0x1D40A, "80b501000748c172002201210b3000f011f9")
+    require_bytes(memory, 0x1E0AC, "3888102809d0112832d0192868d0502800d1")
+    require_bytes(memory, 0x1E17A, "2120fff745f9")
+    require_bytes(memory, 0x1E1AE, "2020fff72bf9")
+    require_bytes(memory, 0x1EDE0, "2020fef712fb")
     routes = {value: serial_receive_route(memory, value) for value in range(256)}
     if any(routes[value] != target for value, target in {
             0x10: 0x1E8CA, 0x11: 0x1E8DE, 0x80: 0x1EC24,
@@ -114,6 +120,9 @@ def inspect(data):
             "sender": "0x1d63e copies the supplied type unchanged and adds XOR checksum",
             "located_91_reply": "0x1ec64 constructs type 91, length 1, payload F0",
             "ordinary_command_status": "0x1d474 constructs type 20, length 4, subtype 40",
+            "link_status": "0x1d40a caches and sends type 00, length 1, caller's status byte",
+            "status_21_origin": "stack event 11 in 0x1e09e can send 21 at 0x1e17a",
+            "status_20_origins": "stack event 19 can send 20 at 0x1e1ae; 0x1edc0 can send 20 at 0x1ede0",
         },
         "validation": "catalog candidate and HEX integrity only; exact-bike radio binding unverified",
         "installation": "not supported; no image output or bike communication",
