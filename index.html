@@ -83,7 +83,7 @@
 <div>Drive unit</div><div id="drive">Not tested</div>
 <div>Protected access</div><div id="protected">Not tested</div>
 </div>
-<div class="row"><button id="copyLog">Copy full report</button><button id="clearLog">Clear log</button></div>
+<div class="row"><button id="copyLog">Copy diagnostic report</button><button id="clearLog">Clear log</button></div>
 <div class="muted" id="exportStatus" role="status"></div>
 <div class="card"><strong>Log</strong><div id="log"></div></div>
 <details><summary>Manual protocol controls</summary>
@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-10-03.97';
+const BUILD = '2026-10-03.98';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -4109,6 +4109,27 @@ function exportFullLog() {
     `BEGIN LOG (${snapshot.length} JavaScript characters)\n` + snapshot +
     `END SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
 }
+function exportDiagnosticLog() {
+  const lines=reportSessionLog().split('\n').filter(Boolean);
+  const probeIndex=lines.findLastIndex(line=>line.includes('--- early display-queue timing probe start;'));
+  const baseline=probeIndex<0?[]:lines.slice(0,probeIndex).filter(line=>
+    /(?:Connected;|Ready\. Build |--- information batch start;|PC-mode application slot observed|Native [DM] firmware:|Drive-unit information:|Current destination:|Current maximum assist speed:|US-profile maximum assist speed:)/.test(line));
+  const diagnostic=probeIndex<0?lines:lines.slice(probeIndex);
+  // Keep the entire diagnostic when it fits, including routine exit TX/ATT/RX.
+  // On unusually large logs prefer its newest whole lines over setup history.
+  const selected=[];let size=baseline.join('\n').length+1;
+  for(let i=diagnostic.length-1;i>=0;i--) {
+    const line=diagnostic[i].length>6000?'[Oversized line: ending shown] '+diagnostic[i].slice(-5900):diagnostic[i];
+    if(size+line.length+1>7000)break;
+    selected.unshift(line);size+=line.length+1;
+  }
+  const snapshot=[...baseline,...selected].join('\n')+'\n';
+  const omitted=diagnostic.length-selected.length;
+  return `SHIMANO LOG — diagnostic report — exported by build ${BUILD}\n` +
+    `Earlier setup is omitted; ${omitted} older diagnostic lines omitted. Routine exit details are retained. Full log remains on the page.\n` +
+    `BEGIN LOG (${snapshot.length} JavaScript characters)\n` + snapshot +
+    `END SHIMANO LOG (${snapshot.length} JavaScript characters)\n`;
+}
 function exportLog() {
   let snapshot = reportSessionLog();
   const lines = snapshot.split('\n').filter(Boolean);
@@ -4577,10 +4598,10 @@ $('passkey').oninput=()=>{guidedStatusOverride='';controls();};
 
 
 $('copyLog').onclick = async () => {
-  const snapshot = exportFullLog();
+  const snapshot = exportDiagnosticLog();
   try {
     await navigator.clipboard.writeText(snapshot);
-    $('exportStatus').textContent = `Copied full session report (${snapshot.length.toLocaleString()} characters), including setup and exit details.`;
+    $('exportStatus').textContent = `Copied diagnostic report (${snapshot.length.toLocaleString()} characters), including exit details. Full log remains below.`;
   } catch (e) {
     $('exportStatus').textContent = 'Copy failed. Select and copy the log text below.';
   }

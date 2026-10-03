@@ -172,10 +172,12 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The page source is now build `2026-10-03.97`. Build 97 changes only report
-copying: the same button is now **Copy full report**, preserving routine exit
-lines from the selected retained test session. Reload the same tab to retrieve
-the previous result; do not rerun the bike test for reporting. Verify the Pages deployment and
+The page source is now build `2026-10-03.98`. Build 98 changes only report
+copying: the same **Copy diagnostic report** button includes the latest full
+queue-probe section and bike summary, including routine exit lines, within a
+chat-sized export. Earlier setup is omitted; the full log remains stored.
+Reload the same tab to retrieve the previous result; do not rerun the bike
+test for reporting. Verify the Pages deployment and
 served build before a live instruction. Build 91 was published; build 92
 reduced the normal interface to one contextual
 button. **Connect and check bike** remains read-only and reports both

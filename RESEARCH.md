@@ -4769,3 +4769,16 @@ The compact exporter remains available internally. Reloading the same open
 tab restores the retained log from the unchanged storage key; no connection
 or bike test is needed to retrieve the build-96 exit details. No protocol,
 setting eligibility, journal, authentication, or firmware behavior changed.
+
+## 2026-10-03 thirty-third correction: preserve exit details within chat size
+
+The owner's build-97 full export declares 22,935 characters but the received
+message ends at the motor challenge, before the diagnostic and exit. Build 98
+changes the same copy button to Copy diagnostic report. For the queue probe,
+it retains the baseline summary and every subsequent diagnostic line, including
+routine exit TX/ATT/RX, when that section fits. Unusually large diagnostics
+retain their newest whole lines within 7,000 body characters and explicitly
+count omitted older diagnostic lines. The unchanged full stored log remains
+available. This resolves the compact report's missing exit details and the
+full-session export's oversized setup history without another bike run.
+Protocol, journals and setting eligibility remain unchanged.

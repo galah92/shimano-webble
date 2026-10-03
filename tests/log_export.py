@@ -28,13 +28,15 @@ class LogExportTests(unittest.TestCase):
         source = '[old] Connected; test\n' + ('Diagnostic line — 0123456789\n' * 15000) + 'LAST RESULT\n'
         self.set_log(source)
         compact = self.page.evaluate('exportLog()')
-        expected = self.page.evaluate('exportFullLog()')
+        full = self.page.evaluate('exportFullLog()')
+        expected = self.page.evaluate('exportDiagnosticLog()')
         self.page.locator('#copyLog').click()
         self.assertEqual(self.page.evaluate('window.copied'), expected)
         self.assertLess(len(compact), 8000)
+        self.assertLess(len(expected), 8000)
         self.assertIn("LAST RESULT", expected)
         self.assertIn("omitted", compact)
-        self.assertIn(source, expected)
+        self.assertIn(source, full)
         self.assertEqual(self.page.locator("#log").inner_text(), source)
         self.assertTrue(expected.rstrip().endswith('JavaScript characters)'))
 
@@ -75,22 +77,25 @@ class LogExportTests(unittest.TestCase):
         self.assertNotIn('QUERY TRAFFIC',copied)
         self.assertIn('END SHIMANO LOG',copied)
 
-    def test_full_copy_keeps_exit_details_after_reload_without_a_bike_run(self):
-        source='[one] Connected; test\n[one] Ready. Build 2026-10-03.96.\n'
-        source+='[one] --- early display-queue timing probe start; AC read only ---\n'
-        source+='[one] TX 2AFA SC-E7000-owned PC mode exit: 00 0C 00\n'
-        source+='[one] ATT write completed: SC-E7000-owned PC mode exit\n'
-        source+='[one] RX SC-E7000-owned PC mode exit display acknowledgement via 2AF9: 2C 00\n'
-        source+='[one] Disconnected\n'
+    def test_diagnostic_copy_keeps_exit_after_large_setup_and_reload_without_a_bike_run(self):
+        baseline='[one] Connected; test\n[one] Ready. Build 2026-10-03.96.\n[one] Current destination: EU\n'
+        diagnostic='[one] --- early display-queue timing probe start; AC read only ---\n'
+        diagnostic+='[one] TX 2AFA SC-E7000-owned PC mode exit: 00 0C 00\n'
+        diagnostic+='[one] ATT write completed: SC-E7000-owned PC mode exit\n'
+        diagnostic+='[one] RX SC-E7000-owned PC mode exit display acknowledgement via 2AF9: 2C 00\n'
+        diagnostic+='[one] Disconnected\n'
+        source=baseline+'[one] QUERY TRAFFIC setup noise\n'*3000+diagnostic
         self.page.evaluate('text => { document.getElementById("log").textContent=text; log("Retained result"); }',source)
         self.page.reload()
         self.page.locator('summary').filter(has_text='Technical details and log').click()
         self.page.locator('#copyLog').click()
         copied=self.page.evaluate('window.copied')
-        self.assertIn(source,copied)
-        self.assertIn('full session report',copied)
-        self.assertIn('exported by build 2026-10-03.97',copied)
-        self.assertIn('Copied full session report',self.page.locator('#exportStatus').inner_text())
+        self.assertIn(baseline,copied)
+        self.assertIn(diagnostic,copied)
+        self.assertNotIn('QUERY TRAFFIC setup noise',copied)
+        self.assertLess(len(copied),8000)
+        self.assertIn('exported by build 2026-10-03.98',copied)
+        self.assertIn('Copied diagnostic report',self.page.locator('#exportStatus').inner_text())
 
     def test_report_preserves_pc_mode_route_and_echo_evidence(self):
         source='[one] Connected; test\n'

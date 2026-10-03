@@ -135,6 +135,9 @@ the same probe; preserve the full on-page exit tail and screen observation.
 Build 97 changes only report export: the existing Copy full report button
 includes the retained selected session's routine exit lines. The storage key
 is unchanged; a same-tab reload can retrieve build 96 without a new bike run.
+Build 98 replaces that same button with Copy diagnostic report: latest queue
+probe lines plus baseline, keeping routine exit TX/ATT/RX within a chat-sized
+export. The full log and journal are untouched. No new bike run is required.
 The exact stock D4.5.0 image retains the category-35 wheel getter and a
 nonzero-PC-mode, source-gated persistent setter. This corrects the assumption
 that the handler was removed after D4.3; it does not establish BLE acceptance
