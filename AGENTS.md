@@ -157,3 +157,9 @@ Build 99 adds one cached display radio-component version getter to the normal
 bike check (`00 13 01 84 01`, reply `33 01 86`, error `33 01 87`). It is not a
 firmware transfer and never retries. Obtain this report once to narrow offline
 radio analysis; do not repeat the inconclusive timing probe or the US attempt.
+
+Physical build 99 now reports cached radio 4.7.1.0 (`33 01 86 47 01 00`),
+matching the plaintext candidate's version but not proving an exact image
+binding. The repeated timing probe remained inconclusive. Build 100 removes
+its guided UI caller; after the terminal non-US record the button is disabled
+as Bike report ready. No further bike test is requested for the radio version.

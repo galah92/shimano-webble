@@ -186,7 +186,7 @@ class RegionWriteTests(unittest.TestCase):
 
     def test_queue_probe_enqueues_only_read_before_mode_completion(self):
         self.prepare_queue_probe()
-        self.assertEqual(self.page.evaluate('currentGuidedWorkflowPlan().action'), 'probe-queue')
+        self.assertEqual(self.page.evaluate('currentGuidedWorkflowPlan().action'), 'blocked')
         self.page.evaluate('probeEarlyDisplayQueue(session)')
         self.assertEqual(self.page.evaluate('queueProbeWrites'),
                          [[0,12,5],[0,22,172,1],[0,12,0]])
@@ -228,10 +228,10 @@ class RegionWriteTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
         self.assertFalse(self.errors)
 
-    def test_guided_queue_probe_matches_motor_authentication_precondition(self):
+    def test_archived_queue_probe_matches_motor_authentication_precondition(self):
         self.prepare_queue_probe(unauthenticated=True)
         self.page.evaluate('window.confirm=()=>true')
-        self.page.locator('#guidedUS').click()
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
         self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
         self.assertEqual(self.page.evaluate('queueProbeAuthenticationCalls'), 1)
         self.assertEqual(self.page.evaluate('queueProbeWrites'),
@@ -241,7 +241,7 @@ class RegionWriteTests(unittest.TestCase):
     def test_failed_probe_authentication_sends_no_mode_or_read(self):
         self.prepare_queue_probe(unauthenticated=True, authentication_failure=True)
         self.page.evaluate('window.confirm=()=>true')
-        self.page.locator('#guidedUS').click()
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
         self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
         self.assertEqual(self.page.evaluate('queueProbeAuthenticationCalls'), 1)
         self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
@@ -281,7 +281,7 @@ class RegionWriteTests(unittest.TestCase):
           };
           window.confirm=()=>true;
         }''')
-        self.page.locator('#guidedUS').click()
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
         self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
         self.assertEqual(self.page.evaluate('probeAuthPackets'),
                          [[0,1,0x3c],[0,0x16,0xd8]]+[[0,0x16,0xe0]]*3+[[0,0x16,0xe8]])
@@ -303,15 +303,18 @@ class RegionWriteTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate('queueProbeWrites'),
                          [[0,12,5],[0,22,172,1],[0,12,0]])
 
-    def test_guided_button_runs_the_read_only_queue_probe(self):
+    def test_guided_button_retires_the_inconclusive_queue_probe(self):
         self.prepare_queue_probe()
         self.page.evaluate('window.confirm=()=>true')
-        self.assertEqual(self.page.locator('#guidedUS').inner_text(), 'Check bus timing')
-        self.page.locator('#guidedUS').click()
-        self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
-        self.assertEqual(self.page.evaluate('queueProbeWrites'),
-                         [[0,12,5],[0,22,172,1],[0,12,0]])
+        self.assertEqual(self.page.locator('#guidedUS').inner_text(), 'Bike report ready')
         self.assertTrue(self.page.locator('#guidedUS').is_disabled())
+        self.page.evaluate('runGuidedWorkflow()')
+        self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
+        self.assertEqual(self.page.evaluate('queueProbeAuthenticationCalls'), 0)
+        self.assertIn('timing experiment is retired', self.page.locator('#guidedUSStatus').inner_text())
+        self.page.evaluate('session.queueProbeAttempted=false;controls();runGuidedWorkflow()')
+        self.assertEqual(self.page.evaluate('currentGuidedWorkflowPlan().action'), 'blocked')
+        self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
         self.assertFalse(self.errors)
 
     def test_all_state_gates(self):

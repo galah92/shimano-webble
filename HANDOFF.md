@@ -59,15 +59,24 @@ and display `2C 00` before disconnect, 92 ms after that acknowledgement. The
 display accepted exit; motor mode-0 completion remains unverified. The retained
 diagnostic is complete, so do not request more copies or repeat the bike test.
 
-**Build 99 next discriminator:** the normal bike check adds one display-local
+**Build 99 radio result (2026-10-03 17:06 UTC):** the normal bike check adds one display-local
 `00 13 01 84 01` cached radio-component version read after the motor reads.
 Exact SC-E7000 4.1.0 tracing shows this copies cached metadata, without sending
 a UART request or firmware data. It reports errors/short replies without a
-retry. This may narrow the separate radio-image investigation; no live radio
-version has been obtained yet and a version alone does not prove image-family
-compatibility. Ask for one normal bike check and its report, then stop; do not
-press Check bus timing or repeat the setting attempt. No new UI button,
+retry. The owner obtained `33 01 86 47 01 00`, reporting **4.7.1.0**.
+This matches the plaintext STEPS2 candidate's version, but a version alone
+does not prove image-family or byte-exact compatibility. No further bike
+check is needed for this question. No new UI button,
 firmware transfer, setting path or attempt-journal change was added.
+
+The owner also repeated the old queue probe: AC ATT acknowledgement was
+63.2 ms after mode-5 completion and AE followed by 63.4 ms. It was again
+inconclusive, sent no setting or firmware write, and disconnected during the
+requested exit (101 ms after local exit acknowledgement; motor mode-0
+completion unverified). Build 100 retires the misleading guided timing offer
+after a verified non-US attempt: the disabled button reads **Bike report
+ready**. The historical probe remains only as an offline regression-test
+function, without a UI caller. Do not repeat the probe or clear the journal.
 
 The radio candidate verifier now separates receive routing from reply
 construction: ordinary status uses type 20/subtype 40; the located type-91
@@ -201,7 +210,8 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The page source is now build `2026-10-03.98`. Build 98 changes only report
+The page source is now build `2026-10-03.100`. Build 100 retires the guided
+timing probe; build 99 added the cached radio getter. Build 98 changed report
 copying: the same **Copy diagnostic report** button includes the latest full
 queue-probe section and bike summary, including routine exit lines, within a
 chat-sized export. Earlier setup is omitted; the full log remains stored.
@@ -328,6 +338,7 @@ route. See `docs/evidence/d5000-boot-patch-analysis.md`.
 | Wireless/display endpoint | SC-E7000 (`SCE7000`) after two session-auth acknowledgements and `2AFF: FF 00` | User logs, `RESEARCH.md` |
 | Drive-unit identity | E50X0 family (exact casing variant not established) | Model read `00 01 1E 22 00` |
 | Native motor firmware | D `4.5.0.0`, M `4.4.8.0` | `84 00/01` reads and `86` replies |
+| Cached radio firmware | `4.7.1.0`; exact image-family/hash not established | Physical build 99, `33 01 86 47 01 00` |
 | OEM/current destination | EU, value `0` | `AC 01` → `AE 01 00`; independently repeated after reconnection |
 | BLE session authentication | Both 2AF3 stages acknowledged | `10 01 01`, `10 02 01` |
 | Motor challenge-response | Completion marker observed | `00 16 E2 FF FF` |

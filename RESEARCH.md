@@ -5045,3 +5045,37 @@ served HTML SHA-256 matched the local index. The cached-version report remains
 the next bike-side discriminator, not another timing or setting experiment.
 The app, motor settings, terminal attempt journal and live firmware were
 unchanged during this follow-up. EU/25 km/h remains the last verified state.
+
+## 2026-10-03 forty-first correction: physical radio version obtained; retire the repeated timing prompt
+
+The owner's complete diagnostic exported by build 99 at 17:06 UTC successfully
+read display-local `00 13 01 84 01`: reply `33 01 86 47 01 00` reports cached
+radio firmware **4.7.1.0**. This is a physical result, not the earlier synthetic
+fixture. It matches the version of the plaintext STEPS2-ap 4.7.1 candidate
+and narrows the offline radio branch. It does not prove identical image bytes
+or hardware family, identify the producer of event 91/04, or justify flashing.
+The motor still reads D4.5.0.0/M4.4.8.0, EU/25 km/h, with a US ceiling of
+32.18 km/h. No new radio-version bike test is needed now.
+
+The same report also contains a repeated queue probe at 17:07 UTC. Motor
+authentication/E8-EA and display-owned mode 5 completed. AC was called 4.7 ms
+after local acknowledgement; mode completion followed 9.3 ms after AC's
+send-call. AC ATT acknowledgement was **63.2 ms after** motor completion,
+and AE/EU followed by 63.4 ms. The early-admission condition again was not
+established. Exit `00 0C 00` received ATT completion and local `2C 00`;
+disconnect followed 101 ms after that acknowledgement. No motor mode-0
+completion was verified. No A0/A8/B0, firmware transfer or journal change
+was sent in this probe. This does not measure sustained mode 5 or explain
+the build-94 A0 rejection.
+
+The UI was still offering Check bus timing after every fresh connection with
+the terminal non-US attempt, despite instructions not to repeat it. Build 100
+removes that guided action and its confirmation/caller. After the ordinary
+check, that recorded state now shows disabled **Bike report ready**, with a
+copy-report instruction and an explicit retired-timing notice. The historical
+function is retained only for offline regression tests; no visible/manual UI
+invokes it. The same durable setting journal and fresh ordinary reads remain
+unchanged. Synthetic tests check no probe/authentication traffic from the
+guided action, including resetting the per-connection probe flag, while the
+archived protocol tests call the function directly. This UI correction is
+not an unlock; no higher assisted-speed result exists.

@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-10-03.99';
+const BUILD = '2026-10-03.100';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2516,11 +2516,7 @@ function currentGuidedWorkflowPlan() {
 
   if(session.currentDestination===0) {
     if(commandRecord?.verified)
-      return commandRecord.outcome==='not-us'&&session.directWriteEligible&&session.motorEligible
-        ? session.queueProbeAttempted
-          ? {action:'blocked',label:'Timing report ready',status:'The read-only queue probe has run in this connection. Copy its report; the US write remains blocked.'}
-          : {action:'probe-queue',label:'Check bus timing',status:'EU persisted after the recorded attempt. This diagnostic authenticates the motor, checks timing with one destination read, records any reported mode change, then exits test mode. It changes no stored setting.'}
-        : {action:'blocked',label:'US write will not repeat',status:'EU persisted after the recorded US attempt. The at-most-once write is blocked; open Technical details and copy the report.'};
+      return {action:'blocked',label:'Bike report ready',status:'EU persisted after the recorded US attempt. Copy the report under Technical details. The US write remains blocked and the inconclusive timing experiment is retired; no more bike test is needed now.'};
     if(probeRecord)
       return {action:'blocked',label:'Review stored state',status:'A prior experiment record blocks a new destination write. Open Technical details and copy the report.'};
     if(session.directWriteEligible&&session.motorEligible)
@@ -3699,6 +3695,8 @@ async function exitDisplayPcMode(s) {
   await setDisplayPcMode(s,{mode:0,label:'SC-E7000-owned PC mode exit',timeout:5000});
   log('SC-E7000-owned protected PC mode exited.');
 }
+// Retired from the UI after physical builds 96/99 were inconclusive.
+// Retained only for offline regression tests and historical analysis.
 // Diagnose the display queue without repeating the journaled A0/A8 attempt.
 // AC is the existing read-only destination getter and follows A0's bridge path.
 async function probeEarlyDisplayQueue(s) {
@@ -4075,10 +4073,6 @@ async function runGuidedWorkflow() {
     return continueCommandWorkflow();
   }
   if(plan.action==='set-us'||plan.action==='set-max')return runGuidedMutation(plan.action);
-  if(plan.action==='probe-queue') {
-    if(!window.confirm('This diagnostic authenticates the motor, checks bus timing with one destination read, then exits test mode. It does not change region, speed or firmware. Continue?'))return;
-    return probeEarlyDisplayQueue(session);
-  }
   if(plan.action==='verify-us'||plan.action==='verify-max') {
     if(!window.confirm('Confirm that you fully turned the bike off and back on. Verification is read-only and will not repeat either write.'))return;
     if(!session?.verified&&!rememberWorkflowPasskey()) {
