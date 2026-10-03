@@ -138,6 +138,10 @@ is unchanged; a same-tab reload can retrieve build 96 without a new bike run.
 Build 98 replaces that same button with Copy diagnostic report: latest queue
 probe lines plus baseline, keeping routine exit TX/ATT/RX within a chat-sized
 export. The full log and journal are untouched. No new bike run is required.
+The recovered complete diagnostic confirms exit ATT completion and display
+`2C 00`, followed by disconnect 92 ms later. Display exit was accepted; motor
+mode-0 completion remains unverified. No further copy/repeat is needed. The
+exit error is not evidence of a preceding unsolicited mode transition.
 The exact stock D4.5.0 image retains the category-35 wheel getter and a
 nonzero-PC-mode, source-gated persistent setter. This corrects the assumption
 that the handler was removed after D4.3; it does not establish BLE acceptance
@@ -148,3 +152,8 @@ The last verified destination is EU and no higher-speed result exists. The
 paired BLE downgrade remains the riskier fallback; no image has ever been sent
 to this bike. Keep private passkeys, raw captures, serials, and vendor binaries
 (including display and motor images) out of the public repository.
+
+Build 99 adds one cached display radio-component version getter to the normal
+bike check (`00 13 01 84 01`, reply `33 01 86`, error `33 01 87`). It is not a
+firmware transfer and never retries. Obtain this report once to narrow offline
+radio analysis; do not repeat the inconclusive timing probe or the US attempt.

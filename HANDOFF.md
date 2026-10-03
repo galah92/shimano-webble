@@ -54,6 +54,28 @@ does not establish retained mode 5. Disconnect occurred during the requested
 mode-0 exit, whose completion remains unverified. No setting or firmware write
 was sent. Preserve the full on-page exit tail and screen observation; do not
 repeat this same timing probe or infer A0 eligibility from it.
+The recovered build-98 diagnostic confirms the requested exit's ATT completion
+and display `2C 00` before disconnect, 92 ms after that acknowledgement. The
+display accepted exit; motor mode-0 completion remains unverified. The retained
+diagnostic is complete, so do not request more copies or repeat the bike test.
+
+**Build 99 next discriminator:** the normal bike check adds one display-local
+`00 13 01 84 01` cached radio-component version read after the motor reads.
+Exact SC-E7000 4.1.0 tracing shows this copies cached metadata, without sending
+a UART request or firmware data. It reports errors/short replies without a
+retry. This may narrow the separate radio-image investigation; no live radio
+version has been obtained yet and a version alone does not prove image-family
+compatibility. Ask for one normal bike check and its report, then stop; do not
+press Check bus timing or repeat the setting attempt. No new UI button,
+firmware transfer, setting path or attempt-journal change was added.
+
+**Completion-role correction:** exact display `0x21d2c` handles inbound secure
+requests and returns while a nonzero outbound local-0C request is staged.
+Its own mode-field writes do not prove the display synchronized its state to
+the outbound motor completion. Opcode 12 takes generic forwarding instead.
+Local-0C construction and maintenance disarm remain verified; sustained
+ownership and the later mode loss remain unmeasured. See the thirty-sixth
+correction in `RESEARCH.md` and the updated offline verifier.
 
 The exact D4.5.0 image also retains `35 00`/`35 04` wheel-setting handlers;
 the setter has nonzero-PC-mode and source-state gates and persists record
@@ -519,6 +541,12 @@ evidence of a region-setting menu (`RESEARCH.md`, latest section).
 - [`tests/`](tests): synthetic browser/BLE and firmware protocol regression
   tests. They verify software guards and parsing, not acceptance by the bike.
 - [`tools/`](tools): offline firmware inspection/planning utilities.
+  `inspect_display_source_selector.py` checks the exact SC-E7000 bit-0x40
+  transport reset and separate interface-state path; it does not establish
+  motor mode loss or authorize retaining a temporary selector as a fix.
+  `inspect_display_lifecycle.py` maps all 256 internal serial-event types;
+  0x91 subtype 4 can re-arm mode exit, but its meaning and live occurrence
+  are unverified and ordinary data takes separate immediate paths.
   `inspect_motor_destination.py` verifies the exact D4.1/D4.3/D4.5 A0/A8 gate
   and PC-mode separation and cold-start-zero invariants without storing vendor
   images. `inspect_display_pc_mode.py` verifies the current display's owned-mode

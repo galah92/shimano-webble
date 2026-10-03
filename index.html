@@ -101,7 +101,7 @@
 </details>
 <script>
 'use strict';
-const BUILD = '2026-10-03.98';
+const BUILD = '2026-10-03.99';
 // BEGIN FIRMWARE PACKET ENCODERS
 // C0041b7.Q1/M1 and C0776xk.j1/M0. Explicit sequence only: the transport
 // scheduler must account for queries and retries. These functions never send.
@@ -2909,6 +2909,12 @@ const INFO_QUERIES = [
   ...[0, 1].map(ic => ({name: `Native ${ic ? 'M' : 'D'} firmware`, tx: '2afe', rx: '2afd',
     packet: [0, 1, 0x84, ic], prefix: [0, 1, 0x86], errorPrefix: [0, 1, 0x87],
     fieldBytes: 6, minLength: 6, native: true})),
+  // Exact SC-E7000 4.1.0: 01/84 -> 0x204e0 -> 0x19780(1)
+  // -> 0x1819e -> 0x283cc copies cached radio version only. No radio update.
+  // Last and on a separate reply route from D/M, so it cannot satisfy their reads.
+  {name: 'Display radio firmware', tx: '2afa', rx: '2af9', packet: [0,0x13,1,0x84,1],
+    prefix: [0x33,1,0x86], errorPrefix: [0x33,1,0x87],
+    fieldBytes: 6, minLength: 6, native: true, radioVersion: true},
 ];
 function queryInfo(s, query) {
   assertCurrent(s);
@@ -3032,7 +3038,7 @@ async function identifyDrive() {
   const results = [];
   const observers = [];
   const traffic = {};
-  log(`--- information batch start; build ${BUILD}; eleven reads plus ten setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
+  log(`--- information batch start; build ${BUILD}; ${INFO_QUERIES.filter(q=>!q.setup).length} reads plus ${INFO_QUERIES.filter(q=>q.setup).length} setup commands; testing eTuning connection states 34–40; US target = 1 ---`);
   try {
     for (const short of ['2af9', '2afa', '2afb', '2afd', '2afe']) {
       if (!s.chars[short]) s.chars[short] = await s.service.getCharacteristic(UUID(short));
@@ -3081,7 +3087,7 @@ async function identifyDrive() {
           break;
         }
         const f = result.fields;
-        log(`${query.name}: ${f[3] >> 4}.${f[3] & 15}.${f[4]}.${f[5]} (native component read; update compatibility unverified)`);
+        log(`${query.name}: ${f[3] >> 4}.${f[3] & 15}.${f[4]}.${f[5]} (${query.radioVersion?'cached radio component read; exact image binding unverified':'native component read; update compatibility unverified'})`);
       }
       if (result.alternate) {
         // No slot identifier: avoid attributing a delayed AF/3A to the next read.
@@ -4113,7 +4119,7 @@ function exportDiagnosticLog() {
   const lines=reportSessionLog().split('\n').filter(Boolean);
   const probeIndex=lines.findLastIndex(line=>line.includes('--- early display-queue timing probe start;'));
   const baseline=probeIndex<0?[]:lines.slice(0,probeIndex).filter(line=>
-    /(?:Connected;|Ready\. Build |--- information batch start;|PC-mode application slot observed|Native [DM] firmware:|Drive-unit information:|Current destination:|Current maximum assist speed:|US-profile maximum assist speed:)/.test(line));
+    /(?:Connected;|Ready\. Build |--- information batch start;|PC-mode application slot observed|Native [DM] firmware:|Display radio firmware:|Drive-unit information:|Current destination:|Current maximum assist speed:|US-profile maximum assist speed:)/.test(line));
   const diagnostic=probeIndex<0?lines:lines.slice(probeIndex);
   // Keep the entire diagnostic when it fits, including routine exit TX/ATT/RX.
   // On unusually large logs prefer its newest whole lines over setup history.

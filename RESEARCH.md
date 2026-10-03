@@ -4782,3 +4782,225 @@ count omitted older diagnostic lines. The unchanged full stored log remains
 available. This resolves the compact report's missing exit details and the
 full-session export's oversized setup history without another bike run.
 Protocol, journals and setting eligibility remain unchanged.
+
+## 2026-10-03 thirty-fourth correction: retained diagnostic confirms display exit acceptance
+
+The build-98 export contains the END LOG marker and reports zero omitted older
+diagnostic lines. It recovers the entire retained build-96 probe and ending;
+no further log-copy or repeated bike action is needed. The earlier visible
+build-97 message ending at a challenge fragment was insufficient to assert
+why the paste ended. A log can legitimately stop on disconnect; it should not
+be inferred incomplete merely because the expected motor completion is absent.
+
+The newly visible exit sequence is exact: at 10:10:45.565 UTC the page sent
+display-local `00 0C 00`; ATT completion followed at .631 and display `2C 00`
+at .637. Disconnection followed at .729, 92 ms after the display acknowledgement.
+Thus the display accepted the requested exit. The missing motor
+`00 32 12 00 0D` means motor mode-0 completion remains unverified. The app's
+failure message reflects that stricter two-acknowledgement requirement; it
+does not mean the display rejected exit, and the disconnect is not evidence
+of a preceding unsolicited mode change during the AC read. Exact display
+cleanup before its local acknowledgement is consistent with exit-related
+shutdown, but this trace does not prove physical screen restart or every
+motor-side state transition. Do not relax the verification gate on that basis.
+
+Authentication, requested mode 5, EU read, and the previously recorded negative
+ATT timing are unchanged. Early protected-setting admission is still
+inconclusive, and no A0/A8/B0/firmware/journal mutation occurred. Park the
+ACK-triggered setting candidate until offline source/owner/routing analysis
+supplies a materially different causal mechanism or a known-good trace.
+
+One bounded offline follow-up is the display-local source selector, separate
+from protected PC mode. The complete setup reports `24 CD` after `03 4B` and
+`24 8D` after restoring `03 00`. Exact display dispatcher `0x161dc` routes
+command 03 to `0x234ee`/`0x23508`; that setter stores request bits 0x40 and
+0x20 separately from its low-five-bit selector. Getter `0x235f0` builds the
+0xC0 status form when the 0x40 flag is set, otherwise the 0x80 form using a
+different selector field. This confirms a distinct setup/routing context
+change, not an observed motor mode-5 loss. Its helpers `0x21276` and `0x1f9c6`
+and the downstream request-target mapping need to be traced before treating
+that distinction as an A0 cause or preparing any new live command. The
+current evidence does not establish that retaining the 0x40 flag would fix
+the rejection.
+
+## 2026-10-03 thirty-fifth correction: selector flag resets transport, not a motor-mode getter
+
+The exact SC-E7000 4.1.0 source-selector follow-up now traces the previously
+unresolved helpers. `0x21276` stores its argument at `0x20000218` and calls
+`0x2bcfc`. That function writes the argument to bus state `0x2000000c+6`,
+then resets queue/formatter state through `0x2d5ec`, `0x2d99c`, and `0x2de74`.
+Thus changing request bit 0x40 has a real transport side effect; it is not
+merely an alternative status display. It does not itself establish the
+motor's current protected PC mode or explain a later A0 rejection.
+
+`0x1f9c6` separately stores requested interface state at `0x200006e7+6`:
+2 when bit 0x20 is clear, 3 when set. The lifecycle worker `0x1faaa` compares
+that requested state with current state at +5. Only when different does it
+reset transport through `0x2bf22` and initialize interface/DU connection state
+through `0x22282` and `0x21a76`. Both `03 4B` and `03 00` have bit 0x20 clear;
+their distinction is the bit-0x40 transport flag, not requesting different
+interface states 2 versus 3. The actual low-five-bit selector can be normalized
+from the already discovered automatic selector; the request's literal 0x0B
+must not be treated as the returned motor/application slot 0x0D.
+
+The earlier inspected eTuning connection state machine also restores
+`03 00 / 06 00` before normal operation (builds 61–63 correction above).
+That earlier client result has not been independently re-decompiled in this
+iteration. It is a reason against promoting temporary selector retention to
+a fix, not a substitute for a known-good exact-bike trace. The ordinary bus
+full-copy formatter still copies all command bytes unchanged; this follow-up
+has found no A0-specific rewrite or demonstrated target-byte change.
+
+`tools/inspect_display_source_selector.py` now verifies the exact image hash,
+helper signatures, RAM literals and bounded call graphs without printing
+secure words or writing an image. The stock-image check passes; altered and
+wrong-size input fail closed. This is offline causal narrowing, not bike
+acceptance. No live selector test, A0/A8/B0 retry, journal clear, UI change or
+firmware transfer is enabled. The complete build-96 diagnostic needs no
+further copy. Destination remains EU/25 km/h; stock-BLE success is unresolved.
+
+## 2026-10-03 thirty-sixth correction: separate inbound display role from outbound motor completion
+
+A reachability check corrects the earlier completion-path rationale. The
+state writes in display handler `0x21d2c` are real, but the claim that this
+handler updates the display's active mode before reporting an outbound local
+`0C 05` completion was not established. At `0x212b6`, the local request builder
+stores the requested mode in `0x20003100+3`. Both inbound category-32 request
+handler `0x21c80` and secure handler `0x21d2c` immediately return while that
+byte is nonzero. The latter's five-word comparisons and own active-mode writes
+therefore belong to accepting an inbound request when the display is not
+issuing one, not to proving it adopted the outbound motor's accepted mode.
+
+The bus dispatcher at `0x2161c` uses opcode shifted right by one. Exact table
+`0x21844` maps opcode `10` to `0x21c80`, opcode `30` to `0x21d2c`, but opcode
+`12` to generic forwarding handler `0x20320`, which calls `0x19184` under its
+connection-state guard. Motor D4.5.0's separately decompiled secure handler
+`0x27430` promotes its own active mode before sending opcode 12; it echoes
+secure words only in mode 1, not mode 4/5. These distinct roles resolve the
+apparent display/motor completion-handler overlap. They do not demonstrate
+that the recorded opcode-12 reply was fabricated, or that motor mode 5 never
+completed. Raw bus-origin metadata is absent from the BLE report.
+
+The corrected interpretation is narrower: local `0C 05` makes the display
+queue the motor request and secure words and disarms periodic maintenance;
+it does not, from the previously cited inbound handler, prove synchronization
+of the display's own active-mode byte to the motor's outbound mode. Do not
+infer sustained ownership from that state-write excerpt. The physical opcode
+12 is still consistent with motor acceptance, while subsequent A0 rejection
+and the missing live state transition remain unexplained.
+
+The lifecycle re-arm calls at `0x17820`, `0x178a6`, `0x17b6c`, and `0x18352`
+are each guarded by the connection/setup flag getter `0x16120`. Its setter
+`0x16110` has only the located direct caller `0x23598` in command-03 setup;
+its clearer `0x16118` has only caller `0x1f790` in cleanup. One re-arm caller,
+`0x18348`, is reached from `0x28e70` when the external-event buffer's first byte
+is 4. This is a concrete event path, not proof it occurred during either bike
+test. The upstream event producer and role-state writers need further tracing
+before proposing a distinct live diagnostic. Do not disable setup or lifecycle
+cleanup based only on this static path.
+
+`inspect_display_pc_mode.py` now pins the role guards and dispatch mapping and
+removes its unsupported outbound-state-update conclusion. The historical
+comparison tool also labels its state-write signatures as insufficient to
+prove outbound handler reachability. Stock-image verification and fail-closed
+input checks pass. No app, setting journal, selector state or firmware image
+was changed on the bike.
+
+## 2026-10-03 thirty-seventh correction: lifecycle rearm is a separate serial event
+
+The external-event producer is now bounded to the display's serial receive
+callback `0x28a8c`, referenced by pointer `0x276e4` from the byte-input driver.
+The callback receives framed bytes, stores the payload at `0x200029f4`, and
+accepts a completed frame only after an XOR-checksum match at `0x28b04`.
+It sets a pending flag and schedules the worker rather than directly calling
+the PC-mode handler. The worker `0x28bb8` dispatches the outer event type from
+receive state +0x0c. Its cumulative subtraction table must be decoded before
+assigning a type; the payload's first byte alone is not the full event ID.
+
+Exhaustive evaluation of all 256 outer-byte values identifies **0x91**, uniquely,
+as the route to `0x28e58`. Payload subtype 4 then calls `0x18348`, whose setup
+flag guard may call `0x1f7b8` and re-arm the mode-exit machine. The separate
+data paths are outer type `0x10` to `0x28d1a` and `0x20` to `0x28dcc`. Thus this
+specific re-arm is not simply the synchronous raw-data/command-forward branch.
+It remains possible that data processing induces a later separate event.
+The vendor meaning of 0x91 subtype 4 and its radio-side producer have not been
+identified; do not name it a connection-parameter update, restart, or ordinary
+ATT completion without stronger evidence. Neither user's BLE log shows these
+internal serial event headers, so occurrence during build 94 is unproved.
+
+`tools/inspect_display_lifecycle.py` pins the exact stock image, serial-receive
+signatures, checksum path, callback pointer, and subtype guard. Its small
+Thumb-16 dispatch evaluator checks all 256 values; every result agrees with
+an independent Capstone-disassembled evaluation. Exact stock passes and four
+wrong-size/altered inputs fail closed. This is reproducible offline event
+mapping, not a successful setting or a reason to change lifecycle setup.
+No new live probe, app change, firmware transfer or setting retry is enabled.
+
+## 2026-10-03 thirty-eighth correction: obtain separate radio candidates, do not infer protocol from opcode similarity
+
+Targeted public protocol searches did not establish a vendor meaning for
+0x91 subtype 4. Similar bytes in unrelated Bluetooth/XBee/serial protocols
+are not evidence for this display. A useful primary artifact surfaced instead:
+the public eTUBE API catalog lists separate Nordic-named radio applications,
+including `UPDATENRF-STEPS2-ap.4.7.1.hex` and
+`UPDATENRF2-STEPS-ap.4.3.0.hex`. Both were retrieved from Shimano's published
+endpoint using the documented app User-Agent, outside Git, and their sizes
+and MD5 match the catalog. SHA-256 and links are now in `ASSETS.md`.
+
+The first is real plaintext Intel HEX, not the accidental HTML asset described
+in older public discussions. Every record length and checksum validates;
+decoded data occupies 0x1d000–0x27d8a with stack 0x20002fe8 and Thumb entry
+0x27bd5. The second is not ASCII Intel HEX and remains an undecoded container;
+its `.hex` name must not be used to choose a loader or infer architecture.
+Neither is bound to this bike's radio by a live version/component read.
+
+Initial disassembly of the plaintext candidate identifies a serial queue
+builder at `0x1d63e`: it copies the supplied type byte unchanged and constructs
+an XOR checksum. It does not universally OR 0x80 into responses. A located
+explicit 0x91 construction at `0x1ec6a` sends payload F0, not subtype 4.
+These facts prevent falsely identifying the display's 0x91/4 event as the
+generic acknowledgement of outgoing type 0x11 based solely on arithmetic.
+Other computed/tail-called builders and the candidate's receive dispatcher
+remain to be traced; the exact radio-family/version binding is also unresolved.
+
+Display transmit inspection additionally shows local mode-entry setup can
+schedule transport-control work through `0x17cc8` -> `0x18240` -> `0x28498`.
+Its pending bit 4 reaches `0x29584`, which constructs serial type 0x20 with
+subtype 0x4c; no traced direct path emits 0x11/subtype 4 from this setup helper.
+This excludes that specific synchronous request/response shortcut, not every
+later radio lifecycle event. It does not explain the physical A0 rejection.
+
+`inspect_radio_candidate.py` checks the exact first candidate, parses records
+in memory and validates the range/vectors without writing a derived image.
+It rejects wrong candidates and malformed records. Radio analysis is now a
+distinct available offline branch; neither radio candidate nor any other
+firmware was sent to the bike. No UI, setting gate or journal changed.
+
+## 2026-10-03 thirty-ninth correction: read cached radio version instead of repeating timing experiments
+
+The radio candidates remain unbound to this bike. Exact display tracing now
+identifies a small, existing getter that can narrow that gap without downloading
+firmware to the bike. The category-01 dispatch table at `0x15d7c` maps opcode
+`0x84` to `0x204e0`. That handler reads the component selector and calls
+`0x19780`: selector 0 reads the display version, selector 1 calls `0x1819e`
+and `0x283cc` to copy 17 bytes of cached radio metadata. A missing cache produces
+error `0x39`; selectors >=2 produce `0x3a`. The cache copier has no direct BL
+calls. This is a cached component read, not a radio UART request, update entry,
+or motor firmware operation. `inspect_display_lifecycle.py` now pins the
+dispatch pointer, selector/error signature and cache-copy call path.
+
+Build `2026-10-03.99` adds `00 13 01 84 01` on 2AFA as the final ordinary
+information query. Success uses `33 01 86` on 2AF9 and rejection uses
+`33 01 87`; a short or rejected response is not decoded and is never retried.
+It adds no button and changes no authentication, mode handshake, motor setting,
+firmware transfer or durable attempt journal. The diagnostic exporter retains
+the decoded radio-version line. A successful version read alone will not prove
+the radio family or justify installing either candidate.
+
+Targeted browser tests cover the one-read ordering, synthetic valid version,
+rejection and short reply, plus late display-reply isolation and native-read
+failure guards. Diagnostic-export, region-write, compatibility and UI checks
+remain required before publication. Synthetic radio `4.7.1.0` is a fixture,
+not a physical bike result. The next owner step is one normal bike check and
+Copy report, then stop; the old timing probe and terminal US attempt must not
+be repeated. No higher-speed result has been demonstrated.

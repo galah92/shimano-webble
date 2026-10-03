@@ -9,7 +9,7 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.route('https://shimano.test/', lambda route: route.fulfill(body=html, content_type='text/html'))
     page.goto('https://shimano.test/')
-    expect(page.locator('#build')).to_contain_text('2026-10-03.98')
+    expect(page.locator('#build')).to_contain_text(page.evaluate('BUILD'))
     expect(page.locator('#guidedUS')).to_be_visible()
     expect(page.locator('#guidedUSStatus')).to_contain_text('six-digit Shimano passkey')
     expect(page.locator('summary').first).to_have_text('Technical details and log')

@@ -136,6 +136,16 @@ def inspect(data):
     require_bytes(data, 0x21CC2, bytes.fromhex("4748002181736170"), "explicit mode-0 state clear")
     require_bytes(data, 0x21D76, bytes.fromhex("1a4da9730020a0700120a8772078a874"),
                   "successful secure completion state update")
+    require_bytes(data, 0x21D38, bytes.fromhex("2e4ce07800284cd1"),
+                  "inbound secure handler disabled while outbound request is nonzero")
+    require_bytes(data, 0x21C8C, bytes.fromhex("594ce078002843d1"),
+                  "inbound request handler disabled while outbound request is nonzero")
+    require_bytes(data, 0x2161A, bytes.fromhex("40784208"),
+                  "bus dispatch indexes opcode shifted right by one")
+    for opcode, handler in [(0x10, 0x21C81), (0x12, 0x20321), (0x30, 0x21D2D)]:
+        pointer = struct.unpack_from("<I", data, file_offset(0x21844 + (opcode >> 1) * 4))[0]
+        if pointer != handler:
+            raise ValueError(f"category-32 opcode-{opcode:02x} handler mismatch")
     require_bytes(data, 0x1F6F0, bytes.fromhex(
         "80b590480189002901d0491e01818079012801d100f097f801bd"),
         "periodic topology-maintenance gate")
@@ -227,6 +237,8 @@ def inspect(data):
         },
         "five_word_completion": {
             "handler": "0x21d2c",
+            "role": "display accepts an inbound PC-mode request, not the outbound local-0C completion",
+            "requires_outbound_requested_mode_zero": True,
             "state_order": [
                 "store requested mode at connection_state+0x0e",
                 "set completion flag at connection_state+0x1e",
@@ -235,6 +247,13 @@ def inspect(data):
             ],
             "call_targets": [f"0x{target:x}" for target in completion_calls],
             "immediate_mode0_or_cleanup_call": bool(forbidden_immediate_exit_targets & set(completion_calls)),
+        },
+        "outbound_completion_provenance": {
+            "local_0c_builder": "0x212ac stages nonzero requested mode at 0x20003100+3",
+            "inbound_request_and_secure_handlers": "both return while that byte is nonzero",
+            "opcode_12_handler": "0x20320 -> 0x19184 generic forwarding",
+            "inbound_handler_cannot_prove_outbound_display_active_mode_updated": True,
+            "runtime_provenance": "motor response is consistent with this routing; bus-origin metadata not captured",
         },
         "topology_maintenance": {
             "post_nonzero_request_helper": "0x1f7a4",
@@ -281,7 +300,8 @@ def inspect(data):
             "bike_acceptance": "unverified; do not repeat the journaled attempt",
         },
         "conclusion": (
-            "successful display-owned completion records the requested mode with no immediate exit; "
+            "local 0C queues a motor request and disarms periodic topology maintenance; "
+            "the display's separate inbound secure handler cannot establish its outbound-mode state; "
             "the post-request helper also disarms periodic topology maintenance, so a "
             "later mode-0 exit requires a fresh event to re-arm that state machine; the "
             "raw drive-command enqueue path does not synchronously re-arm or exit it"
@@ -291,6 +311,7 @@ def inspect(data):
             "does not prove runtime bus ordering or queue state after the local acknowledgement",
             "does not prove that no topology or lifecycle event occurs before the next BLE write",
             "does not exclude an asynchronous event after a drive command is enqueued",
+            "does not establish an outbound motor completion updates the display's own active-mode field",
             "does not prove the motor accepts A0 or A8",
             "does not prove persistence or assistance cutoff",
         ],

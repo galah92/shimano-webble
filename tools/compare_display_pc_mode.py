@@ -196,6 +196,7 @@ def inspect(data, source_name):
         },
         "successful_completion": {
             "handler": f"0x{profile['completion'][0]:x}",
+            "role_caveat": "these state-write signatures alone do not prove the handler runs for a local-0C outbound completion",
             "stores_requested_mode": True,
             "stores_completion_flag": True,
             "stores_application_slot": True,
@@ -218,8 +219,9 @@ def inspect(data, source_name):
             "whole_image_local_mode_references": [f"0x{address:x}" for address in local_refs],
         },
         "conclusion": (
-            "display-owned mode 4/5, retained successful completion, and trigger-disarmed "
-            "maintenance already exist in this version"
+            "local mode 4/5 construction, a separate secure-completion handler, and "
+            "trigger-disarmed maintenance already exist in this version; handler reachability "
+            "must be established before relating inbound state writes to outbound completions"
         ),
         "limitations": [
             "static result for this exact display image only",

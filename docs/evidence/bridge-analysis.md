@@ -1,5 +1,31 @@
 # SC-E7000 bridge analysis and SC-E6100 historical control
 
+**2026-10-03 cached radio getter:** local `00 13 01 84 01` reads the display's
+cached radio-component version through `0x204e0` -> `0x19780` -> `0x1819e`
+-> `0x283cc`. It does not send a radio UART request or firmware. Build 99 adds
+this one getter to the normal check to narrow the unbound radio-candidate
+analysis; no live version is known yet. A version is not proof of compatible
+image family or an explanation of the mode loss. See correction 39 in
+`RESEARCH.md` and `tools/inspect_display_lifecycle.py`.
+
+**2026-10-03 role correction:** the display's `0x21d2c` five-word handler
+accepts an inbound request and returns while an outbound local-0C mode is
+staged. It does not prove the display's own active-mode byte was synchronized
+to the motor's outbound mode-5 completion. Opcode 12 follows generic forwarding
+at `0x20320`; its earlier state-write rationale below is superseded by the
+thirty-sixth correction in `RESEARCH.md`. The local request/secure-word queue
+and maintenance-disarm findings remain valid, but sustained ownership is not
+proved. No new bike command is justified by this correction alone.
+
+**2026-10-03 selector follow-up:** `24 CD` versus `24 8D` reports explicit
+versus automatic selector context, not protected motor mode. Exact helper
+`0x21276` changes the transport flag and resets bus queues through `0x2bcfc`;
+`0x1f9c6` requests interface state 2 for both `03 4B` and `03 00`. A changed
+interface state separately reinitializes DU connection state. This supplies
+no verified cause of the later A0 rejection and no basis for another write.
+Reproduce with `tools/inspect_display_source_selector.py`; details and limits
+are in the thirty-fifth correction at the end of `RESEARCH.md`.
+
 **2026-09-27 update:** Build 94 physically completed display-owned mode 5 but
 its first A0 returned `A3 3A`; no A8 was sent and EU remained on reconnect.
 The earlier proposed post-completion sequence below is therefore not a next
@@ -229,7 +255,12 @@ stock pair and verified non-US attempt record are freshly checked. It runs at
 most once per connection, does not alter the attempt journal, and requires a
 mode-0 exit or disconnect. Synthetic browser tests cover its packet ordering,
 early-completion fail-closed branch, and late-ATT-acknowledgement ambiguity;
-no bike result exists.
+Physical build 96 completed matching motor authentication but its AC ATT
+acknowledgement arrived 54.7 ms after mode-5 completion, so early admission
+remains inconclusive. The complete retained diagnostic confirms local mode-0
+exit ATT completion and display `2C 00`, then disconnect 92 ms later without
+motor mode-0 completion. This is display acceptance of a requested exit, not
+proof of an earlier unsolicited transition. No setting command was sent.
 
 A future bounded setting implementation would have to stage only one
 unchanged A0 after `2C 00`, require both exact motor mode-5 completion and A2,

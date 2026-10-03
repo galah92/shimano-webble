@@ -94,7 +94,7 @@ class LogExportTests(unittest.TestCase):
         self.assertIn(diagnostic,copied)
         self.assertNotIn('QUERY TRAFFIC setup noise',copied)
         self.assertLess(len(copied),8000)
-        self.assertIn('exported by build 2026-10-03.98',copied)
+        self.assertIn('exported by build '+self.page.evaluate('BUILD'),copied)
         self.assertIn('Copied diagnostic report',self.page.locator('#exportStatus').inner_text())
 
     def test_report_preserves_pc_mode_route_and_echo_evidence(self):

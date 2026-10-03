@@ -43,6 +43,12 @@ class Characteristic extends EventTarget {
         return;
       }
       const send = () => {
+        if (packet[3] === 132) {
+          rx.value=value(options.radioVersionError ? [51,1,135,57,0,0] :
+            options.radioVersionShort ? [51,1,134,71,1] : [51,1,134,71,1,0,255,255,255,255]);
+          rx.dispatchEvent(new Event('characteristicvaluechanged'));
+          return;
+        }
         rx.value = value([51, 1, packet[3] + 2, packet[3] === 28 ? 33 : 65, packet[3] === 28 ? 2 : 0, 255, 255, 255, 255, 255]);
         rx.dispatchEvent(new Event('characteristicvaluechanged'));
       };
@@ -387,10 +393,31 @@ class BrowserTests(unittest.TestCase):
     def wait_batch(self, timeout=110000):
         self.page.wait_for_function("document.getElementById('log').textContent.includes('information batch end')", timeout=timeout)
 
+    def test_radio_version_is_one_cached_component_read_after_motor_reads(self):
+        self.ready_for_identify()
+        self.wait_batch()
+        writes=self.writes()
+        self.assertEqual(writes[-1],['write','2afa',[0,19,1,132,1]])
+        self.assertEqual(sum(x[1]=='2afa' and x[2]==[0,19,1,132,1] for x in writes),1)
+        self.assertIn('Display radio firmware: 4.7.1.0 (cached radio component read;',self.page.locator('#log').inner_text())
+        self.assertFalse(any(x[1]=='2afe' and len(x[2])>2 and x[2][2] in [0xa0,0xa8,0xb0] for x in writes))
+        self.assertFalse(self.errors)
+
+    def test_radio_version_rejection_does_not_decode_or_retry(self):
+        for option in ['radioVersionError','radioVersionShort']:
+            with self.subTest(option=option):
+                self.ready_for_identify(**{option:True})
+                self.wait_batch()
+                self.assertEqual(self.writes()[-1],['write','2afa',[0,19,1,132,1]])
+                self.assertNotIn('Display radio firmware: 4.7.1.0',self.page.locator('#log').inner_text())
+                self.assertEqual(sum(x[1]=='2afa' and x[2]==[0,19,1,132,1] for x in self.writes()),1)
+                self.assertFalse(self.errors)
+                self.context.close()
+
     def test_batch_continues_after_completed_writes_without_replies(self):
         self.ready_for_identify(batchTimeout=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 24)
+        self.assertEqual(len(self.writes()), 25)
         self.assertEqual(self.page.locator('#status').inner_text(), 'Connected')
         self.assertTrue(self.page.locator('#identify').is_disabled())
         self.assertIn('Drive-unit firmware: no matching reply', self.page.locator('#log').inner_text())
@@ -403,7 +430,7 @@ class BrowserTests(unittest.TestCase):
         self.assertIn('Display model: no matching reply', log)
         self.assertIn('Display firmware: no matching reply', log)
         self.assertIn('DU-E7000; firmware 4.7.1', log)
-        self.assertIn('2AF9 traffic: 11 notifications', log)
+        self.assertIn('2AF9 traffic: 12 notifications', log)
 
     def test_stalled_write_stops_even_with_matching_notification(self):
         self.ready_for_identify(stalledWrite=True)
@@ -415,7 +442,7 @@ class BrowserTests(unittest.TestCase):
     def test_short_replies_do_not_decode_but_batch_continues(self):
         self.ready_for_identify(motorMalformed=True)
         self.wait_batch()
-        self.assertEqual(len(self.writes()), 24)
+        self.assertEqual(len(self.writes()), 25)
         self.assertIn('Drive-unit model: short reply', self.page.locator('#log').inner_text())
         self.assertNotIn('Drive-unit information:', self.page.locator('#log').inner_text())
         self.assertFalse(self.errors)
