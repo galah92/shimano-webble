@@ -116,6 +116,15 @@ distinct untested stock-BLE hypothesis. The verifier and limitations are in
 No early A0 write or journal bypass is enabled. Build 95
 adds a read-only AC timing probe after the verified non-US attempt record;
 synthetic tests do not establish bike behavior.
+Build 96 matches build 94's bounded motor authentication before that probe and
+passively records redacted category-32 request/completion/rejection headers
+from entry through exit. It adds local-acknowledgement timing and explicit
+verdicts. Silence is not proof that mode 5 was retained; AC timing is not A0
+permission. The owner's screen-restart recollection is unknown. October 3
+Reddit/GitHub/vendor research found no exact known-good stock D4.5.0/M4.4.8 +
+SC-E7000 destination trace; see `reports/Shimano stock BLE next step.md`.
+Build 96's publication must be verified before a live instruction. No probe
+result, journal clear, new setting write, or firmware transfer exists.
 The exact stock D4.5.0 image retains the category-35 wheel getter and a
 nonzero-PC-mode, source-gated persistent setter. This corrects the assumption
 that the handler was removed after D4.3; it does not establish BLE acceptance

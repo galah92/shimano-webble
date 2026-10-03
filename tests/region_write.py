@@ -131,11 +131,19 @@ class RegionWriteTests(unittest.TestCase):
         return self.page.evaluate('regionWrites')
 
     def prepare_queue_probe(self, completion_before_ack=False, late_att_ack=False,
-                            duplicate_completion=False):
+                            duplicate_completion=False, unauthenticated=False,
+                            authentication_failure=False, unsolicited_mode=False):
         self.open()
         self.page.evaluate('''async opts => {
           window.queueProbeWrites=[];
           session.verified=session.motorEligible=session.directWriteEligible=true;
+          session.motorAuthenticated=!opts.unauthenticated;
+          window.queueProbeAuthenticationCalls=0;
+          window.realProbeMotorAuthentication=authenticateMotor;
+          authenticateMotor=async()=>{
+            queueProbeAuthenticationCalls++;
+            session.motorAuthenticated=!opts.authenticationFailure;
+          };
           session.batchDone=true;session.currentDestination=0;
           session.pcApplicationSlot=0x0d;
           probeRecord={version:2,kind:'command-us-region',verified:true,outcome:'not-us'};
@@ -156,6 +164,11 @@ class RegionWriteTests(unittest.TestCase):
               setTimeout(()=>emit('2afd',[0,0x32,0x12,5,0x0d]),20);
             if(p[2]===5&&opts.duplicateCompletion)
               setTimeout(()=>emit('2afb',[0,0x32,0x12,5,0x0d]),28);
+            if(p[2]===5&&opts.unsolicitedMode) {
+              setTimeout(()=>emit('2afb',[0,0x32,0x12,1,0x0d]),25);
+              setTimeout(()=>emit('2afd',[0,0x32,0x30,0xde,0xad,0xbe,0xef]),26);
+              setTimeout(()=>emit('2afd',[0,0x32,0x32,0xca,0xfe,0xba,0xbe]),27);
+            }
             if(p[2]===0)emit('2afd',[0,0x32,0x12,0,0x0d]);
           };
           session.chars['2afe'].writeValueWithResponse=async packet=>{
@@ -166,7 +179,10 @@ class RegionWriteTests(unittest.TestCase):
           };
           controls();
         }''', {'earlyCompletion': completion_before_ack, 'lateAttAck': late_att_ack,
-                'duplicateCompletion': duplicate_completion})
+                'duplicateCompletion': duplicate_completion,
+                'unauthenticated': unauthenticated,
+                'authenticationFailure': authentication_failure,
+                'unsolicitedMode': unsolicited_mode})
 
     def test_queue_probe_enqueues_only_read_before_mode_completion(self):
         self.prepare_queue_probe()
@@ -211,6 +227,81 @@ class RegionWriteTests(unittest.TestCase):
         self.page.evaluate('probeEarlyDisplayQueue(session)')
         self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
         self.assertFalse(self.errors)
+
+    def test_guided_queue_probe_matches_motor_authentication_precondition(self):
+        self.prepare_queue_probe(unauthenticated=True)
+        self.page.evaluate('window.confirm=()=>true')
+        self.page.locator('#guidedUS').click()
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
+        self.assertEqual(self.page.evaluate('queueProbeAuthenticationCalls'), 1)
+        self.assertEqual(self.page.evaluate('queueProbeWrites'),
+                         [[0,12,5],[0,22,172,1],[0,12,0]])
+        self.assertIn('precondition verified: motor authentication',self.page.locator('#log').inner_text())
+
+    def test_failed_probe_authentication_sends_no_mode_or_read(self):
+        self.prepare_queue_probe(unauthenticated=True, authentication_failure=True)
+        self.page.evaluate('window.confirm=()=>true')
+        self.page.locator('#guidedUS').click()
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
+        self.assertEqual(self.page.evaluate('queueProbeAuthenticationCalls'), 1)
+        self.assertEqual(self.page.evaluate('queueProbeWrites'), [])
+        report=self.page.locator('#log').inner_text()
+        self.assertIn('Queue probe verdict: probe failed',report)
+        self.assertNotIn('precondition verified',report)
+
+    def test_probe_awaits_real_motor_authentication_and_unlock(self):
+        self.prepare_queue_probe(unauthenticated=True)
+        self.page.evaluate('''() => {
+          authenticateMotor=realProbeMotorAuthentication;
+          window.probeAuthPackets=[];
+          const tx=session.chars['2afe'],original=tx.writeValueWithResponse;
+          const emit=data=>{
+            const rx=session.chars['2afd'];
+            rx.value=new DataView(Uint8Array.from(data).buffer);
+            rx.dispatchEvent(new Event('characteristicvaluechanged'));
+          };
+          tx.writeValueWithResponse=async packet=>{
+            const p=[...packet];
+            if(p[1]===0x16&&p[2]===0xac)return original(packet);
+            probeAuthPackets.push(p.slice(0,3));
+            await new Promise(resolve=>setTimeout(resolve,15));
+            if(p[1]===1)emit([0,1,0x3e,1,2,3,4,5,6]);
+            else if(p[2]===0xd8) {
+              emit([0,0x16,0xda,0x16,0,1,2,3,4,5]);
+              emit([0,0x16,0xda,0x26,6,7,8,9,10,11]);
+              emit([0,0x16,0xda,0x34,12,13,14,15,255,255]);
+            } else if(p[2]===0xe0&&p[3]===0x34)emit([0,0x16,0xe2,255,255]);
+            else if(p[2]===0xe8)emit([0,0x16,0xea,0]);
+          };
+          const display=session.chars['2afa'],request=display.writeValueWithResponse;
+          display.writeValueWithResponse=async packet=>{
+            if(packet[2]===5&&!session.motorAuthenticated)
+              throw Error('Mode requested before real authentication completed');
+            return request(packet);
+          };
+          window.confirm=()=>true;
+        }''')
+        self.page.locator('#guidedUS').click()
+        self.page.wait_for_function("document.getElementById('log').textContent.includes('--- early display-queue timing probe end;')")
+        self.assertEqual(self.page.evaluate('probeAuthPackets'),
+                         [[0,1,0x3c],[0,0x16,0xd8]]+[[0,0x16,0xe0]]*3+[[0,0x16,0xe8]])
+        self.assertEqual(self.page.evaluate('queueProbeWrites'),
+                         [[0,12,5],[0,22,172,1],[0,12,0]])
+        self.assertIn('early read timing established',self.page.locator('#log').inner_text())
+        self.assertFalse(self.errors)
+
+    def test_probe_observer_retains_mode_transition_and_redacts_secure_words(self):
+        self.prepare_queue_probe(unsolicited_mode=True)
+        self.page.evaluate('probeEarlyDisplayQueue(session)')
+        report=self.page.locator('#log').inner_text()
+        self.assertIn('completion via 2AFB',report)
+        self.assertIn('mode 01, slot 0D',report)
+        self.assertIn('different PC mode observed before requested exit',report)
+        self.assertNotIn('DE AD',report)
+        self.assertNotIn('CA FE',report)
+        self.assertIn('observed PC completion via 2AFD',self.page.evaluate('exportLog()'))
+        self.assertEqual(self.page.evaluate('queueProbeWrites'),
+                         [[0,12,5],[0,22,172,1],[0,12,0]])
 
     def test_guided_button_runs_the_read_only_queue_probe(self):
         self.prepare_queue_probe()

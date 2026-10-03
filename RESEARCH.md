@@ -4659,3 +4659,54 @@ the vendor's D4.3 Bluetooth compatibility matrix is wrong in practice. The
 SC-E7000 source-state gate and live BLE reply are untested, and a wheel edit
 would misstate speed/distance. A stock-firmware, read-only `35 04` query is a
 separate low-risk discriminator; no wheel setter is exposed or sent to the bike.
+
+## 2026-10-03 thirtieth correction: match authentication and observe surfaced modes
+
+A fresh review of build 95 found a real comparison confound: its AC queue
+probe did not invoke motor authentication, while the physical build-94 A0
+attempt had completed the motor D8/E0 exchange and bounded E8/EA recovery.
+Build `2026-10-03.96` now completes the existing bounded authentication path
+before display-owned mode 5 and verifies success in the same connection.
+Failed authentication sends neither mode 5 nor AC. This does not prove that
+authentication caused the earlier rejection; it makes the diagnostic compare
+the same established preconditions.
+
+The probe also passively records only redacted category-32 mode/slot and
+rejection-reason headers surfaced on 2AF9/B/D from before entry through exit.
+Secure words and authentication bytes are excluded. It records the local
+`2C 00`-to-AC-send interval and an explicit timing/transition/failure verdict.
+The existing one-read early-AC sequence, exact completion/readback checks,
+once-per-connection rule, mode-0 exit, and durable setting journal remain.
+No A0, A8, B0, wheel setter, journal bypass, or firmware transfer was added.
+AC has no protected-mode gate: success tests phone read admission and observed
+event order only. BLE arrival times are not motor processing timestamps, and
+silence from the passive observer does not establish retained motor mode 5.
+
+The owner does not remember whether the screen restarted during build 94;
+that observation remains unknown. Fresh research in the supplied
+[EP8 Reddit thread](https://www.reddit.com/r/ebikes/comments/13djzkb/change_of_region_on_ep8_shimano_steps/)
+found Android/Bluetooth success reports but no native firmware pair, display
+identity, or known-good byte trace. A
+[May 29, 2024 E5000 report](https://happyride.se/forum/threads/optimala-installningar-for-shimano-steps-e5000.3700908/)
+explicitly describes no downgrade with EW-WU111, but supplies no firmware
+version and uses a different BLE owner topology. It is a lead for ownership
+comparison, not an exact D4.5 counterexample or an instruction to buy hardware.
+
+Current primary sources remain model/function/transport specific. The
+[eMax matrix, revision 3.2](https://www.emax-tuning.com/eMax-possibilities.pdf#page=20)
+marks E5000 D4.4.2–4.5.0 Bluetooth destination/wheel changes unsupported;
+[STUnlocker](https://stunlocker.com/) places those BLE features through D4.3;
+and [eTuning's comparison](https://etuning-app.com/compare/etuning-vs-emax-vs-stunlocker/)
+assigns latest-firmware changes without downgrade to desktop/PCE. Its
+[in-app downgrade guide](https://etuning-app.com/downgrade.pdf) still names
+D4.3 for E5000. Public GitHub repository/issue and indexed-code searches found
+firmware inspection, download, hardware exploration, and telemetry projects,
+but no independently demonstrated exact-stock destination trace. These are
+bounded search results, not proof that a creative stock BLE route is impossible.
+Sources, transfer limits, and next decisions are collected in
+[`the research report`](reports/Shimano%20stock%20BLE%20next%20step.md).
+
+The synthetic checks passed 27 region/probe tests, 11 motor-authentication
+tests, seven compact-report tests, and the firmware-picker browser check. These checks
+establish code ordering, guards, and redaction only. Build 96 has no bike result;
+the last physical result remains stock D4.5.0/M4.4.8, EU, and 25 km/h.

@@ -119,9 +119,17 @@ candidate: its mode-5 request and five secure words are enqueued before local
 `2C 00`, and phone-forwarded A0 uses the same normal bus queue. An A0 placed
 after that local acknowledgement could follow the handshake before the later
 motor completion reaches BLE. This is not bike-tested and no new setting write
-is wired. Build 95 adds only a read-only `AC 01` timing
-diagnostic after a verified non-US reconnect; it leaves the prior attempt
-journal intact. See
+is wired. Build 96 improves build 95's read-only `AC 01` timing
+diagnostic after a verified non-US reconnect. It first completes the same
+bounded motor authentication used by build 94, then records redacted PC-mode
+headers through entry, the early read, and exit. It leaves the prior attempt
+journal intact. Early read timing does not prove A0 acceptance, and absent mode
+headers do not prove that protected mode remained active. Its ordering, guards,
+and redaction are synthetically verified; there is no physical probe result.
+The October 3
+[`research report`](reports/Shimano%20stock%20BLE%20next%20step.md) reviews the
+linked Reddit thread, related E5000 reports, GitHub implementations, and current
+vendor firmware gates. See
 [`bridge-analysis.md`](docs/evidence/bridge-analysis.md).
 
 The stock D4.5.0 image also retains the old wheel getter and a gated,

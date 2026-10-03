@@ -1,4 +1,4 @@
-# Shimano WebBLE handoff — 2026-09-27
+# Shimano WebBLE handoff — 2026-10-03
 
 ## Objective and current answer
 
@@ -36,9 +36,13 @@ Enqueueing A0 on that earlier local acknowledgement could place it directly
 behind the handshake rather than waiting for motor completion to return over
 BLE. This has not been sent to the bike, runtime queue behavior is unverified,
 and build 94's terminal journal remains intact. Build 95
-adds only a read-only AC timing probe to the existing guided button after a
-verified non-US attempt record; it does not wire the candidate A0 write or
-clear the journal. Synthetic tests are not bike results. See the latest correction in
+added a read-only AC timing probe to the existing guided button after a
+verified non-US attempt record. Build 96 first completes the same bounded motor
+authentication/regulation-unlock path used by build 94, then observes redacted
+PC-mode headers across the probe and exit. This removes a comparison confound
+and can reveal a surfaced transition, but silence does not prove mode 5 was
+retained. It does not wire the candidate A0 write or clear the journal.
+Synthetic tests are not bike results. See the latest correction in
 [`RESEARCH.md`](RESEARCH.md) and
 [`bridge-analysis.md`](docs/evidence/bridge-analysis.md).
 
@@ -159,7 +163,8 @@ undecoded; the published recipe allowed PCE02. Retained state, an omitted
 command, a different firmware context, or another omitted workflow step remain
 possible.
 
-The page source is now build `2026-09-27.95`. Build 91 was published; build 92
+The page source is now build `2026-10-03.96`. Verify the Pages deployment and
+served build before a live instruction. Build 91 was published; build 92
 reduced the normal interface to one contextual
 button. **Connect and check bike** remains read-only and reports both
 assist-speed ceilings. Only after those reads prove eligibility does that same
@@ -456,10 +461,16 @@ write**:
 2. Compare any discovered transition with the exact SC-E7000 4.1.0 and motor
    D4.5.0 handlers, then find a known-good destination trace if one exists.
    The newly identified pre-completion bus-queue path is a distinct stock-BLE
-   hypothesis. Build 95's no-setting-write timing probe enqueues the existing
+   hypothesis. Build 96's no-setting-write timing probe first matches build
+   94's successful motor authentication, then enqueues the existing
    `AC 01` destination getter on local `2C 00`, checks ATT acknowledgement
    before exact motor completion and `AE 01` afterward, then exits. Its first
    live result can test queue admission and relative timing without A0/A8/B0.
+   Passive, redacted category-32 mode headers span entry through exit; absence
+   of a surfaced transition is not evidence that mode 5 survived. The owner's
+   build-94 screen-restart recollection is unknown. Fresh Reddit/GitHub/vendor
+   research found no known-good exact D4.5.0/M4.4.8 + SC-E7000 trace; see
+   [`the October 3 research report`](reports/Shimano%20stock%20BLE%20next%20step.md).
    A later setting candidate would still need
    reviewed completion/A2 gates and a separate attempt record. Do not repeat
    the post-completion A0 or erase its journal.
@@ -486,7 +497,7 @@ evidence of a region-setting menu (`RESEARCH.md`, latest section).
 
 ## Repository map and reproducibility
 
-- [`index.html`](index.html): public single-file application source. Build 95's
+- [`index.html`](index.html): public single-file application source. Build 96's
   first guided action is read-only; the same button exposes the display-owned
   destination setter and separately gated stock B0 setter only when each is the
   next verified step. Technical controls are collapsed and the firmware
