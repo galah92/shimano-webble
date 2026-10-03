@@ -5004,3 +5004,44 @@ remain required before publication. Synthetic radio `4.7.1.0` is a fixture,
 not a physical bike result. The next owner step is one normal bike check and
 Copy report, then stop; the old timing probe and terminal US attempt must not
 be repeated. No higher-speed result has been demonstrated.
+
+## 2026-10-03 fortieth correction: distinguish candidate radio receive and reply roles
+
+The plaintext STEPS2-ap 4.7.1 candidate's receive worker starts at `0x1e670`.
+Its type byte is loaded into r3 at `0x1e68c`; the bounded CMP/branch table at
+`0x1e68e` maps input 0x10 to `0x1e8ca`, 0x11 to `0x1e8de`, 0x80 to
+`0x1ec24`, and 0x90 to `0x1ec54`. Input 0x91 takes the default exit at
+`0x1eca2`. These are **radio receive** roles, not display receive roles and
+not an inventory of possible radio transmissions.
+
+The located type-0x91 transmission at `0x1ec64` writes payload F0, length 1,
+and calls the unchanged-type serial queue sender. Ordinary radio command
+status construction is instead `0x1d474`: payload subtype 0x40, type 0x20,
+length 4. Thus neither this ordinary status path nor the located F0 reply
+identifies the display's distinct 0x91/subtype-4 lifecycle event. Do not
+replace display event 0x91/04 with a presumed generic type-0x11 ACK. All
+halfword-aligned direct calls to the sender were examined, including shared
+reply tails, but indirect/computed transmitters and other image families
+remain outside this conclusion. Absence of the producer is not proved.
+
+`inspect_radio_candidate.py` now checks the sender/status signatures and
+evaluates all 256 receive-dispatch byte inputs. Its results agree for every
+input with an independent Capstone-disassembled reference. Five synthetic
+unit tests cover record integrity, malformed/overlapping/out-of-range HEX,
+wrong candidates, bounded dispatch and unexpected instructions. Exact stock
+passes; truncated, appended, altered and different-family candidates fail
+closed. The tool has no transport, image output or installation operation.
+
+A targeted public-source check found the [Reven E-TUBE crypto implementation](https://github.com/reven-project/reven-plugin-etube/blob/master/src/reven_plugin_etube/crypto.py).
+It needs a supplied key and expects a 16-byte IV followed by AES-CBC data,
+then text decoding. The undecoded NRF2 candidate is 325,076 bytes; removing
+only a 16-byte IV leaves a non-block-aligned payload (remainder 4). It cannot
+be blindly handed to that exact format as a complete file. This does not
+rule out encryption with additional framing or provide its key. No third-party
+decryption code was executed and no radio image was installed.
+
+Build 99's Pages deployment completed successfully at commit `0005c38`; the
+served HTML SHA-256 matched the local index. The cached-version report remains
+the next bike-side discriminator, not another timing or setting experiment.
+The app, motor settings, terminal attempt journal and live firmware were
+unchanged during this follow-up. EU/25 km/h remains the last verified state.

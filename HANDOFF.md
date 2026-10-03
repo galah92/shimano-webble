@@ -69,6 +69,13 @@ compatibility. Ask for one normal bike check and its report, then stop; do not
 press Check bus timing or repeat the setting attempt. No new UI button,
 firmware transfer, setting path or attempt-journal change was added.
 
+The radio candidate verifier now separates receive routing from reply
+construction: ordinary status uses type 20/subtype 40; the located type-91
+reply carries F0, not lifecycle subtype 04. All 256 dispatch inputs were
+independently cross-checked, but no producer of the display's 91/04 event is
+identified and the candidate is still not bound to this bike. See correction
+40 and `tools/inspect_radio_candidate.py`; do not infer an installable fix.
+
 **Completion-role correction:** exact display `0x21d2c` handles inbound secure
 requests and returns while a nonzero outbound local-0C request is staged.
 Its own mode-field writes do not prove the display synchronized its state to
